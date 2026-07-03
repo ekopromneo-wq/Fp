@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
+import { checkDependencies } from './health.js';
 
 dotenv.config();
 
@@ -27,6 +28,27 @@ app.get('/health', (c) => {
     service: 'voxmate-api',
     environment: process.env.NODE_ENV || 'development',
   });
+});
+
+app.get('/health/live', (c) => {
+  return c.json({
+    status: 'ok',
+    service: 'voxmate-api',
+    environment: process.env.NODE_ENV || 'development',
+  });
+});
+
+app.get('/health/ready', async (c) => {
+  const result = await checkDependencies();
+
+  return c.json(
+    {
+      service: 'voxmate-api',
+      environment: process.env.NODE_ENV || 'development',
+      ...result,
+    },
+    result.status === 'ok' ? 200 : 503,
+  );
 });
 
 app.get('/api/hello', (c) => {
