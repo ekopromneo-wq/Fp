@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon --watch src --exec node --enable-source-maps src/index.js",
-    "start": "node --enable-source-maps src/index.js"
+    "start": "node --enable-source-maps src/index.js",
+    "worker": "node --enable-source-maps src/worker.js"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.8",

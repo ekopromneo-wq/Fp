@@ -2,6 +2,8 @@ import dotenv from 'dotenv';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { checkDependencies } from './health.js';
+import { registerRecordingRoutes } from './recordings.js';
+import { runMigrations } from './migrations.js';
 
 dotenv.config();
 
@@ -57,12 +59,23 @@ app.get('/api/hello', (c) => {
   });
 });
 
-serve(
-  {
-    fetch: app.fetch,
-    port,
-  },
-  (info) => {
-    console.log(`VoxMate backend listening on http://localhost:${info.port}`);
-  },
-);
+registerRecordingRoutes(app);
+
+async function main() {
+  await runMigrations();
+
+  serve(
+    {
+      fetch: app.fetch,
+      port,
+    },
+    (info) => {
+      console.log(`VoxMate backend listening on http://localhost:${info.port}`);
+    },
+  );
+}
+
+main().catch((error) => {
+  console.error('Backend failed to start', error);
+  process.exit(1);
+});

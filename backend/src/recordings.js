@@ -1,0 +1,203 @@
+import { createRecordingQueue } from './queue.js';
+import { query, transaction } from './db.js';
+
+const queue = createRecordingQueue();
+
+function mapRecording(row) {
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    title: row.title,
+    status: row.status,
+    source: row.source,
+    durationSeconds: row.duration_seconds,
+    storageKey: row.storage_key,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapJob(row) {
+  return {
+    id: row.id,
+    recordingId: row.recording_id,
+    queueJobId: row.queue_job_id,
+    status: row.status,
+    error: row.error,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapTranscript(row) {
+  return row
+    ? {
+        id: row.id,
+        recordingId: row.recording_id,
+        jobId: row.job_id,
+        language: row.language,
+        text: row.text,
+        segments: row.segments,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }
+    : null;
+}
+
+export async function listRecordings() {
+  const result = await query(
+    `
+      select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
+      from recordings
+      order by created_at desc
+      limit 50
+    `,
+  );
+
+  return result.rows.map(mapRecording);
+}
+
+export async function createRecording(input) {
+  const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : 'Untitled recording';
+  const source = typeof input.source === 'string' && input.source.trim() ? input.source.trim() : 'manual';
+
+  const result = await query(
+    `
+      insert into recordings (title, source, duration_seconds, storage_key)
+      values ($1, $2, $3, $4)
+      returning id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
+    `,
+    [title, source, input.durationSeconds || null, input.storageKey || null],
+  );
+
+  return mapRecording(result.rows[0]);
+}
+
+export async function getRecording(id) {
+  const result = await query(
+    `
+      select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
+      from recordings
+      where id = $1
+    `,
+    [id],
+  );
+
+  if (result.rowCount === 0) {
+    return null;
+  }
+
+  const [jobs, transcript] = await Promise.all([
+    query(
+      `
+        select id, recording_id, queue_job_id, status, error, created_at, updated_at
+        from processing_jobs
+        where recording_id = $1
+        order by created_at desc
+      `,
+      [id],
+    ),
+    query(
+      `
+        select id, recording_id, job_id, language, text, segments, created_at, updated_at
+        from transcripts
+        where recording_id = $1
+        order by created_at desc
+        limit 1
+      `,
+      [id],
+    ),
+  ]);
+
+  return {
+    ...mapRecording(result.rows[0]),
+    jobs: jobs.rows.map(mapJob),
+    transcript: mapTranscript(transcript.rows[0]),
+  };
+}
+
+export async function enqueueRecording(recordingId) {
+  const job = await transaction(async (client) => {
+    const recording = await client.query('select id from recordings where id = $1', [recordingId]);
+
+    if (recording.rowCount === 0) {
+      return null;
+    }
+
+    const inserted = await client.query(
+      `
+        insert into processing_jobs (recording_id, status)
+        values ($1, 'queued')
+        returning id, recording_id, queue_job_id, status, error, created_at, updated_at
+      `,
+      [recordingId],
+    );
+
+    await client.query(
+      `
+        update recordings
+        set status = 'queued', updated_at = now()
+        where id = $1
+      `,
+      [recordingId],
+    );
+
+    return mapJob(inserted.rows[0]);
+  });
+
+  if (!job) {
+    return null;
+  }
+
+  const queueJob = await queue.add('process-recording', {
+    jobId: job.id,
+    recordingId,
+  });
+
+  const updated = await query(
+    `
+      update processing_jobs
+      set queue_job_id = $1, updated_at = now()
+      where id = $2
+      returning id, recording_id, queue_job_id, status, error, created_at, updated_at
+    `,
+    [queueJob.id, job.id],
+  );
+
+  return mapJob(updated.rows[0]);
+}
+
+export function registerRecordingRoutes(app) {
+  app.get('/api/recordings', async (c) => {
+    return c.json({
+      recordings: await listRecordings(),
+    });
+  });
+
+  app.post('/api/recordings', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const recording = await createRecording(body);
+
+    return c.json({ recording }, 201);
+  });
+
+  app.get('/api/recordings/:id', async (c) => {
+    const recording = await getRecording(c.req.param('id'));
+
+    if (!recording) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    return c.json({ recording });
+  });
+
+  app.post('/api/recordings/:id/jobs', async (c) => {
+    const job = await enqueueRecording(c.req.param('id'));
+
+    if (!job) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    return c.json({ job }, 202);
+  });
+}
