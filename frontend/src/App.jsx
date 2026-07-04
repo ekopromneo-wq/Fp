@@ -126,7 +126,10 @@ function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [savingTaskId, setSavingTaskId] = useState(null);
+  const [deletingTaskId, setDeletingTaskId] = useState(null);
+  const [isAddingTask, setIsAddingTask] = useState(false);
   const [taskDrafts, setTaskDrafts] = useState({});
+  const [newTaskDraft, setNewTaskDraft] = useState({ assignee: '', dueText: '', description: '' });
   const [processingId, setProcessingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
@@ -427,6 +430,65 @@ function App() {
     });
   }
 
+  function appendTask(task) {
+    setSelectedRecording((current) =>
+      current ? { ...current, tasks: [...(current.tasks || []), task] } : current,
+    );
+  }
+
+  function removeTask(taskId) {
+    setSelectedRecording((current) =>
+      current?.tasks ? { ...current, tasks: current.tasks.filter((task) => task.id !== taskId) } : current,
+    );
+    setTaskDrafts((current) => {
+      const next = { ...current };
+      delete next[taskId];
+      return next;
+    });
+  }
+
+  function updateNewTaskDraft(field, value) {
+    setNewTaskDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  async function handleAddTask(event) {
+    event.preventDefault();
+
+    if (!selectedRecording) {
+      return;
+    }
+
+    if (!newTaskDraft.description.trim()) {
+      setStatus('Заполни описание задачи');
+      return;
+    }
+
+    setIsAddingTask(true);
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/tasks`, {
+        method: 'POST',
+        body: JSON.stringify(newTaskDraft),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось добавить задачу');
+      }
+
+      appendTask(data.task);
+      setNewTaskDraft({ assignee: '', dueText: '', description: '' });
+      setStatus('Задача добавлена');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка добавления задачи');
+    } finally {
+      setIsAddingTask(false);
+    }
+  }
+
   async function updateTask(task, patch, successMessage) {
     if (!selectedRecording) {
       return;
@@ -479,6 +541,38 @@ function App() {
 
   async function handleDismissTask(task) {
     await updateTask(task, { status: 'dismissed' }, 'Задача скрыта');
+  }
+
+  async function handleDeleteTask(task) {
+    if (!selectedRecording) {
+      return;
+    }
+
+    const confirmed = window.confirm('Удалить задачу окончательно?');
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingTaskId(task.id);
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/tasks/${task.id}`, {
+        method: 'DELETE',
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось удалить задачу');
+      }
+
+      removeTask(task.id);
+      setStatus('Задача удалена');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка удаления задачи');
+    } finally {
+      setDeletingTaskId(null);
+    }
   }
 
   async function handleDelete(recording) {
@@ -771,11 +865,50 @@ function App() {
 
               <section className="detail-section">
                 <h3>Задачи</h3>
+                <form className="task-row task-create-form" onSubmit={handleAddTask}>
+                  <div className="task-row-header">
+                    <strong>Новая задача</strong>
+                  </div>
+
+                  <label>
+                    Исполнитель
+                    <input
+                      value={newTaskDraft.assignee}
+                      onChange={(event) => updateNewTaskDraft('assignee', event.target.value)}
+                      placeholder="Не указан"
+                    />
+                  </label>
+
+                  <label>
+                    Срок
+                    <input
+                      value={newTaskDraft.dueText}
+                      onChange={(event) => updateNewTaskDraft('dueText', event.target.value)}
+                      placeholder="Не указан"
+                    />
+                  </label>
+
+                  <label>
+                    Что сделать
+                    <textarea
+                      value={newTaskDraft.description}
+                      onChange={(event) => updateNewTaskDraft('description', event.target.value)}
+                      rows={3}
+                      placeholder="Описание задачи"
+                    />
+                  </label>
+
+                  <button className="button button-primary" type="submit" disabled={isAddingTask}>
+                    {isAddingTask ? 'Добавляем...' : 'Добавить задачу'}
+                  </button>
+                </form>
+
                 {selectedRecording.tasks?.length ? (
                   <div className="task-list">
                     {selectedRecording.tasks.map((task) => {
                       const draft = getTaskDraft(task);
                       const isSavingTask = savingTaskId === task.id;
+                      const isDeletingTask = deletingTaskId === task.id;
 
                       return (
                         <div className={`task-row task-status-${task.status}`} key={task.id}>
@@ -825,6 +958,14 @@ function App() {
                             </button>
                             <button className="button button-danger" type="button" onClick={() => handleDismissTask(task)} disabled={isSavingTask}>
                               Скрыть
+                            </button>
+                            <button
+                              className="button button-danger"
+                              type="button"
+                              onClick={() => handleDeleteTask(task)}
+                              disabled={isSavingTask || isDeletingTask}
+                            >
+                              {isDeletingTask ? 'Удаляем...' : 'Удалить'}
                             </button>
                           </div>
                         </div>

@@ -337,6 +337,50 @@ export async function summarizeRecording(recordingId, ownerId) {
   });
 }
 
+export async function createRecordingTask(recordingId, ownerId, input) {
+  const data = input && typeof input === 'object' ? input : {};
+  const description = typeof data.description === 'string' ? data.description.trim() : '';
+  const assignee = typeof data.assignee === 'string' && data.assignee.trim() ? data.assignee.trim() : null;
+  const dueText = typeof data.dueText === 'string' && data.dueText.trim() ? data.dueText.trim() : null;
+
+  if (!description) {
+    throw new Error('Task description is required');
+  }
+
+  const result = await query(
+    `
+      insert into recording_tasks (recording_id, summary_id, transcript_id, assignee, description, due_text, status)
+      select
+        recording.id,
+        (
+          select id
+          from recording_summaries
+          where recording_id = recording.id
+          order by created_at desc
+          limit 1
+        ),
+        (
+          select id
+          from transcripts
+          where recording_id = recording.id
+          order by created_at desc
+          limit 1
+        ),
+        $3,
+        $4,
+        $5,
+        'confirmed'
+      from recordings recording
+      where recording.id = $1
+        and (recording.owner_id = $2 or recording.owner_id is null)
+      returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, status, created_at, updated_at
+    `,
+    [recordingId, ownerId, assignee, description, dueText],
+  );
+
+  return result.rowCount ? mapTask(result.rows[0]) : null;
+}
+
 export async function updateRecordingTask(recordingId, taskId, ownerId, input) {
   const data = input && typeof input === 'object' ? input : {};
   const hasAssignee = Object.prototype.hasOwnProperty.call(data, 'assignee');
@@ -379,6 +423,23 @@ export async function updateRecordingTask(recordingId, taskId, ownerId, input) {
   );
 
   return result.rowCount ? mapTask(result.rows[0]) : null;
+}
+
+export async function deleteRecordingTask(recordingId, taskId, ownerId) {
+  const result = await query(
+    `
+      delete from recording_tasks task
+      using recordings recording
+      where task.id = $1
+        and task.recording_id = $2
+        and recording.id = task.recording_id
+        and (recording.owner_id = $3 or recording.owner_id is null)
+      returning task.id
+    `,
+    [taskId, recordingId, ownerId],
+  );
+
+  return result.rowCount ? { id: result.rows[0].id } : null;
 }
 
 export async function getRecordingAudio(id, ownerId) {
@@ -614,6 +675,23 @@ export function registerRecordingRoutes(app) {
     }
   });
 
+  app.post('/api/recordings/:recordingId/tasks', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+
+    try {
+      const task = await createRecordingTask(c.req.param('recordingId'), user.id, body);
+
+      if (!task) {
+        return c.json({ error: 'Recording not found' }, 404);
+      }
+
+      return c.json({ task }, 201);
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to create task' }, 400);
+    }
+  });
+
   app.patch('/api/recordings/:recordingId/tasks/:taskId', requireAuth, async (c) => {
     const user = getAuthUser(c);
     const body = await c.req.json().catch(() => ({}));
@@ -629,6 +707,17 @@ export function registerRecordingRoutes(app) {
     } catch (error) {
       return c.json({ error: error.message || 'Failed to update task' }, 400);
     }
+  });
+
+  app.delete('/api/recordings/:recordingId/tasks/:taskId', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const deleted = await deleteRecordingTask(c.req.param('recordingId'), c.req.param('taskId'), user.id);
+
+    if (!deleted) {
+      return c.json({ error: 'Task not found' }, 404);
+    }
+
+    return c.json({ task: deleted });
   });
 
   app.delete('/api/recordings/:id', requireAuth, async (c) => {
