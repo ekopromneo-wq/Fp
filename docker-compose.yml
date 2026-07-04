@@ -1,3 +1,5 @@
+name: project
+
 services:
   web:
     build: ./frontend
@@ -78,6 +80,7 @@ services:
       - ASR_COMPRESS_THRESHOLD_BYTES=${ASR_COMPRESS_THRESHOLD_BYTES:-20971520}
       - ASR_COMPRESSED_BITRATE=${ASR_COMPRESSED_BITRATE:-32k}
       - ASR_MAX_RETRIES=${ASR_MAX_RETRIES:-3}
+      - DIARIZER_URL=${DIARIZER_URL:-http://diarizer:8000}
     depends_on:
       db:
         condition: service_healthy
@@ -88,6 +91,23 @@ services:
     volumes:
       - ./backend:/app
       - /app/node_modules
+
+  diarizer:
+    build: ./diarizer
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - WHISPERX_MODEL=${WHISPERX_MODEL:-medium}
+      - WHISPERX_LANGUAGE=${WHISPERX_LANGUAGE:-ru}
+      - WHISPERX_DEVICE=${WHISPERX_DEVICE:-cpu}
+      - WHISPERX_COMPUTE_TYPE=${WHISPERX_COMPUTE_TYPE:-int8}
+    volumes:
+      - diarizer-models:/models
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   db:
     image: postgres:16-alpine
@@ -135,3 +155,4 @@ volumes:
   db-data:
   redis-data:
   minio-data:
+  diarizer-models:

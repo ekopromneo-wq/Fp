@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
+import uploadIcon from './assets/icons/upload.png';
+import microphoneIcon from './assets/icons/microphone.png';
+import refreshIcon from './assets/icons/refresh.png';
+import settingsIcon from './assets/icons/settings.png';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 const demoEmail = import.meta.env.VITE_DEMO_EMAIL || 'demo@voxmate.local';
@@ -220,6 +224,10 @@ function App() {
   const micStreamRef = useRef(null);
   const micChunksRef = useRef([]);
   const micStartedAtRef = useRef(null);
+  const micAudioContextRef = useRef(null);
+  const micAnalyserRef = useRef(null);
+  const micLevelFrameRef = useRef(null);
+  const micLevelPercentRef = useRef(0);
   const [currentUser, setCurrentUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState('login');
@@ -242,6 +250,7 @@ function App() {
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isMicRecording, setIsMicRecording] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [savingTaskId, setSavingTaskId] = useState(null);
   const [deletingTaskId, setDeletingTaskId] = useState(null);
@@ -636,8 +645,68 @@ function App() {
       }
 
       micStreamRef.current?.getTracks().forEach((track) => track.stop());
+      stopMicLevelMeter();
     };
   }, []);
+
+  function stopMicLevelMeter() {
+    if (micLevelFrameRef.current !== null) {
+      cancelAnimationFrame(micLevelFrameRef.current);
+      micLevelFrameRef.current = null;
+    }
+
+    micAnalyserRef.current = null;
+    micAudioContextRef.current?.close().catch(() => {});
+    micAudioContextRef.current = null;
+    micLevelPercentRef.current = 0;
+    setMicLevel(0);
+  }
+
+  function startMicLevelMeter(stream) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+    if (!AudioContextClass) {
+      return;
+    }
+
+    try {
+      const audioContext = new AudioContextClass();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.6;
+      source.connect(analyser);
+
+      micAudioContextRef.current = audioContext;
+      micAnalyserRef.current = analyser;
+
+      const levelData = new Uint8Array(analyser.fftSize);
+
+      const updateLevel = () => {
+        analyser.getByteTimeDomainData(levelData);
+
+        let sumSquares = 0;
+        for (let i = 0; i < levelData.length; i += 1) {
+          const normalized = (levelData[i] - 128) / 128;
+          sumSquares += normalized * normalized;
+        }
+
+        const rms = Math.sqrt(sumSquares / levelData.length);
+        const percent = Math.round(Math.min(1, rms * 4) * 100);
+
+        if (Math.abs(percent - micLevelPercentRef.current) >= 2) {
+          micLevelPercentRef.current = percent;
+          setMicLevel(percent / 100);
+        }
+
+        micLevelFrameRef.current = requestAnimationFrame(updateLevel);
+      };
+
+      micLevelFrameRef.current = requestAnimationFrame(updateLevel);
+    } catch {
+      // Level meter is a visual enhancement only - recording keeps working without it.
+    }
+  }
 
   async function uploadRecordingFile(file, source = 'frontend-upload') {
     setIsUploading(true);
@@ -722,6 +791,7 @@ function App() {
         micStreamRef.current = null;
         mediaRecorderRef.current = null;
         micStartedAtRef.current = null;
+        stopMicLevelMeter();
         setIsMicRecording(false);
 
         if (!chunks.length) {
@@ -735,12 +805,14 @@ function App() {
       };
 
       recorder.start();
+      startMicLevelMeter(stream);
       setIsMicRecording(true);
       setStatus('Идёт запись с микрофона...');
     } catch (error) {
       micStreamRef.current?.getTracks().forEach((track) => track.stop());
       micStreamRef.current = null;
       mediaRecorderRef.current = null;
+      stopMicLevelMeter();
       setIsMicRecording(false);
       setStatus(error.name === 'NotAllowedError' ? 'Доступ к микрофону запрещён' : error.message || 'Не удалось начать запись');
     }
@@ -758,6 +830,7 @@ function App() {
     micStreamRef.current?.getTracks().forEach((track) => track.stop());
     micStreamRef.current = null;
     mediaRecorderRef.current = null;
+    stopMicLevelMeter();
     setIsMicRecording(false);
   }
 
@@ -1213,7 +1286,7 @@ function App() {
             ) : (
               <>
                 <label
-                  className={`button button-primary icon-button ${isUploading || isMicRecording ? 'is-disabled' : ''}`}
+                  className={`button icon-button icon-button-ghost ${isUploading || isMicRecording ? 'is-disabled' : ''}`}
                   aria-label="Загрузить запись"
                   title="Загрузить запись"
                 >
@@ -1223,7 +1296,7 @@ function App() {
                     onChange={handleFileChange}
                     disabled={isUploading || isMicRecording}
                   />
-                  ⬆
+                  <img className="icon-button-image" src={uploadIcon} alt="" />
                 </label>
 
                 <button
@@ -1233,8 +1306,13 @@ function App() {
                   disabled={isUploading}
                   aria-label={isMicRecording ? 'Остановить запись' : 'Записать с микрофона'}
                   title={isMicRecording ? 'Остановить запись' : 'Записать с микрофона'}
+                  style={
+                    isMicRecording
+                      ? { background: `linear-gradient(to top, #f4c430 ${micLevel * 100}%, #fff7f5 ${micLevel * 100}%)` }
+                      : undefined
+                  }
                 >
-                  🎙
+                  <img className="icon-button-image" src={microphoneIcon} alt="" />
                 </button>
 
                 <button
@@ -1245,7 +1323,7 @@ function App() {
                   aria-label="Обновить"
                   title="Обновить"
                 >
-                  ↻
+                  <img className="icon-button-image" src={refreshIcon} alt="" />
                 </button>
               </>
             )}
@@ -1257,7 +1335,7 @@ function App() {
               aria-label="Настройки"
               title="Настройки"
             >
-              ⚙
+              <img className="icon-button-image" src={settingsIcon} alt="" />
             </button>
 
             <button className="button button-secondary" type="button" onClick={handleLogout}>

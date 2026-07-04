@@ -5,12 +5,19 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Agent, setGlobalDispatcher } from 'undici';
 import { query, transaction } from './db.js';
 import { runMigrations } from './migrations.js';
 import { createRedisConnection, RECORDING_QUEUE_NAME } from './queue.js';
 import { ensureAudioBucket, getRecordingAudioBuffer } from './storage.js';
+import { trySplitTranscriptBySpeaker } from './speakerSplit.js';
 
 dotenv.config();
+
+// Diarizing a long meeting on CPU can take well over the default 5-minute
+// undici headers/body timeout used by Node's global fetch. This is a trusted
+// internal worker process, not user-facing, so disabling the timeout is safe.
+setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0 }));
 
 const ASR_COMPRESS_THRESHOLD_BYTES = Number(process.env.ASR_COMPRESS_THRESHOLD_BYTES || 20 * 1024 * 1024);
 const ASR_MAX_RETRIES = Number(process.env.ASR_MAX_RETRIES || 3);
@@ -138,16 +145,10 @@ async function callOpenRouterAsr(payload) {
   return responseBody;
 }
 
-async function transcribeWithOpenRouter(file) {
+async function transcribeWithOpenRouter(file, audioBuffer) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
-  if (!apiKey || !file?.storage_key) {
-    return null;
-  }
-
-  const audioBuffer = await getRecordingAudioBuffer(file.storage_key);
-
-  if (!audioBuffer) {
+  if (!apiKey || !audioBuffer) {
     return null;
   }
 
@@ -183,6 +184,76 @@ async function transcribeWithOpenRouter(file) {
   return null;
 }
 
+function formatDiarizerSpeakerLabel(label) {
+  const match = String(label || '').match(/SPEAKER_?(\d+)/i);
+
+  return match ? `Спикер ${Number(match[1]) + 1}` : String(label || 'Спикер 1');
+}
+
+function mergeDiarizerSegments(segments) {
+  const merged = [];
+
+  for (const segment of segments) {
+    const speaker = formatDiarizerSpeakerLabel(segment.speaker);
+    const last = merged[merged.length - 1];
+
+    if (last && last.speaker === speaker) {
+      last.text = `${last.text} ${segment.text}`.trim();
+      last.endMs = Math.round((segment.end || 0) * 1000);
+    } else {
+      merged.push({
+        speaker,
+        text: segment.text,
+        startMs: Math.round((segment.start || 0) * 1000),
+        endMs: Math.round((segment.end || 0) * 1000),
+      });
+    }
+  }
+
+  return merged;
+}
+
+async function transcribeWithDiarizer(file, audioBuffer) {
+  const diarizerUrl = process.env.DIARIZER_URL;
+
+  if (!diarizerUrl || !audioBuffer) {
+    return null;
+  }
+
+  try {
+    const formData = new FormData();
+    formData.append(
+      'file',
+      new Blob([audioBuffer], { type: file?.mime_type || 'application/octet-stream' }),
+      file?.original_filename || 'audio',
+    );
+
+    const response = await fetch(`${diarizerUrl}/diarize`, { method: 'POST', body: formData });
+    const body = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      throw new Error(body?.detail || `Diarizer failed with ${response.status}`);
+    }
+
+    const rawSegments = Array.isArray(body?.segments) ? body.segments.filter((segment) => segment.text?.trim()) : [];
+
+    if (!rawSegments.length) {
+      return null;
+    }
+
+    const segments = mergeDiarizerSegments(rawSegments);
+
+    return {
+      text: segments.map((segment) => `${segment.speaker}\n${segment.text}`).join('\n\n'),
+      segments,
+      speakerCount: new Set(segments.map((segment) => segment.speaker)).size,
+    };
+  } catch (error) {
+    console.warn('Diarizer transcription failed, falling back to OpenRouter ASR:', error.message);
+    return null;
+  }
+}
+
 async function processRecording(data) {
   const { jobId, recordingId } = data;
 
@@ -216,12 +287,42 @@ async function processRecording(data) {
   );
   const title = recording.rows[0]?.title || 'recording';
   const file = recording.rows[0];
-  const transcription = await transcribeWithOpenRouter(file);
-  const transcriptText =
-    transcription?.text ||
-    (file?.storage_key
-      ? `Audio file received for "${title}", but OpenRouter ASR is not configured.`
-      : `Mock transcript for "${title}". No audio file is attached yet.`);
+  const audioBuffer = file?.storage_key ? await getRecordingAudioBuffer(file.storage_key) : null;
+
+  const diarized = await transcribeWithDiarizer(file, audioBuffer);
+
+  let finalText;
+  let finalSegments;
+
+  if (diarized) {
+    console.log(`Diarized recording ${recordingId} into ${diarized.speakerCount} speakers via WhisperX`);
+    finalText = diarized.text;
+    finalSegments = diarized.segments;
+  } else {
+    const transcription = await transcribeWithOpenRouter(file, audioBuffer);
+    const transcriptText =
+      transcription?.text ||
+      (file?.storage_key
+        ? `Audio file received for "${title}", but OpenRouter ASR is not configured.`
+        : `Mock transcript for "${title}". No audio file is attached yet.`);
+
+    const speakerSplit = await trySplitTranscriptBySpeaker(transcriptText);
+
+    if (speakerSplit) {
+      console.log(`Split transcript for recording ${recordingId} into ${speakerSplit.speakerCount} speakers`);
+    }
+
+    finalText = speakerSplit?.text || transcriptText;
+    finalSegments = speakerSplit?.segments || [
+      {
+        startMs: 0,
+        endMs: 3000,
+        speaker: 'speaker_1',
+        text: transcriptText,
+        usage: transcription?.usage || null,
+      },
+    ];
+  }
 
   await transaction(async (client) => {
     await client.query(
@@ -229,20 +330,7 @@ async function processRecording(data) {
         insert into transcripts (recording_id, job_id, language, text, segments)
         values ($1, $2, 'ru', $3, $4::jsonb)
       `,
-      [
-        recordingId,
-        jobId,
-        transcriptText,
-        JSON.stringify([
-          {
-            startMs: 0,
-            endMs: 3000,
-            speaker: 'speaker_1',
-            text: transcriptText,
-            usage: transcription?.usage || null,
-          },
-        ]),
-      ],
+      [recordingId, jobId, finalText, JSON.stringify(finalSegments)],
     );
 
     await client.query(
