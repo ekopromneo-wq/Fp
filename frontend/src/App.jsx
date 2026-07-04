@@ -933,39 +933,46 @@ function App() {
             <article
               className={`recording-row ${selectedRecordingId === recording.id ? 'is-selected' : ''}`}
               key={recording.id}
-              onClick={() => setSelectedRecordingId(recording.id)}
             >
-              <div className="recording-main">
-                <div className="recording-title-row">
-                  <h2>{recording.title}</h2>
-                  <span className={`status-pill status-${recording.status}`}>{recording.status}</span>
-                </div>
-
-                <div className="recording-meta">
-                  <span>{recording.originalFilename || 'файл не прикреплен'}</span>
-                  <span>{formatFileSize(recording.fileSizeBytes)}</span>
-                  {recording.project ? (
-                    <span className="project-chip" style={{ '--project-color': recording.project.color }}>
-                      {recording.project.name}
-                    </span>
-                  ) : null}
-                  <span>{formatDate(recording.createdAt)}</span>
-                </div>
-
-                {recording.storageKey ? <code className="storage-key">{recording.storageKey}</code> : null}
-              </div>
-
               <button
-                className="button button-danger"
+                className="recording-toggle"
                 type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleDelete(recording);
-                }}
-                disabled={deletingId === recording.id}
+                onClick={() => setSelectedRecordingId(selectedRecordingId === recording.id ? null : recording.id)}
+                aria-expanded={selectedRecordingId === recording.id}
+                aria-label={`${selectedRecordingId === recording.id ? 'Свернуть' : 'Открыть'} ${recording.originalFilename || recording.title}`}
               >
-                {deletingId === recording.id ? 'Удаляем...' : 'Удалить'}
+                <span>{recording.originalFilename || recording.title}</span>
+                <span className="recording-chevron" aria-hidden="true">
+                  {selectedRecordingId === recording.id ? '▴' : '▾'}
+                </span>
               </button>
+
+              {selectedRecordingId === recording.id ? (
+                <div className="recording-dropdown">
+                  <div className="recording-meta">
+                    <span>{formatFileSize(recording.fileSizeBytes)}</span>
+                    <span>{formatDate(recording.createdAt)}</span>
+                    <span className={`status-pill status-${recording.status}`}>{recording.status}</span>
+                    {recording.project ? (
+                      <span className="project-chip" style={{ '--project-color': recording.project.color }}>
+                        {recording.project.name}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="recording-dropdown-actions">
+                    <span>{recording.title}</span>
+                    <button
+                      className="button button-danger"
+                      type="button"
+                      onClick={() => handleDelete(recording)}
+                      disabled={deletingId === recording.id}
+                    >
+                      {deletingId === recording.id ? 'Удаляем...' : 'Удалить'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </article>
           ))}
         </section>
@@ -1078,7 +1085,7 @@ function App() {
                 </section>
               )}
 
-              <section className="detail-section">
+              <section className="detail-section detail-section-wide">
                 <h3>Стенограмма</h3>
                 {selectedRecording.transcript ? (
                   <p className="transcript-text">{selectedRecording.transcript.text}</p>
@@ -1172,7 +1179,7 @@ function App() {
               </section>
 
               {selectedRecording.summary?.protocol ? (
-                <section className="detail-section">
+                <section className="detail-section detail-section-wide">
                   <h3>Протокол</h3>
                   <div className="protocol-grid">
                     <div>
@@ -1217,7 +1224,7 @@ function App() {
                 </section>
               ) : null}
 
-              <section className="detail-section">
+              <section className="detail-section detail-section-wide">
                 <h3>Задачи</h3>
                 <form className="task-row task-create-form" onSubmit={handleAddTask}>
                   <div className="task-row-header">
