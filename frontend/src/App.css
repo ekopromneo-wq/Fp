@@ -374,7 +374,7 @@ h3 {
 }
 
 .detail-actions .button {
-  width: 100%;
+  flex: 1 1 160px;
 }
 
 .detail-grid {
@@ -430,6 +430,39 @@ audio {
   color: #27322c;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.summary-block {
+  display: grid;
+  gap: 10px;
+  color: #27322c;
+  line-height: 1.5;
+}
+
+.summary-block h4 {
+  margin: 4px 0 0;
+  color: #26312b;
+  font-size: 0.86rem;
+}
+
+.summary-block ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.topic-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.topic-list span {
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: #235b4f;
+  background: #e3f0ea;
+  font-size: 0.8rem;
+  font-weight: 800;
 }
 
 .job-list {

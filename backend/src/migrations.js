@@ -82,6 +82,24 @@ const migrations = [
       create index if not exists auth_sessions_expires_at_idx on auth_sessions(expires_at);
     `,
   },
+  {
+    id: '004_recording_summaries',
+    sql: `
+      create table if not exists recording_summaries (
+        id uuid primary key default gen_random_uuid(),
+        recording_id uuid not null references recordings(id) on delete cascade,
+        transcript_id uuid references transcripts(id) on delete set null,
+        model text not null,
+        summary text not null,
+        action_items jsonb not null default '[]'::jsonb,
+        topics jsonb not null default '[]'::jsonb,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      );
+
+      create index if not exists recording_summaries_recording_id_idx on recording_summaries(recording_id);
+    `,
+  },
 ];
 
 export async function runMigrations() {

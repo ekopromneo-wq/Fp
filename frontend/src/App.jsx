@@ -124,6 +124,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSummarizing, setIsSummarizing] = useState(false);
   const [processingId, setProcessingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
@@ -356,6 +357,35 @@ function App() {
     }
   }
 
+  async function handleSummarize(recording) {
+    if (!recording?.transcript) {
+      setStatus('Сначала нужна стенограмма');
+      return;
+    }
+
+    setIsSummarizing(true);
+    setStatus(`Готовим резюме "${recording.title}"...`);
+
+    try {
+      const response = await apiFetch(`/api/recordings/${recording.id}/summary`, {
+        method: 'POST',
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось сделать резюме');
+      }
+
+      setSelectedRecording((current) => (current?.id === recording.id ? { ...current, summary: data.summary } : current));
+      setRecordings((current) => current.map((item) => (item.id === recording.id ? { ...item, summary: data.summary } : item)));
+      setStatus(`Резюме "${recording.title}" готово`);
+    } catch (error) {
+      setStatus(error.message || 'Ошибка создания резюме');
+    } finally {
+      setIsSummarizing(false);
+    }
+  }
+
   async function handleDelete(recording) {
     const confirmed = window.confirm(`Удалить запись "${recording.title}"?`);
 
@@ -518,6 +548,14 @@ function App() {
                 >
                   {processingId === selectedRecording.id ? 'Запускаем...' : 'Запустить обработку'}
                 </button>
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  onClick={() => handleSummarize(selectedRecording)}
+                  disabled={!selectedRecording.transcript || isSummarizing}
+                >
+                  {isSummarizing ? 'Готовим...' : 'Сделать резюме'}
+                </button>
               </div>
 
               <dl className="detail-grid">
@@ -557,6 +595,36 @@ function App() {
                   <p className="transcript-text">{selectedRecording.transcript.text}</p>
                 ) : (
                   <p className="muted-text">Стенограммы пока нет. Запусти обработку записи.</p>
+                )}
+              </section>
+
+              <section className="detail-section">
+                <h3>Резюме</h3>
+                {selectedRecording.summary ? (
+                  <div className="summary-block">
+                    <p>{selectedRecording.summary.summary}</p>
+
+                    {selectedRecording.summary.actionItems?.length ? (
+                      <>
+                        <h4>Action items</h4>
+                        <ul>
+                          {selectedRecording.summary.actionItems.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : null}
+
+                    {selectedRecording.summary.topics?.length ? (
+                      <div className="topic-list">
+                        {selectedRecording.summary.topics.map((topic) => (
+                          <span key={topic}>{topic}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="muted-text">Резюме пока нет. Сделай его после появления стенограммы.</p>
                 )}
               </section>
 

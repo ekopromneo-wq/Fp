@@ -34,7 +34,7 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_ASR_MODEL=${OPENROUTER_ASR_MODEL:-openai/whisper-large-v3}
       - OPENROUTER_ASR_LANGUAGE=${OPENROUTER_ASR_LANGUAGE:-ru}
-      - OPENROUTER_LLM_MODEL=${OPENROUTER_LLM_MODEL:-gpt-4o-mini}
+      - OPENROUTER_LLM_MODEL=${OPENROUTER_LLM_MODEL:-openai/gpt-4o-mini}
     depends_on:
       db:
         condition: service_healthy
@@ -66,7 +66,7 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_ASR_MODEL=${OPENROUTER_ASR_MODEL:-openai/whisper-large-v3}
       - OPENROUTER_ASR_LANGUAGE=${OPENROUTER_ASR_LANGUAGE:-ru}
-      - OPENROUTER_LLM_MODEL=${OPENROUTER_LLM_MODEL:-gpt-4o-mini}
+      - OPENROUTER_LLM_MODEL=${OPENROUTER_LLM_MODEL:-openai/gpt-4o-mini}
     depends_on:
       db:
         condition: service_healthy

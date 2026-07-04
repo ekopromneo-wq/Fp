@@ -50,6 +50,91 @@ function mapTranscript(row) {
     : null;
 }
 
+function mapSummary(row) {
+  return row
+    ? {
+        id: row.id,
+        recordingId: row.recording_id,
+        transcriptId: row.transcript_id,
+        model: row.model,
+        summary: row.summary,
+        actionItems: row.action_items,
+        topics: row.topics,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }
+    : null;
+}
+
+function parseJsonObject(text) {
+  const trimmed = String(text || '').trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : trimmed;
+
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    const start = candidate.indexOf('{');
+    const end = candidate.lastIndexOf('}');
+
+    if (start !== -1 && end !== -1 && end > start) {
+      return JSON.parse(candidate.slice(start, end + 1));
+    }
+
+    throw new Error('LLM response is not valid JSON');
+  }
+}
+
+async function generateSummaryWithOpenRouter(transcriptText) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+
+  if (!apiKey) {
+    throw new Error('OPENROUTER_API_KEY is not configured');
+  }
+
+  const model = process.env.OPENROUTER_LLM_MODEL || 'openai/gpt-4o-mini';
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'http://localhost:4173',
+      'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'VoxMate',
+    },
+    body: JSON.stringify({
+      model,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Ты помощник VoxMate. Верни строго JSON с полями summary:string, actionItems:string[], topics:string[]. Пиши по-русски, кратко и конкретно.',
+        },
+        {
+          role: 'user',
+          content: `Сделай краткое резюме стенограммы, список action items и ключевые темы.\n\nСтенограмма:\n${transcriptText}`,
+        },
+      ],
+    }),
+  });
+
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(body?.error?.message || body?.message || `OpenRouter LLM failed with ${response.status}`);
+  }
+
+  const content = body?.choices?.[0]?.message?.content;
+  const parsed = parseJsonObject(content);
+
+  return {
+    model,
+    summary: String(parsed.summary || '').trim(),
+    actionItems: Array.isArray(parsed.actionItems) ? parsed.actionItems.map(String) : [],
+    topics: Array.isArray(parsed.topics) ? parsed.topics.map(String) : [],
+  };
+}
+
 export async function listRecordings(ownerId) {
   const result = await query(
     `
@@ -98,7 +183,7 @@ export async function getRecording(id, ownerId) {
     return null;
   }
 
-  const [jobs, transcript] = await Promise.all([
+  const [jobs, transcript, summary] = await Promise.all([
     query(
       `
         select id, recording_id, queue_job_id, status, error, created_at, updated_at
@@ -118,13 +203,55 @@ export async function getRecording(id, ownerId) {
       `,
       [id],
     ),
+    query(
+      `
+        select id, recording_id, transcript_id, model, summary, action_items, topics, created_at, updated_at
+        from recording_summaries
+        where recording_id = $1
+        order by created_at desc
+        limit 1
+      `,
+      [id],
+    ),
   ]);
 
   return {
     ...mapRecording(result.rows[0]),
     jobs: jobs.rows.map(mapJob),
     transcript: mapTranscript(transcript.rows[0]),
+    summary: mapSummary(summary.rows[0]),
   };
+}
+
+export async function summarizeRecording(recordingId, ownerId) {
+  const recording = await getRecording(recordingId, ownerId);
+
+  if (!recording) {
+    return null;
+  }
+
+  if (!recording.transcript?.text) {
+    throw new Error('Recording has no transcript yet');
+  }
+
+  const generated = await generateSummaryWithOpenRouter(recording.transcript.text);
+  const result = await query(
+    `
+      insert into recording_summaries (recording_id, transcript_id, model, summary, action_items, topics)
+      values ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
+      returning id, recording_id, transcript_id, model, summary, action_items, topics, created_at, updated_at
+    `,
+    [
+      recordingId,
+      recording.transcript.id,
+      generated.model,
+      generated.summary,
+      JSON.stringify(generated.actionItems),
+      JSON.stringify(generated.topics),
+    ],
+  );
+
+  return mapSummary(result.rows[0]);
 }
 
 export async function getRecordingAudio(id, ownerId) {
@@ -342,6 +469,22 @@ export function registerRecordingRoutes(app) {
     }
 
     return c.json({ job }, 202);
+  });
+
+  app.post('/api/recordings/:id/summary', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+
+    try {
+      const summary = await summarizeRecording(c.req.param('id'), user.id);
+
+      if (!summary) {
+        return c.json({ error: 'Recording not found' }, 404);
+      }
+
+      return c.json({ summary }, 201);
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to summarize recording' }, 400);
+    }
   });
 
   app.delete('/api/recordings/:id', requireAuth, async (c) => {
