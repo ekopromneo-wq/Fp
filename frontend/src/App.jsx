@@ -2,6 +2,19 @@ import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
+const demoEmail = import.meta.env.VITE_DEMO_EMAIL || 'demo@voxmate.local';
+const demoPassword = import.meta.env.VITE_DEMO_PASSWORD || 'voxmate123';
+
+function apiFetch(path, options = {}) {
+  return fetch(`${apiBaseUrl}${path}`, {
+    ...options,
+    credentials: 'include',
+    headers: {
+      ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+      ...(options.headers || {}),
+    },
+  });
+}
 
 function formatDate(value) {
   if (!value) {
@@ -32,7 +45,74 @@ function getAudioUrl(recording) {
   return recording?.storageKey ? `${apiBaseUrl}/api/recordings/${recording.id}/audio` : '';
 }
 
+function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage }) {
+  const [email, setEmail] = useState(demoEmail);
+  const [password, setPassword] = useState(demoPassword);
+  const [displayName, setDisplayName] = useState('Demo User');
+  const isRegister = authMode === 'register';
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    onSubmit({
+      email,
+      password,
+      displayName,
+    });
+  }
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel" aria-labelledby="auth-title">
+        <p className="eyebrow">VoxMate</p>
+        <h1 id="auth-title">{isRegister ? 'Создать аккаунт' : 'Вход'}</h1>
+        <p className="auth-copy">Рабочая область записей доступна после входа.</p>
+
+        <form className="auth-form" onSubmit={handleSubmit}>
+          {isRegister ? (
+            <label>
+              Имя
+              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" />
+            </label>
+          ) : null}
+
+          <label>
+            Email
+            <input value={email} type="email" onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
+          </label>
+
+          <label>
+            Пароль
+            <input
+              value={password}
+              type="password"
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete={isRegister ? 'new-password' : 'current-password'}
+              minLength={6}
+              required
+            />
+          </label>
+
+          <button className="button button-primary" type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Проверяем...' : isRegister ? 'Зарегистрироваться' : 'Войти'}
+          </button>
+        </form>
+
+        <button className="link-button" type="button" onClick={() => setAuthMode(isRegister ? 'login' : 'register')}>
+          {isRegister ? 'Уже есть аккаунт' : 'Создать новый аккаунт'}
+        </button>
+
+        {authMessage ? <p className="auth-message">{authMessage}</p> : null}
+      </section>
+    </main>
+  );
+}
+
 function App() {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [authMode, setAuthMode] = useState('login');
+  const [authMessage, setAuthMessage] = useState('');
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [recordings, setRecordings] = useState([]);
   const [selectedRecordingId, setSelectedRecordingId] = useState(null);
   const [selectedRecording, setSelectedRecording] = useState(null);
@@ -51,11 +131,66 @@ function App() {
     selectedRecording.status !== 'processing' &&
     processingId !== selectedRecording.id;
 
+  async function loadCurrentUser() {
+    setIsAuthLoading(true);
+
+    try {
+      const response = await apiFetch('/api/auth/me');
+      const data = await response.json();
+      setCurrentUser(data.user || null);
+    } catch {
+      setCurrentUser(null);
+    } finally {
+      setIsAuthLoading(false);
+    }
+  }
+
+  async function handleAuthSubmit(input) {
+    setIsAuthSubmitting(true);
+    setAuthMessage('');
+
+    try {
+      const response = await apiFetch(`/api/auth/${authMode}`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось войти');
+      }
+
+      setCurrentUser(data.user);
+      setAuthMessage('');
+    } catch (error) {
+      setAuthMessage(error.message || 'Ошибка авторизации');
+    } finally {
+      setIsAuthSubmitting(false);
+    }
+  }
+
+  async function handleLogout() {
+    await apiFetch('/api/auth/logout', {
+      method: 'POST',
+    }).catch(() => null);
+
+    setCurrentUser(null);
+    setRecordings([]);
+    setSelectedRecordingId(null);
+    setSelectedRecording(null);
+    setStatus('');
+  }
+
   async function loadRecordings(nextSelectedId = selectedRecordingId) {
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/recordings`);
+      const response = await apiFetch('/api/recordings');
+
+      if (response.status === 401) {
+        setCurrentUser(null);
+        throw new Error('Нужно войти заново');
+      }
 
       if (!response.ok) {
         throw new Error('Не удалось получить список записей');
@@ -88,7 +223,12 @@ function App() {
     setIsDetailLoading(true);
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/recordings/${recordingId}`);
+      const response = await apiFetch(`/api/recordings/${recordingId}`);
+
+      if (response.status === 401) {
+        setCurrentUser(null);
+        throw new Error('Нужно войти заново');
+      }
 
       if (!response.ok) {
         throw new Error('Не удалось получить запись');
@@ -105,12 +245,20 @@ function App() {
   }
 
   useEffect(() => {
-    loadRecordings();
+    loadCurrentUser();
   }, []);
 
   useEffect(() => {
-    loadRecordingDetail(selectedRecordingId);
-  }, [selectedRecordingId]);
+    if (currentUser) {
+      loadRecordings();
+    }
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (currentUser) {
+      loadRecordingDetail(selectedRecordingId);
+    }
+  }, [selectedRecordingId, currentUser?.id]);
 
   async function handleFileChange(event) {
     const file = event.target.files?.[0];
@@ -124,11 +272,8 @@ function App() {
     setStatus(`Загружаем ${file.name}...`);
 
     try {
-      const createResponse = await fetch(`${apiBaseUrl}/api/recordings`, {
+      const createResponse = await apiFetch('/api/recordings', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           title: file.name.replace(/\.[^.]+$/, '') || file.name,
           source: 'frontend-upload',
@@ -143,7 +288,7 @@ function App() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const uploadResponse = await fetch(`${apiBaseUrl}/api/recordings/${createData.recording.id}/audio`, {
+      const uploadResponse = await apiFetch(`/api/recordings/${createData.recording.id}/audio`, {
         method: 'POST',
         body: formData,
       });
@@ -170,7 +315,7 @@ function App() {
     setStatus(`Запускаем обработку "${recording.title}"...`);
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/recordings/${recording.id}/jobs`, {
+      const response = await apiFetch(`/api/recordings/${recording.id}/jobs`, {
         method: 'POST',
       });
 
@@ -199,7 +344,7 @@ function App() {
     setStatus(`Удаляем "${recording.title}"...`);
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/recordings/${recording.id}`, {
+      const response = await apiFetch(`/api/recordings/${recording.id}`, {
         method: 'DELETE',
       });
 
@@ -219,6 +364,29 @@ function App() {
     }
   }
 
+  if (isAuthLoading) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-panel">
+          <p className="eyebrow">VoxMate</p>
+          <h1>Проверяем вход</h1>
+        </section>
+      </main>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <AuthScreen
+        authMode={authMode}
+        setAuthMode={setAuthMode}
+        onSubmit={handleAuthSubmit}
+        isSubmitting={isAuthSubmitting}
+        authMessage={authMessage}
+      />
+    );
+  }
+
   return (
     <main className="app-shell">
       <section className="topbar" aria-labelledby="page-title">
@@ -227,15 +395,26 @@ function App() {
           <h1 id="page-title">Записи</h1>
         </div>
 
-        <div className="actions">
-          <button className="button button-secondary" type="button" onClick={() => loadRecordings()} disabled={isLoading || isUploading}>
-            Обновить
-          </button>
+        <div className="topbar-right">
+          <div className="user-chip">
+            <strong>{currentUser.displayName}</strong>
+            <span>{currentUser.email}</span>
+          </div>
 
-          <label className={`button button-primary ${isUploading ? 'is-disabled' : ''}`}>
-            <input type="file" accept="audio/*,video/webm,.webm,.mp3,.wav,.m4a,.ogg" onChange={handleFileChange} disabled={isUploading} />
-            {isUploading ? 'Загрузка...' : 'Загрузить запись'}
-          </label>
+          <div className="actions">
+            <button className="button button-secondary" type="button" onClick={() => loadRecordings()} disabled={isLoading || isUploading}>
+              Обновить
+            </button>
+
+            <label className={`button button-primary ${isUploading ? 'is-disabled' : ''}`}>
+              <input type="file" accept="audio/*,video/webm,.webm,.mp3,.wav,.m4a,.ogg" onChange={handleFileChange} disabled={isUploading} />
+              {isUploading ? 'Загрузка...' : 'Загрузить запись'}
+            </label>
+
+            <button className="button button-secondary" type="button" onClick={handleLogout}>
+              Выйти
+            </button>
+          </div>
         </div>
       </section>
 

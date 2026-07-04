@@ -25,6 +25,69 @@ input {
   font: inherit;
 }
 
+.auth-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-panel {
+  width: min(420px, 100%);
+  border: 1px solid #d9dfd8;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 16px 36px rgba(29, 39, 33, 0.08);
+  padding: 24px;
+}
+
+.auth-panel h1 {
+  margin-bottom: 8px;
+}
+
+.auth-copy,
+.auth-message {
+  color: #5e6a63;
+  line-height: 1.45;
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+  margin: 20px 0 14px;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 6px;
+  color: #4d5a52;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.auth-form input {
+  width: 100%;
+  border: 1px solid #cbd4cd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #19201d;
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.auth-message {
+  margin-top: 12px;
+}
+
+.link-button {
+  border: 0;
+  padding: 0;
+  color: #235b4f;
+  background: transparent;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .app-shell {
   width: min(1280px, calc(100% - 32px));
   margin: 0 auto;
@@ -74,6 +137,24 @@ h3 {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.topbar-right {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
+.user-chip {
+  display: grid;
+  justify-items: end;
+  color: #5f6b64;
+  font-size: 0.84rem;
+}
+
+.user-chip strong {
+  color: #1d2822;
+  font-size: 0.95rem;
 }
 
 .button {
@@ -402,6 +483,11 @@ audio {
 
   .topbar {
     display: grid;
+  }
+
+  .topbar-right,
+  .user-chip {
+    justify-items: stretch;
   }
 
   .actions,

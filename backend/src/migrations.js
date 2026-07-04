@@ -63,6 +63,25 @@ const migrations = [
         add column if not exists file_size_bytes bigint;
     `,
   },
+  {
+    id: '003_auth_credentials_sessions',
+    sql: `
+      alter table app_users
+        add column if not exists password_hash text;
+
+      create table if not exists auth_sessions (
+        id uuid primary key default gen_random_uuid(),
+        user_id uuid not null references app_users(id) on delete cascade,
+        token_hash text not null unique,
+        expires_at timestamptz not null,
+        created_at timestamptz not null default now(),
+        last_seen_at timestamptz not null default now()
+      );
+
+      create index if not exists auth_sessions_user_id_idx on auth_sessions(user_id);
+      create index if not exists auth_sessions_expires_at_idx on auth_sessions(expires_at);
+    `,
+  },
 ];
 
 export async function runMigrations() {

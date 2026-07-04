@@ -14,9 +14,18 @@
   - `GET /api/recordings/:id` for details, jobs, and latest transcript.
   - `POST /api/recordings/:id/jobs` to enqueue processing.
   - `DELETE /api/recordings/:id` to remove the DB row and delete the MinIO object when `storage_key` is present.
+  - `GET /api/recordings/:id/audio` to stream the MinIO object through the backend.
+- Auth API currently supports cookie-based sessions:
+  - `POST /api/auth/register`
+  - `POST /api/auth/login`
+  - `POST /api/auth/logout`
+  - `GET /api/auth/me`
+  - Recording routes require auth; legacy `owner_id is null` recordings remain visible in dev so previous smoke data does not disappear.
 - Frontend `frontend/src/App.jsx` is a basic recordings UI:
   - Lists recordings from the backend.
   - Uploads audio files by creating a recording first, then posting multipart `file`.
   - Deletes recordings via the backend `DELETE` endpoint.
+  - Shows login/register before the recordings workspace.
+  - Shows selected recording details, audio playback, latest transcript, job history, and a processing trigger.
   - Styles live in `frontend/src/App.css`.
 - On this Windows + Docker setup, Vite/nodemon may not always see bind-mounted file changes immediately. Recreating the relevant service with `docker-compose up -d --force-recreate web` or `api` refreshed the running code.

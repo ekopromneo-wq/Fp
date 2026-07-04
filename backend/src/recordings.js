@@ -1,4 +1,5 @@
 import { createRecordingQueue } from './queue.js';
+import { getAuthUser, requireAuth } from './auth.js';
 import { query, transaction } from './db.js';
 import { Readable } from 'node:stream';
 import { deleteRecordingAudio, getRecordingAudioStream, saveRecordingAudio } from './storage.js';
@@ -49,46 +50,48 @@ function mapTranscript(row) {
     : null;
 }
 
-export async function listRecordings() {
+export async function listRecordings(ownerId) {
   const result = await query(
     `
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
       , original_filename, mime_type, file_size_bytes
       from recordings
+      where owner_id = $1 or owner_id is null
       order by created_at desc
       limit 50
     `,
+    [ownerId],
   );
 
   return result.rows.map(mapRecording);
 }
 
-export async function createRecording(input) {
+export async function createRecording(input, ownerId) {
   const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : 'Untitled recording';
   const source = typeof input.source === 'string' && input.source.trim() ? input.source.trim() : 'manual';
 
   const result = await query(
     `
-      insert into recordings (title, source, duration_seconds, storage_key)
-      values ($1, $2, $3, $4)
+      insert into recordings (owner_id, title, source, duration_seconds, storage_key)
+      values ($1, $2, $3, $4, $5)
       returning id, owner_id, title, status, source, duration_seconds, storage_key,
         original_filename, mime_type, file_size_bytes, created_at, updated_at
     `,
-    [title, source, input.durationSeconds || null, input.storageKey || null],
+    [ownerId, title, source, input.durationSeconds || null, input.storageKey || null],
   );
 
   return mapRecording(result.rows[0]);
 }
 
-export async function getRecording(id) {
+export async function getRecording(id, ownerId) {
   const result = await query(
     `
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
       , original_filename, mime_type, file_size_bytes
       from recordings
-      where id = $1
+      where id = $1 and (owner_id = $2 or owner_id is null)
     `,
-    [id],
+    [id, ownerId],
   );
 
   if (result.rowCount === 0) {
@@ -124,15 +127,15 @@ export async function getRecording(id) {
   };
 }
 
-export async function getRecordingAudio(id) {
+export async function getRecordingAudio(id, ownerId) {
   const result = await query(
     `
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at,
         original_filename, mime_type, file_size_bytes
       from recordings
-      where id = $1
+      where id = $1 and (owner_id = $2 or owner_id is null)
     `,
-    [id],
+    [id, ownerId],
   );
 
   if (result.rowCount === 0) {
@@ -153,9 +156,12 @@ export async function getRecordingAudio(id) {
   };
 }
 
-export async function enqueueRecording(recordingId) {
+export async function enqueueRecording(recordingId, ownerId) {
   const job = await transaction(async (client) => {
-    const recording = await client.query('select id from recordings where id = $1', [recordingId]);
+    const recording = await client.query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
+      recordingId,
+      ownerId,
+    ]);
 
     if (recording.rowCount === 0) {
       return null;
@@ -204,8 +210,11 @@ export async function enqueueRecording(recordingId) {
   return mapJob(updated.rows[0]);
 }
 
-export async function attachRecordingAudio(recordingId, file) {
-  const recording = await query('select id from recordings where id = $1', [recordingId]);
+export async function attachRecordingAudio(recordingId, file, ownerId) {
+  const recording = await query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
+    recordingId,
+    ownerId,
+  ]);
 
   if (recording.rowCount === 0) {
     return null;
@@ -232,8 +241,11 @@ export async function attachRecordingAudio(recordingId, file) {
   return mapRecording(result.rows[0]);
 }
 
-export async function deleteRecording(id) {
-  const result = await query('delete from recordings where id = $1 returning storage_key', [id]);
+export async function deleteRecording(id, ownerId) {
+  const result = await query('delete from recordings where id = $1 and (owner_id = $2 or owner_id is null) returning storage_key', [
+    id,
+    ownerId,
+  ]);
 
   if (result.rowCount === 0) {
     return null;
@@ -251,21 +263,25 @@ export async function deleteRecording(id) {
 }
 
 export function registerRecordingRoutes(app) {
-  app.get('/api/recordings', async (c) => {
+  app.get('/api/recordings', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+
     return c.json({
-      recordings: await listRecordings(),
+      recordings: await listRecordings(user.id),
     });
   });
 
-  app.post('/api/recordings', async (c) => {
+  app.post('/api/recordings', requireAuth, async (c) => {
+    const user = getAuthUser(c);
     const body = await c.req.json().catch(() => ({}));
-    const recording = await createRecording(body);
+    const recording = await createRecording(body, user.id);
 
     return c.json({ recording }, 201);
   });
 
-  app.get('/api/recordings/:id', async (c) => {
-    const recording = await getRecording(c.req.param('id'));
+  app.get('/api/recordings/:id', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const recording = await getRecording(c.req.param('id'), user.id);
 
     if (!recording) {
       return c.json({ error: 'Recording not found' }, 404);
@@ -274,8 +290,9 @@ export function registerRecordingRoutes(app) {
     return c.json({ recording });
   });
 
-  app.get('/api/recordings/:id/audio', async (c) => {
-    const audio = await getRecordingAudio(c.req.param('id'));
+  app.get('/api/recordings/:id/audio', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const audio = await getRecordingAudio(c.req.param('id'), user.id);
 
     if (!audio) {
       return c.json({ error: 'Recording not found' }, 404);
@@ -298,7 +315,8 @@ export function registerRecordingRoutes(app) {
     return c.body(Readable.toWeb(audio.stream), 200, headers);
   });
 
-  app.post('/api/recordings/:id/audio', async (c) => {
+  app.post('/api/recordings/:id/audio', requireAuth, async (c) => {
+    const user = getAuthUser(c);
     const formData = await c.req.raw.formData().catch(() => null);
     const file = formData?.get('file');
 
@@ -306,7 +324,7 @@ export function registerRecordingRoutes(app) {
       return c.json({ error: 'Expected multipart form-data with file field named "file"' }, 400);
     }
 
-    const recording = await attachRecordingAudio(c.req.param('id'), file);
+    const recording = await attachRecordingAudio(c.req.param('id'), file, user.id);
 
     if (!recording) {
       return c.json({ error: 'Recording not found' }, 404);
@@ -315,8 +333,9 @@ export function registerRecordingRoutes(app) {
     return c.json({ recording });
   });
 
-  app.post('/api/recordings/:id/jobs', async (c) => {
-    const job = await enqueueRecording(c.req.param('id'));
+  app.post('/api/recordings/:id/jobs', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const job = await enqueueRecording(c.req.param('id'), user.id);
 
     if (!job) {
       return c.json({ error: 'Recording not found' }, 404);
@@ -325,8 +344,9 @@ export function registerRecordingRoutes(app) {
     return c.json({ job }, 202);
   });
 
-  app.delete('/api/recordings/:id', async (c) => {
-    const deleted = await deleteRecording(c.req.param('id'));
+  app.delete('/api/recordings/:id', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const deleted = await deleteRecording(c.req.param('id'), user.id);
 
     if (!deleted) {
       return c.json({ error: 'Recording not found' }, 404);

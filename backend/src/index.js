@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
+import { registerAuthRoutes } from './auth.js';
 import { checkDependencies } from './health.js';
 import { registerRecordingRoutes } from './recordings.js';
 import { runMigrations } from './migrations.js';
@@ -12,9 +13,12 @@ const port = Number(process.env.PORT || 4000);
 const app = new Hono();
 
 app.use('/api/*', async (c, next) => {
-  c.header('Access-Control-Allow-Origin', '*');
+  const origin = c.req.header('Origin');
+
+  c.header('Access-Control-Allow-Origin', origin || '*');
   c.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  c.header('Access-Control-Allow-Credentials', 'true');
 
   if (c.req.method === 'OPTIONS') {
     return c.body(null, 204);
@@ -60,6 +64,7 @@ app.get('/api/hello', (c) => {
   });
 });
 
+registerAuthRoutes(app);
 registerRecordingRoutes(app);
 
 async function main() {
