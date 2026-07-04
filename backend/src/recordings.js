@@ -10,6 +10,14 @@ function mapRecording(row) {
   return {
     id: row.id,
     ownerId: row.owner_id,
+    projectId: row.project_id,
+    project: row.project_id
+      ? {
+          id: row.project_id,
+          name: row.project_name,
+          color: row.project_color,
+        }
+      : null,
     title: row.title,
     status: row.status,
     source: row.source,
@@ -18,6 +26,18 @@ function mapRecording(row) {
     originalFilename: row.original_filename,
     mimeType: row.mime_type,
     fileSizeBytes: row.file_size_bytes === null ? null : Number(row.file_size_bytes),
+    autoNamed: Boolean(row.auto_named),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapProject(row) {
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    name: row.name,
+    color: row.color,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -249,17 +269,67 @@ async function generateSummaryWithOpenRouter(transcriptText) {
   };
 }
 
-export async function listRecordings(ownerId) {
+export async function listProjects(ownerId) {
   const result = await query(
     `
-      select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
-      , original_filename, mime_type, file_size_bytes
-      from recordings
+      select id, owner_id, name, color, created_at, updated_at
+      from projects
       where owner_id = $1 or owner_id is null
-      order by created_at desc
-      limit 50
+      order by name asc
     `,
     [ownerId],
+  );
+
+  return result.rows.map(mapProject);
+}
+
+export async function createProject(input, ownerId) {
+  const name = typeof input.name === 'string' && input.name.trim() ? input.name.trim() : '';
+  const color = typeof input.color === 'string' && input.color.trim() ? input.color.trim() : '#235b4f';
+
+  if (!name) {
+    throw new Error('Project name is required');
+  }
+
+  const result = await query(
+    `
+      insert into projects (owner_id, name, color)
+      values ($1, $2, $3)
+      returning id, owner_id, name, color, created_at, updated_at
+    `,
+    [ownerId, name, color],
+  );
+
+  return mapProject(result.rows[0]);
+}
+
+export async function listRecordings(ownerId, filters = {}) {
+  const search = typeof filters.search === 'string' ? filters.search.trim() : '';
+  const projectId = typeof filters.projectId === 'string' && filters.projectId.trim() ? filters.projectId.trim() : null;
+  const result = await query(
+    `
+      select
+        recordings.id, recordings.owner_id, recordings.project_id, recordings.title, recordings.status,
+        recordings.source, recordings.duration_seconds, recordings.storage_key, recordings.created_at,
+        recordings.updated_at, recordings.original_filename, recordings.mime_type, recordings.file_size_bytes,
+        recordings.auto_named, projects.name as project_name, projects.color as project_color
+      from recordings
+      left join projects on projects.id = recordings.project_id
+      where (recordings.owner_id = $1 or recordings.owner_id is null)
+        and ($2 = '' or recordings.title ilike '%' || $2 || '%'
+          or recordings.original_filename ilike '%' || $2 || '%'
+          or projects.name ilike '%' || $2 || '%'
+          or exists (
+            select 1
+            from transcripts
+            where transcripts.recording_id = recordings.id
+              and transcripts.text ilike '%' || $2 || '%'
+          ))
+        and ($3::uuid is null or recordings.project_id = $3::uuid)
+      order by recordings.created_at desc
+      limit 50
+    `,
+    [ownerId, search, projectId],
   );
 
   return result.rows.map(mapRecording);
@@ -273,8 +343,9 @@ export async function createRecording(input, ownerId) {
     `
       insert into recordings (owner_id, title, source, duration_seconds, storage_key)
       values ($1, $2, $3, $4, $5)
-      returning id, owner_id, title, status, source, duration_seconds, storage_key,
-        original_filename, mime_type, file_size_bytes, created_at, updated_at
+      returning id, owner_id, project_id, title, status, source, duration_seconds, storage_key,
+        original_filename, mime_type, file_size_bytes, auto_named, created_at, updated_at,
+        null as project_name, null as project_color
     `,
     [ownerId, title, source, input.durationSeconds || null, input.storageKey || null],
   );
@@ -286,7 +357,9 @@ export async function getRecording(id, ownerId) {
   const result = await query(
     `
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
-      , original_filename, mime_type, file_size_bytes
+      , original_filename, mime_type, file_size_bytes, auto_named, project_id,
+        (select name from projects where projects.id = recordings.project_id) as project_name,
+        (select color from projects where projects.id = recordings.project_id) as project_color
       from recordings
       where id = $1 and (owner_id = $2 or owner_id is null)
     `,
@@ -409,6 +482,51 @@ export async function summarizeRecording(recordingId, ownerId) {
 
     return { summary, tasks };
   });
+}
+
+export async function updateRecordingMetadata(recordingId, ownerId, input) {
+  const data = input && typeof input === 'object' ? input : {};
+  const hasTitle = Object.prototype.hasOwnProperty.call(data, 'title');
+  const hasProjectId = Object.prototype.hasOwnProperty.call(data, 'projectId');
+  const title = hasTitle && typeof data.title === 'string' ? data.title.trim() : null;
+  const projectId = hasProjectId && typeof data.projectId === 'string' && data.projectId.trim() ? data.projectId.trim() : null;
+
+  if (hasTitle && !title) {
+    throw new Error('Recording title is required');
+  }
+
+  const result = await query(
+    `
+      update recordings
+      set
+        title = case when $3 then $4 else recordings.title end,
+        project_id = case when $5 then $6::uuid else recordings.project_id end,
+        auto_named = case when $3 then false else recordings.auto_named end,
+        updated_at = now()
+      where recordings.id = $1
+        and (recordings.owner_id = $2 or recordings.owner_id is null)
+        and (
+          not $5
+          or $6::uuid is null
+          or exists (
+            select 1
+            from projects
+            where projects.id = $6::uuid
+              and (projects.owner_id = $2 or projects.owner_id is null)
+          )
+        )
+      returning
+        recordings.id, recordings.owner_id, recordings.project_id, recordings.title, recordings.status,
+        recordings.source, recordings.duration_seconds, recordings.storage_key, recordings.created_at,
+        recordings.updated_at, recordings.original_filename, recordings.mime_type, recordings.file_size_bytes,
+        recordings.auto_named,
+        (select name from projects where projects.id = recordings.project_id) as project_name,
+        (select color from projects where projects.id = recordings.project_id) as project_color
+    `,
+    [recordingId, ownerId, hasTitle, title, hasProjectId, projectId],
+  );
+
+  return result.rowCount ? mapRecording(result.rows[0]) : null;
 }
 
 export async function createRecordingTask(recordingId, ownerId, input) {
@@ -683,11 +801,34 @@ export async function deleteRecording(id, ownerId) {
 }
 
 export function registerRecordingRoutes(app) {
-  app.get('/api/recordings', requireAuth, async (c) => {
+  app.get('/api/projects', requireAuth, async (c) => {
     const user = getAuthUser(c);
 
     return c.json({
-      recordings: await listRecordings(user.id),
+      projects: await listProjects(user.id),
+    });
+  });
+
+  app.post('/api/projects', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+
+    try {
+      const project = await createProject(body, user.id);
+
+      return c.json({ project }, 201);
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to create project' }, 400);
+    }
+  });
+
+  app.get('/api/recordings', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const search = c.req.query('search') || '';
+    const projectId = c.req.query('projectId') || '';
+
+    return c.json({
+      recordings: await listRecordings(user.id, { search, projectId }),
     });
   });
 
@@ -733,6 +874,23 @@ export function registerRecordingRoutes(app) {
     }
 
     return c.body(Readable.toWeb(audio.stream), 200, headers);
+  });
+
+  app.patch('/api/recordings/:id', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+
+    try {
+      const recording = await updateRecordingMetadata(c.req.param('id'), user.id, body);
+
+      if (!recording) {
+        return c.json({ error: 'Recording not found' }, 404);
+      }
+
+      return c.json({ recording });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to update recording' }, 400);
+    }
   });
 
   app.post('/api/recordings/:id/audio', requireAuth, async (c) => {

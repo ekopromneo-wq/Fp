@@ -118,9 +118,16 @@ function App() {
   const [authMessage, setAuthMessage] = useState('');
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [recordings, setRecordings] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [selectedRecordingId, setSelectedRecordingId] = useState(null);
   const [selectedRecording, setSelectedRecording] = useState(null);
   const [status, setStatus] = useState('Загружаем записи...');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [projectFilter, setProjectFilter] = useState('');
+  const [recordingDraft, setRecordingDraft] = useState({ title: '', projectId: '' });
+  const [newProjectDraft, setNewProjectDraft] = useState({ name: '', color: '#235b4f' });
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [isSavingRecording, setIsSavingRecording] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -142,6 +149,8 @@ function App() {
     selectedRecording.status !== 'queued' &&
     selectedRecording.status !== 'processing' &&
     processingId !== selectedRecording.id;
+
+  const projectOptions = useMemo(() => projects, [projects]);
 
   async function loadCurrentUser() {
     setIsAuthLoading(true);
@@ -188,16 +197,42 @@ function App() {
 
     setCurrentUser(null);
     setRecordings([]);
+    setProjects([]);
     setSelectedRecordingId(null);
     setSelectedRecording(null);
     setStatus('');
+  }
+
+  async function loadProjects() {
+    try {
+      const response = await apiFetch('/api/projects');
+
+      if (!response.ok) {
+        throw new Error('Не удалось получить проекты');
+      }
+
+      const data = await response.json();
+      setProjects(data.projects || []);
+    } catch (error) {
+      setStatus(error.message || 'Ошибка загрузки проектов');
+    }
   }
 
   async function loadRecordings(nextSelectedId = selectedRecordingId) {
     setIsLoading(true);
 
     try {
-      const response = await apiFetch('/api/recordings');
+      const params = new URLSearchParams();
+
+      if (searchQuery.trim()) {
+        params.set('search', searchQuery.trim());
+      }
+
+      if (projectFilter) {
+        params.set('projectId', projectFilter);
+      }
+
+      const response = await apiFetch(`/api/recordings${params.toString() ? `?${params.toString()}` : ''}`);
 
       if (response.status === 401) {
         setCurrentUser(null);
@@ -269,15 +304,90 @@ function App() {
 
   useEffect(() => {
     if (currentUser) {
+      loadProjects();
       loadRecordings();
     }
-  }, [currentUser?.id]);
+  }, [currentUser?.id, searchQuery, projectFilter]);
 
   useEffect(() => {
     if (currentUser) {
       loadRecordingDetail(selectedRecordingId);
     }
   }, [selectedRecordingId, currentUser?.id]);
+
+  useEffect(() => {
+    setRecordingDraft({
+      title: selectedRecording?.title || '',
+      projectId: selectedRecording?.projectId || '',
+    });
+  }, [selectedRecording?.id, selectedRecording?.title, selectedRecording?.projectId]);
+
+  async function handleCreateProject(event) {
+    event.preventDefault();
+
+    if (!newProjectDraft.name.trim()) {
+      setStatus('Заполни название проекта');
+      return;
+    }
+
+    setIsCreatingProject(true);
+
+    try {
+      const response = await apiFetch('/api/projects', {
+        method: 'POST',
+        body: JSON.stringify(newProjectDraft),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось создать проект');
+      }
+
+      setProjects((current) => [...current, data.project].sort((a, b) => a.name.localeCompare(b.name)));
+      setNewProjectDraft({ name: '', color: '#235b4f' });
+      setStatus('Проект создан');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка создания проекта');
+    } finally {
+      setIsCreatingProject(false);
+    }
+  }
+
+  async function handleSaveRecordingMetadata() {
+    if (!selectedRecording) {
+      return;
+    }
+
+    if (!recordingDraft.title.trim()) {
+      setStatus('Заполни название записи');
+      return;
+    }
+
+    setIsSavingRecording(true);
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: recordingDraft.title,
+          projectId: recordingDraft.projectId || null,
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось сохранить запись');
+      }
+
+      setSelectedRecording((current) => (current?.id === data.recording.id ? { ...current, ...data.recording } : current));
+      setRecordings((current) => current.map((recording) => (recording.id === data.recording.id ? { ...recording, ...data.recording } : recording)));
+      setStatus('Запись сохранена');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка сохранения записи');
+    } finally {
+      setIsSavingRecording(false);
+    }
+  }
 
   useEffect(() => {
     if (!currentUser || !selectedRecordingId || !isProcessingStatus(selectedRecording?.status)) {
@@ -733,6 +843,47 @@ function App() {
         </div>
       </section>
 
+      <section className="library-controls" aria-label="Фильтры библиотеки">
+        <label>
+          Поиск
+          <input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Название, файл, проект или текст стенограммы"
+          />
+        </label>
+
+        <label>
+          Проект
+          <select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}>
+            <option value="">Все проекты</option>
+            {projectOptions.map((project) => (
+              <option value={project.id} key={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <form className="project-create-form" onSubmit={handleCreateProject}>
+          <input
+            value={newProjectDraft.name}
+            onChange={(event) => setNewProjectDraft((current) => ({ ...current, name: event.target.value }))}
+            placeholder="Новый проект"
+          />
+          <input
+            className="project-color-input"
+            value={newProjectDraft.color}
+            onChange={(event) => setNewProjectDraft((current) => ({ ...current, color: event.target.value }))}
+            type="color"
+            aria-label="Цвет проекта"
+          />
+          <button className="button button-secondary" type="submit" disabled={isCreatingProject}>
+            {isCreatingProject ? 'Создаём...' : 'Создать'}
+          </button>
+        </form>
+      </section>
+
       <section className="status-line" aria-live="polite">
         {status || (hasRecordings ? `${recordings.length} записей в библиотеке` : 'Записей пока нет')}
       </section>
@@ -763,6 +914,11 @@ function App() {
                 <div className="recording-meta">
                   <span>{recording.originalFilename || 'файл не прикреплен'}</span>
                   <span>{formatFileSize(recording.fileSizeBytes)}</span>
+                  {recording.project ? (
+                    <span className="project-chip" style={{ '--project-color': recording.project.color }}>
+                      {recording.project.name}
+                    </span>
+                  ) : null}
                   <span>{formatDate(recording.createdAt)}</span>
                 </div>
 
@@ -819,6 +975,35 @@ function App() {
                   {isSummarizing ? 'Готовим...' : 'Сделать протокол'}
                 </button>
               </div>
+
+              <section className="recording-edit-panel" aria-label="Редактирование записи">
+                <label>
+                  Название
+                  <input
+                    value={recordingDraft.title}
+                    onChange={(event) => setRecordingDraft((current) => ({ ...current, title: event.target.value }))}
+                  />
+                </label>
+
+                <label>
+                  Проект
+                  <select
+                    value={recordingDraft.projectId}
+                    onChange={(event) => setRecordingDraft((current) => ({ ...current, projectId: event.target.value }))}
+                  >
+                    <option value="">Без проекта</option>
+                    {projectOptions.map((project) => (
+                      <option value={project.id} key={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <button className="button button-secondary" type="button" onClick={handleSaveRecordingMetadata} disabled={isSavingRecording}>
+                  {isSavingRecording ? 'Сохраняем...' : 'Сохранить запись'}
+                </button>
+              </section>
 
               <dl className="detail-grid">
                 <div>

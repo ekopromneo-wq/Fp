@@ -143,6 +143,27 @@ const migrations = [
       create index if not exists recording_speakers_recording_id_idx on recording_speakers(recording_id);
     `,
   },
+  {
+    id: '007_projects_recording_metadata',
+    sql: `
+      create table if not exists projects (
+        id uuid primary key default gen_random_uuid(),
+        owner_id uuid references app_users(id) on delete set null,
+        name text not null,
+        color text not null default '#235b4f',
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      );
+
+      alter table recordings
+        add column if not exists project_id uuid references projects(id) on delete set null,
+        add column if not exists auto_named boolean not null default false;
+
+      create index if not exists projects_owner_id_idx on projects(owner_id);
+      create index if not exists projects_created_at_idx on projects(created_at desc);
+      create index if not exists recordings_project_id_idx on recordings(project_id);
+    `,
+  },
 ];
 
 export async function runMigrations() {

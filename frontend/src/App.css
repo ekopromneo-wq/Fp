@@ -22,6 +22,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -232,6 +233,49 @@ h3 {
   font-size: 0.95rem;
 }
 
+.library-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, 220px) minmax(280px, 360px);
+  gap: 10px;
+  align-items: end;
+  padding: 16px 0 4px;
+}
+
+.library-controls label,
+.recording-edit-panel label {
+  display: grid;
+  gap: 6px;
+  color: #69756d;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.library-controls input,
+.library-controls select,
+.recording-edit-panel input,
+.recording-edit-panel select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid #cbd4cd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #19201d;
+  padding: 0 10px;
+  text-transform: none;
+}
+
+.project-create-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.project-color-input {
+  padding: 3px !important;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
@@ -323,6 +367,15 @@ h3 {
   font-size: 0.9rem;
 }
 
+.project-chip {
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: #1d2822;
+  background: color-mix(in srgb, var(--project-color, #235b4f) 18%, #ffffff);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .storage-key {
   display: block;
   overflow: hidden;
@@ -376,6 +429,20 @@ h3 {
 
 .detail-actions .button {
   flex: 1 1 160px;
+}
+
+.recording-edit-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  border: 1px solid #e2e7e0;
+  border-radius: 8px;
+  background: #fbfcf9;
+  padding: 12px;
+}
+
+.recording-edit-panel .button {
+  width: 100%;
 }
 
 .detail-grid {
@@ -655,6 +722,11 @@ audio {
   .actions,
   .button {
     width: 100%;
+  }
+
+  .library-controls,
+  .project-create-form {
+    grid-template-columns: 1fr;
   }
 
   .recording-title-row {

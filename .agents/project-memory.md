@@ -8,10 +8,12 @@
   - MinIO console: http://localhost:9001
   - MinIO default credentials: `minioadmin` / `minioadmin`
 - Recordings API currently supports:
-  - `GET /api/recordings` for the latest 50 recordings.
+  - `GET /api/projects` and `POST /api/projects` for basic project organization.
+  - `GET /api/recordings` for the latest 50 recordings, with optional `search` and `projectId` query filters.
   - `POST /api/recordings` to create recording metadata.
   - `POST /api/recordings/:id/audio` to attach an uploaded audio file.
   - `GET /api/recordings/:id` for details, jobs, and latest transcript.
+  - `PATCH /api/recordings/:id` to edit title and project assignment.
   - `POST /api/recordings/:id/jobs` to enqueue processing.
   - `POST /api/recordings/:recordingId/tasks` to add a manual confirmed task.
   - `PATCH /api/recordings/:recordingId/tasks/:taskId` to edit extracted task fields and status.
@@ -31,6 +33,7 @@
   - Deletes recordings via the backend `DELETE` endpoint.
   - Shows login/register before the recordings workspace.
   - Shows selected recording details, audio playback, latest transcript, job history, and a processing trigger.
+  - Shows library search, project filter, project creation, and title/project editing for the selected recording.
   - Shows extracted/manual tasks with inline editing for assignee, due text, description, confirmation, dismissal, hard delete, and manual add.
   - Shows transcript speaker labels with inline editing for display name, contact name, and email.
   - Styles live in `frontend/src/App.css`.
@@ -48,4 +51,8 @@
   - Recording details derive speaker labels from latest transcript `segments[].speaker`.
   - Manual speaker names and contact hints are stored in `recording_speakers`.
   - Current ASR fallback creates a single `speaker_1` segment; full automatic diarization remains a later provider/service step.
+- Projects/search:
+  - Projects are stored in `projects`; recordings have nullable `project_id` and `auto_named`.
+  - Search checks recording title, original filename, project name, and transcript text.
+  - Project deletion/editing and AI auto-title generation are not implemented yet.
 - On this Windows + Docker setup, Vite/nodemon may not always see bind-mounted file changes immediately. Recreating the relevant service with `docker-compose up -d --force-recreate web` or `api` refreshed the running code.
