@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
@@ -216,6 +216,10 @@ function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage
 }
 
 function App() {
+  const mediaRecorderRef = useRef(null);
+  const micStreamRef = useRef(null);
+  const micChunksRef = useRef([]);
+  const micStartedAtRef = useRef(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState('login');
@@ -237,6 +241,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isMicRecording, setIsMicRecording] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [savingTaskId, setSavingTaskId] = useState(null);
   const [deletingTaskId, setDeletingTaskId] = useState(null);
@@ -621,14 +626,20 @@ function App() {
     return () => window.clearInterval(intervalId);
   }, [currentUser?.id, selectedRecordingId, selectedRecording?.status]);
 
-  async function handleFileChange(event) {
-    const file = event.target.files?.[0];
-    event.target.value = '';
+  useEffect(() => {
+    return () => {
+      const recorder = mediaRecorderRef.current;
 
-    if (!file) {
-      return;
-    }
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.onstop = null;
+        recorder.stop();
+      }
 
+      micStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  async function uploadRecordingFile(file, source = 'frontend-upload') {
     setIsUploading(true);
     setStatus(`Загружаем ${file.name}...`);
 
@@ -637,7 +648,7 @@ function App() {
         method: 'POST',
         body: JSON.stringify({
           title: file.name.replace(/\.[^.]+$/, '') || file.name,
-          source: 'frontend-upload',
+          source,
         }),
       });
 
@@ -665,6 +676,98 @@ function App() {
     } finally {
       setIsUploading(false);
     }
+  }
+
+  async function handleFileChange(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    await uploadRecordingFile(file);
+  }
+
+  async function startMicRecording() {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setStatus('Запись с микрофона не поддерживается в этом браузере');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const options = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? { mimeType: 'audio/webm;codecs=opus' } : {};
+      const recorder = new MediaRecorder(stream, options);
+
+      micChunksRef.current = [];
+      micStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      micStartedAtRef.current = new Date();
+
+      recorder.ondataavailable = (event) => {
+        if (event.data?.size) {
+          micChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const chunks = micChunksRef.current;
+        const mimeType = recorder.mimeType || 'audio/webm';
+        const extension = mimeType.includes('ogg') ? 'ogg' : 'webm';
+        const startedAt = micStartedAtRef.current || new Date();
+        const filename = `mic-recording-${startedAt.toISOString().replace(/[:.]/g, '-')}.${extension}`;
+
+        stream.getTracks().forEach((track) => track.stop());
+        micStreamRef.current = null;
+        mediaRecorderRef.current = null;
+        micStartedAtRef.current = null;
+        setIsMicRecording(false);
+
+        if (!chunks.length) {
+          setStatus('Микрофонная запись пустая');
+          return;
+        }
+
+        const file = new File([new Blob(chunks, { type: mimeType })], filename, { type: mimeType });
+        micChunksRef.current = [];
+        await uploadRecordingFile(file, 'frontend-microphone');
+      };
+
+      recorder.start();
+      setIsMicRecording(true);
+      setStatus('Идёт запись с микрофона...');
+    } catch (error) {
+      micStreamRef.current?.getTracks().forEach((track) => track.stop());
+      micStreamRef.current = null;
+      mediaRecorderRef.current = null;
+      setIsMicRecording(false);
+      setStatus(error.name === 'NotAllowedError' ? 'Доступ к микрофону запрещён' : error.message || 'Не удалось начать запись');
+    }
+  }
+
+  function stopMicRecording() {
+    const recorder = mediaRecorderRef.current;
+
+    if (recorder && recorder.state !== 'inactive') {
+      setStatus('Останавливаем запись...');
+      recorder.stop();
+      return;
+    }
+
+    micStreamRef.current?.getTracks().forEach((track) => track.stop());
+    micStreamRef.current = null;
+    mediaRecorderRef.current = null;
+    setIsMicRecording(false);
+  }
+
+  function handleMicRecordingToggle() {
+    if (isMicRecording) {
+      stopMicRecording();
+      return;
+    }
+
+    startMicRecording();
   }
 
   async function handleProcess(recording) {
@@ -1109,14 +1212,41 @@ function App() {
               </button>
             ) : (
               <>
-                <button className="button button-secondary" type="button" onClick={() => loadRecordings()} disabled={isLoading || isUploading}>
-                  Обновить
+                <label
+                  className={`button button-primary icon-button ${isUploading || isMicRecording ? 'is-disabled' : ''}`}
+                  aria-label="Загрузить запись"
+                  title="Загрузить запись"
+                >
+                  <input
+                    type="file"
+                    accept="audio/*,video/webm,.webm,.mp3,.wav,.m4a,.ogg"
+                    onChange={handleFileChange}
+                    disabled={isUploading || isMicRecording}
+                  />
+                  ⬆
+                </label>
+
+                <button
+                  className={`button icon-button ${isMicRecording ? 'button-danger' : 'button-secondary'}`}
+                  type="button"
+                  onClick={handleMicRecordingToggle}
+                  disabled={isUploading}
+                  aria-label={isMicRecording ? 'Остановить запись' : 'Записать с микрофона'}
+                  title={isMicRecording ? 'Остановить запись' : 'Записать с микрофона'}
+                >
+                  🎙
                 </button>
 
-                <label className={`button button-primary ${isUploading ? 'is-disabled' : ''}`}>
-                  <input type="file" accept="audio/*,video/webm,.webm,.mp3,.wav,.m4a,.ogg" onChange={handleFileChange} disabled={isUploading} />
-                  {isUploading ? 'Загрузка...' : 'Загрузить запись'}
-                </label>
+                <button
+                  className="button button-secondary icon-button"
+                  type="button"
+                  onClick={() => loadRecordings()}
+                  disabled={isLoading || isUploading || isMicRecording}
+                  aria-label="Обновить"
+                  title="Обновить"
+                >
+                  ↻
+                </button>
               </>
             )}
 

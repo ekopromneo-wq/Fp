@@ -33,6 +33,7 @@
 - Frontend `frontend/src/App.jsx` is a basic recordings UI:
   - Lists recordings from the backend.
   - Uploads audio files by creating a recording first, then posting multipart `file`.
+  - Can record directly from the browser microphone via MediaRecorder and upload the captured WebM audio through the same audio attach flow.
   - Deletes recordings via the backend `DELETE` endpoint.
   - Shows login/register before the recordings workspace.
   - Shows selected recording details, audio playback, latest transcript, job history, and a processing trigger.
