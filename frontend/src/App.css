@@ -288,7 +288,8 @@ h3 {
   gap: 8px;
 }
 
-.recording-row,
+.recording-selector,
+.recording-summary,
 .empty-state,
 .detail-panel {
   border: 1px solid #d9dfd8;
@@ -297,54 +298,33 @@ h3 {
   box-shadow: 0 12px 28px rgba(29, 39, 33, 0.06);
 }
 
-.recording-row {
+.recording-selector {
   display: grid;
-  gap: 0;
-  overflow: hidden;
-}
-
-.recording-row.is-selected {
-  border-color: #235b4f;
-  box-shadow: 0 0 0 1px #235b4f inset, 0 12px 28px rgba(29, 39, 33, 0.06);
-}
-
-.recording-toggle {
-  display: grid;
-  width: 100%;
-  min-height: 52px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
   gap: 12px;
-  border: 0;
-  background: transparent;
-  color: #18221d;
-  cursor: pointer;
-  padding: 0 16px;
-  text-align: left;
+  padding: 14px 16px;
 }
 
-.recording-toggle span:first-child {
-  overflow: hidden;
-  min-width: 0;
+.recording-selector label {
+  color: #4d5a52;
+  font-size: 0.84rem;
   font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.recording-toggle:hover {
-  background: #f4f8f5;
+.recording-selector select {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid #cbd4cd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #18221d;
+  padding: 0 12px;
+  font-weight: 800;
 }
 
-.recording-chevron {
-  color: #66736b;
-  font-size: 0.9rem;
-}
-
-.recording-dropdown {
+.recording-summary {
   display: grid;
   gap: 12px;
-  border-top: 1px solid #e2e7e0;
-  padding: 12px 16px 16px;
+  padding: 14px 16px;
 }
 
 .status-pill {
@@ -382,11 +362,11 @@ h3 {
   font-size: 0.9rem;
 }
 
-.recording-dropdown .recording-meta {
+.recording-summary .recording-meta {
   margin-top: 0;
 }
 
-.recording-dropdown-actions {
+.recording-summary-actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -395,7 +375,7 @@ h3 {
   font-size: 0.9rem;
 }
 
-.recording-dropdown-actions span {
+.recording-summary-actions span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -771,8 +751,7 @@ audio {
     padding: 20px 0;
   }
 
-  .topbar,
-  .recording-row {
+  .topbar {
     align-items: stretch;
     grid-template-columns: 1fr;
   }
@@ -794,15 +773,6 @@ audio {
   .library-controls,
   .project-create-form {
     grid-template-columns: 1fr;
-  }
-
-  .recording-title-row {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .recording-title-row h2 {
-    white-space: normal;
   }
 
   .detail-grid {

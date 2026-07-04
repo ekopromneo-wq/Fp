@@ -145,6 +145,10 @@ function App() {
 
   const hasRecordings = recordings.length > 0;
   const sortedRecordings = useMemo(() => recordings, [recordings]);
+  const selectedListRecording = useMemo(
+    () => sortedRecordings.find((recording) => recording.id === selectedRecordingId) || null,
+    [selectedRecordingId, sortedRecordings],
+  );
   const canProcessSelected =
     selectedRecording &&
     selectedRecording.status !== 'queued' &&
@@ -929,52 +933,50 @@ function App() {
             </div>
           ) : null}
 
-          {sortedRecordings.map((recording) => (
-            <article
-              className={`recording-row ${selectedRecordingId === recording.id ? 'is-selected' : ''}`}
-              key={recording.id}
-            >
-              <button
-                className="recording-toggle"
-                type="button"
-                onClick={() => setSelectedRecordingId(selectedRecordingId === recording.id ? null : recording.id)}
-                aria-expanded={selectedRecordingId === recording.id}
-                aria-label={`${selectedRecordingId === recording.id ? 'Свернуть' : 'Открыть'} ${recording.originalFilename || recording.title}`}
+          {hasRecordings ? (
+            <div className="recording-selector">
+              <label htmlFor="recording-select">Запись</label>
+              <select
+                id="recording-select"
+                value={selectedRecordingId || ''}
+                onChange={(event) => setSelectedRecordingId(event.target.value || null)}
               >
-                <span>{recording.originalFilename || recording.title}</span>
-                <span className="recording-chevron" aria-hidden="true">
-                  {selectedRecordingId === recording.id ? '▴' : '▾'}
-                </span>
-              </button>
+                <option value="">Выбери запись</option>
+                {sortedRecordings.map((recording) => (
+                  <option value={recording.id} key={recording.id}>
+                    {recording.originalFilename || recording.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
 
-              {selectedRecordingId === recording.id ? (
-                <div className="recording-dropdown">
-                  <div className="recording-meta">
-                    <span>{formatFileSize(recording.fileSizeBytes)}</span>
-                    <span>{formatDate(recording.createdAt)}</span>
-                    <span className={`status-pill status-${recording.status}`}>{recording.status}</span>
-                    {recording.project ? (
-                      <span className="project-chip" style={{ '--project-color': recording.project.color }}>
-                        {recording.project.name}
-                      </span>
-                    ) : null}
-                  </div>
+          {selectedListRecording ? (
+            <article className="recording-summary">
+              <div className="recording-meta">
+                <span>{formatFileSize(selectedListRecording.fileSizeBytes)}</span>
+                <span>{formatDate(selectedListRecording.createdAt)}</span>
+                <span className={`status-pill status-${selectedListRecording.status}`}>{selectedListRecording.status}</span>
+                {selectedListRecording.project ? (
+                  <span className="project-chip" style={{ '--project-color': selectedListRecording.project.color }}>
+                    {selectedListRecording.project.name}
+                  </span>
+                ) : null}
+              </div>
 
-                  <div className="recording-dropdown-actions">
-                    <span>{recording.title}</span>
-                    <button
-                      className="button button-danger"
-                      type="button"
-                      onClick={() => handleDelete(recording)}
-                      disabled={deletingId === recording.id}
-                    >
-                      {deletingId === recording.id ? 'Удаляем...' : 'Удалить'}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
+              <div className="recording-summary-actions">
+                <span>{selectedListRecording.title}</span>
+                <button
+                  className="button button-danger"
+                  type="button"
+                  onClick={() => handleDelete(selectedListRecording)}
+                  disabled={deletingId === selectedListRecording.id}
+                >
+                  {deletingId === selectedListRecording.id ? 'Удаляем...' : 'Удалить'}
+                </button>
+              </div>
             </article>
-          ))}
+          ) : null}
         </section>
 
         <aside className="detail-panel" aria-label="Детали записи">
