@@ -22,23 +22,36 @@ function formatFileSize(bytes) {
   }
 
   if (bytes < 1024 * 1024) {
-    return `${Math.round(bytes / 1024)} KB`;
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   }
 
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function getAudioUrl(recording) {
+  return recording?.storageKey ? `${apiBaseUrl}/api/recordings/${recording.id}/audio` : '';
+}
+
 function App() {
   const [recordings, setRecordings] = useState([]);
+  const [selectedRecordingId, setSelectedRecordingId] = useState(null);
+  const [selectedRecording, setSelectedRecording] = useState(null);
   const [status, setStatus] = useState('Загружаем записи...');
   const [isLoading, setIsLoading] = useState(true);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [processingId, setProcessingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
   const hasRecordings = recordings.length > 0;
   const sortedRecordings = useMemo(() => recordings, [recordings]);
+  const canProcessSelected =
+    selectedRecording &&
+    selectedRecording.status !== 'queued' &&
+    selectedRecording.status !== 'processing' &&
+    processingId !== selectedRecording.id;
 
-  async function loadRecordings() {
+  async function loadRecordings(nextSelectedId = selectedRecordingId) {
     setIsLoading(true);
 
     try {
@@ -49,18 +62,55 @@ function App() {
       }
 
       const data = await response.json();
-      setRecordings(data.recordings || []);
+      const nextRecordings = data.recordings || [];
+      setRecordings(nextRecordings);
+
+      const fallbackId = nextRecordings[0]?.id || null;
+      const existingId = nextRecordings.some((recording) => recording.id === nextSelectedId) ? nextSelectedId : fallbackId;
+      setSelectedRecordingId(existingId);
       setStatus('');
+
+      return nextRecordings;
     } catch (error) {
       setStatus(error.message || 'Backend недоступен');
+      return [];
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function loadRecordingDetail(recordingId) {
+    if (!recordingId) {
+      setSelectedRecording(null);
+      return;
+    }
+
+    setIsDetailLoading(true);
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/recordings/${recordingId}`);
+
+      if (!response.ok) {
+        throw new Error('Не удалось получить запись');
+      }
+
+      const data = await response.json();
+      setSelectedRecording(data.recording);
+    } catch (error) {
+      setStatus(error.message || 'Не удалось открыть запись');
+      setSelectedRecording(null);
+    } finally {
+      setIsDetailLoading(false);
     }
   }
 
   useEffect(() => {
     loadRecordings();
   }, []);
+
+  useEffect(() => {
+    loadRecordingDetail(selectedRecordingId);
+  }, [selectedRecordingId]);
 
   async function handleFileChange(event) {
     const file = event.target.files?.[0];
@@ -102,12 +152,39 @@ function App() {
         throw new Error('Не удалось загрузить файл');
       }
 
-      await loadRecordings();
+      await loadRecordings(createData.recording.id);
       setStatus(`Запись "${file.name}" загружена`);
     } catch (error) {
       setStatus(error.message || 'Ошибка загрузки');
     } finally {
       setIsUploading(false);
+    }
+  }
+
+  async function handleProcess(recording) {
+    if (!recording) {
+      return;
+    }
+
+    setProcessingId(recording.id);
+    setStatus(`Запускаем обработку "${recording.title}"...`);
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/recordings/${recording.id}/jobs`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error('Не удалось запустить обработку');
+      }
+
+      await loadRecordings(recording.id);
+      await loadRecordingDetail(recording.id);
+      setStatus(`Обработка "${recording.title}" поставлена в очередь`);
+    } catch (error) {
+      setStatus(error.message || 'Ошибка запуска обработки');
+    } finally {
+      setProcessingId(null);
     }
   }
 
@@ -130,7 +207,10 @@ function App() {
         throw new Error('Не удалось удалить запись');
       }
 
-      setRecordings((current) => current.filter((item) => item.id !== recording.id));
+      const nextSelectedId = selectedRecordingId === recording.id ? null : selectedRecordingId;
+      setSelectedRecordingId(nextSelectedId);
+      setSelectedRecording((current) => (current?.id === recording.id ? null : current));
+      await loadRecordings(nextSelectedId);
       setStatus(`Запись "${recording.title}" удалена`);
     } catch (error) {
       setStatus(error.message || 'Ошибка удаления');
@@ -148,7 +228,7 @@ function App() {
         </div>
 
         <div className="actions">
-          <button className="button button-secondary" type="button" onClick={loadRecordings} disabled={isLoading || isUploading}>
+          <button className="button button-secondary" type="button" onClick={() => loadRecordings()} disabled={isLoading || isUploading}>
             Обновить
           </button>
 
@@ -163,43 +243,142 @@ function App() {
         {status || (hasRecordings ? `${recordings.length} записей в библиотеке` : 'Записей пока нет')}
       </section>
 
-      <section className="recording-list" aria-label="Список записей">
-        {isLoading && !hasRecordings ? <div className="empty-state">Получаем список записей...</div> : null}
+      <section className="workspace" aria-label="Рабочая область записей">
+        <section className="recording-list" aria-label="Список записей">
+          {isLoading && !hasRecordings ? <div className="empty-state">Получаем список записей...</div> : null}
 
-        {!isLoading && !hasRecordings ? (
-          <div className="empty-state">
-            <h2>Нет загруженных записей</h2>
-            <p>Добавь первый аудиофайл через кнопку загрузки.</p>
-          </div>
-        ) : null}
-
-        {sortedRecordings.map((recording) => (
-          <article className="recording-row" key={recording.id}>
-            <div className="recording-main">
-              <div className="recording-title-row">
-                <h2>{recording.title}</h2>
-                <span className={`status-pill status-${recording.status}`}>{recording.status}</span>
-              </div>
-
-              <div className="recording-meta">
-                <span>{recording.originalFilename || 'файл не прикреплен'}</span>
-                <span>{formatFileSize(recording.fileSizeBytes)}</span>
-                <span>{formatDate(recording.createdAt)}</span>
-              </div>
-
-              {recording.storageKey ? <code className="storage-key">{recording.storageKey}</code> : null}
+          {!isLoading && !hasRecordings ? (
+            <div className="empty-state">
+              <h2>Нет загруженных записей</h2>
+              <p>Добавь первый аудиофайл через кнопку загрузки.</p>
             </div>
+          ) : null}
 
-            <button
-              className="button button-danger"
-              type="button"
-              onClick={() => handleDelete(recording)}
-              disabled={deletingId === recording.id}
+          {sortedRecordings.map((recording) => (
+            <article
+              className={`recording-row ${selectedRecordingId === recording.id ? 'is-selected' : ''}`}
+              key={recording.id}
+              onClick={() => setSelectedRecordingId(recording.id)}
             >
-              {deletingId === recording.id ? 'Удаляем...' : 'Удалить'}
-            </button>
-          </article>
-        ))}
+              <div className="recording-main">
+                <div className="recording-title-row">
+                  <h2>{recording.title}</h2>
+                  <span className={`status-pill status-${recording.status}`}>{recording.status}</span>
+                </div>
+
+                <div className="recording-meta">
+                  <span>{recording.originalFilename || 'файл не прикреплен'}</span>
+                  <span>{formatFileSize(recording.fileSizeBytes)}</span>
+                  <span>{formatDate(recording.createdAt)}</span>
+                </div>
+
+                {recording.storageKey ? <code className="storage-key">{recording.storageKey}</code> : null}
+              </div>
+
+              <button
+                className="button button-danger"
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleDelete(recording);
+                }}
+                disabled={deletingId === recording.id}
+              >
+                {deletingId === recording.id ? 'Удаляем...' : 'Удалить'}
+              </button>
+            </article>
+          ))}
+        </section>
+
+        <aside className="detail-panel" aria-label="Детали записи">
+          {!selectedRecordingId ? (
+            <div className="empty-state detail-empty">Выбери запись, чтобы увидеть детали.</div>
+          ) : null}
+
+          {selectedRecordingId && isDetailLoading ? <div className="empty-state detail-empty">Открываем запись...</div> : null}
+
+          {selectedRecording && !isDetailLoading ? (
+            <>
+              <div className="detail-header">
+                <div>
+                  <p className="eyebrow">Детали</p>
+                  <h2>{selectedRecording.title}</h2>
+                </div>
+                <span className={`status-pill status-${selectedRecording.status}`}>{selectedRecording.status}</span>
+              </div>
+
+              <div className="detail-actions">
+                <button
+                  className="button button-primary"
+                  type="button"
+                  onClick={() => handleProcess(selectedRecording)}
+                  disabled={!canProcessSelected}
+                >
+                  {processingId === selectedRecording.id ? 'Запускаем...' : 'Запустить обработку'}
+                </button>
+              </div>
+
+              <dl className="detail-grid">
+                <div>
+                  <dt>Файл</dt>
+                  <dd>{selectedRecording.originalFilename || 'не прикреплен'}</dd>
+                </div>
+                <div>
+                  <dt>Размер</dt>
+                  <dd>{formatFileSize(selectedRecording.fileSizeBytes)}</dd>
+                </div>
+                <div>
+                  <dt>Источник</dt>
+                  <dd>{selectedRecording.source}</dd>
+                </div>
+                <div>
+                  <dt>Создана</dt>
+                  <dd>{formatDate(selectedRecording.createdAt)}</dd>
+                </div>
+              </dl>
+
+              {selectedRecording.storageKey ? (
+                <section className="detail-section">
+                  <h3>Аудио</h3>
+                  <audio controls preload="metadata" src={getAudioUrl(selectedRecording)} />
+                </section>
+              ) : (
+                <section className="detail-section muted-section">
+                  <h3>Аудио</h3>
+                  <p>К этой записи пока не прикреплен файл.</p>
+                </section>
+              )}
+
+              <section className="detail-section">
+                <h3>Стенограмма</h3>
+                {selectedRecording.transcript ? (
+                  <p className="transcript-text">{selectedRecording.transcript.text}</p>
+                ) : (
+                  <p className="muted-text">Стенограммы пока нет. Запусти обработку записи.</p>
+                )}
+              </section>
+
+              <section className="detail-section">
+                <h3>Jobs</h3>
+                {selectedRecording.jobs?.length ? (
+                  <div className="job-list">
+                    {selectedRecording.jobs.map((job) => (
+                      <div className="job-row" key={job.id}>
+                        <div>
+                          <strong>{job.status}</strong>
+                          <span>{formatDate(job.createdAt)}</span>
+                        </div>
+                        {job.error ? <p>{job.error}</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted-text">Обработки ещё не запускались.</p>
+                )}
+              </section>
+            </>
+          ) : null}
+        </aside>
       </section>
     </main>
   );

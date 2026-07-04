@@ -48,3 +48,11 @@ export async function deleteRecordingAudio(storageKey) {
 
   await storageClient.removeObject(audioBucket, storageKey);
 }
+
+export async function getRecordingAudioStream(storageKey) {
+  if (!storageKey) {
+    return null;
+  }
+
+  return storageClient.getObject(audioBucket, storageKey);
+}

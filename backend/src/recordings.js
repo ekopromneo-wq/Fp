@@ -1,6 +1,7 @@
 import { createRecordingQueue } from './queue.js';
 import { query, transaction } from './db.js';
-import { deleteRecordingAudio, saveRecordingAudio } from './storage.js';
+import { Readable } from 'node:stream';
+import { deleteRecordingAudio, getRecordingAudioStream, saveRecordingAudio } from './storage.js';
 
 const queue = createRecordingQueue();
 
@@ -123,6 +124,35 @@ export async function getRecording(id) {
   };
 }
 
+export async function getRecordingAudio(id) {
+  const result = await query(
+    `
+      select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at,
+        original_filename, mime_type, file_size_bytes
+      from recordings
+      where id = $1
+    `,
+    [id],
+  );
+
+  if (result.rowCount === 0) {
+    return null;
+  }
+
+  const recording = result.rows[0];
+
+  if (!recording.storage_key) {
+    return { recording: mapRecording(recording), stream: null };
+  }
+
+  const stream = await getRecordingAudioStream(recording.storage_key);
+
+  return {
+    recording: mapRecording(recording),
+    stream,
+  };
+}
+
 export async function enqueueRecording(recordingId) {
   const job = await transaction(async (client) => {
     const recording = await client.query('select id from recordings where id = $1', [recordingId]);
@@ -242,6 +272,30 @@ export function registerRecordingRoutes(app) {
     }
 
     return c.json({ recording });
+  });
+
+  app.get('/api/recordings/:id/audio', async (c) => {
+    const audio = await getRecordingAudio(c.req.param('id'));
+
+    if (!audio) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    if (!audio.stream) {
+      return c.json({ error: 'Recording audio not found' }, 404);
+    }
+
+    const filename = audio.recording.originalFilename || 'recording-audio';
+    const headers = {
+      'Content-Type': audio.recording.mimeType || 'application/octet-stream',
+      'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    };
+
+    if (audio.recording.fileSizeBytes) {
+      headers['Content-Length'] = String(audio.recording.fileSizeBytes);
+    }
+
+    return c.body(Readable.toWeb(audio.stream), 200, headers);
   });
 
   app.post('/api/recordings/:id/audio', async (c) => {
