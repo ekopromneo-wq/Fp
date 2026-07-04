@@ -142,6 +142,7 @@ function App() {
   const [newTaskDraft, setNewTaskDraft] = useState({ assignee: '', dueText: '', description: '' });
   const [processingId, setProcessingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [isJobsCollapsed, setIsJobsCollapsed] = useState(false);
 
   const hasRecordings = recordings.length > 0;
   const sortedRecordings = useMemo(() => recordings, [recordings]);
@@ -1340,23 +1341,31 @@ function App() {
                 )}
               </section>
 
-              <section className="detail-section">
-                <h3>Jobs</h3>
-                {selectedRecording.jobs?.length ? (
-                  <div className="job-list">
-                    {selectedRecording.jobs.map((job) => (
-                      <div className="job-row" key={job.id}>
-                        <div>
-                          <strong>{job.status}</strong>
-                          <span>{formatDate(job.createdAt)}</span>
+              <section className="detail-section detail-section-jobs">
+                <div className="jobs-header">
+                  <h3>Jobs</h3>
+                  <button className="button button-secondary" type="button" onClick={() => setIsJobsCollapsed((current) => !current)}>
+                    {isJobsCollapsed ? 'Развернуть' : 'Свернуть'}
+                  </button>
+                </div>
+
+                {!isJobsCollapsed ? (
+                  selectedRecording.jobs?.length ? (
+                    <div className="job-list">
+                      {selectedRecording.jobs.map((job) => (
+                        <div className="job-row" key={job.id}>
+                          <div>
+                            <strong>{job.status}</strong>
+                            <span>{formatDate(job.createdAt)}</span>
+                          </div>
+                          {job.error ? <p>{job.error}</p> : null}
                         </div>
-                        {job.error ? <p>{job.error}</p> : null}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="muted-text">Обработки ещё не запускались.</p>
-                )}
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="muted-text">Обработки ещё не запускались.</p>
+                  )
+                ) : null}
               </section>
             </>
           ) : null}

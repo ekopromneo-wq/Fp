@@ -498,6 +498,10 @@ h3 {
   grid-column: span 2;
 }
 
+.detail-section-jobs {
+  grid-column: 1 / -1;
+}
+
 .detail-grid div,
 .detail-section,
 .job-row {
@@ -711,6 +715,19 @@ audio {
 .job-list {
   display: grid;
   gap: 8px;
+}
+
+.jobs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.jobs-header .button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 12px;
 }
 
 .job-row {
