@@ -15,6 +15,7 @@
   - `GET /api/recordings/:id` for details, jobs, and latest transcript.
   - `PATCH /api/recordings/:id` to edit title and project assignment.
   - `POST /api/recordings/:id/title-suggestion` to generate and apply an AI title from transcript/summary.
+  - `POST /api/recordings/:id/email` to send the current protocol/tasks email through SMTP env config.
   - `POST /api/recordings/:id/jobs` to enqueue processing.
   - `POST /api/recordings/:recordingId/tasks` to add a manual confirmed task.
   - `PATCH /api/recordings/:recordingId/tasks/:taskId` to edit extracted task fields and status.
@@ -36,6 +37,7 @@
   - Shows selected recording details, audio playback, latest transcript, job history, and a processing trigger.
   - Shows library search, project filter, project creation, title/project editing, and AI title generation for the selected recording.
   - Exports the selected recording as Markdown from the frontend: copy to clipboard or download `.md` with summary, protocol, tasks, speakers, and transcript.
+  - Sends the selected recording protocol/tasks by email when SMTP env vars are configured.
   - Shows extracted/manual tasks with inline editing for assignee, due text, description, confirmation, dismissal, hard delete, and manual add.
   - Shows transcript speaker labels with inline editing for display name, contact name, and email.
   - Styles live in `frontend/src/App.css`.

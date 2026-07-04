@@ -35,6 +35,12 @@ services:
       - OPENROUTER_ASR_MODEL=${OPENROUTER_ASR_MODEL:-openai/whisper-large-v3}
       - OPENROUTER_ASR_LANGUAGE=${OPENROUTER_ASR_LANGUAGE:-ru}
       - OPENROUTER_LLM_MODEL=${OPENROUTER_LLM_MODEL:-openai/gpt-4o-mini}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
     depends_on:
       db:
         condition: service_healthy

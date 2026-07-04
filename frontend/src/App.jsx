@@ -244,6 +244,8 @@ function App() {
   const [speakerDrafts, setSpeakerDrafts] = useState({});
   const [savingSpeakerLabel, setSavingSpeakerLabel] = useState(null);
   const [newTaskDraft, setNewTaskDraft] = useState({ assignee: '', dueText: '', description: '' });
+  const [emailDraft, setEmailDraft] = useState({ recipients: '', message: '' });
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [processingId, setProcessingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [isJobsCollapsed, setIsJobsCollapsed] = useState(false);
@@ -434,6 +436,14 @@ function App() {
       projectId: selectedRecording?.projectId || '',
     });
   }, [selectedRecording?.id, selectedRecording?.title, selectedRecording?.projectId]);
+
+  useEffect(() => {
+    const recipients = [
+      ...new Set((selectedRecording?.speakers || []).map((speaker) => speaker.contactEmail).filter(Boolean)),
+    ].join(', ');
+
+    setEmailDraft({ recipients, message: '' });
+  }, [selectedRecording?.id]);
 
   async function handleCreateProject(event) {
     event.preventDefault();
@@ -669,6 +679,40 @@ function App() {
 
     downloadTextFile(createExportFilename(recording), buildRecordingExport(recording));
     setStatus(`Экспорт "${recording.title}" скачан`);
+  }
+
+  async function handleSendEmail(event) {
+    event.preventDefault();
+
+    if (!selectedRecording) {
+      return;
+    }
+
+    if (!emailDraft.recipients.trim()) {
+      setStatus('Укажи хотя бы одного получателя');
+      return;
+    }
+
+    setIsSendingEmail(true);
+    setStatus(`Отправляем протокол "${selectedRecording.title}"...`);
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/email`, {
+        method: 'POST',
+        body: JSON.stringify(emailDraft),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось отправить письмо');
+      }
+
+      setStatus(`Протокол "${selectedRecording.title}" отправлен`);
+    } catch (error) {
+      setStatus(error.message || 'Ошибка отправки письма');
+    } finally {
+      setIsSendingEmail(false);
+    }
   }
 
   function getTaskDraft(task) {
@@ -1201,6 +1245,30 @@ function App() {
                   {isSavingRecording ? 'Сохраняем...' : 'Сохранить запись'}
                 </button>
               </section>
+
+              <form className="email-send-panel" onSubmit={handleSendEmail}>
+                <h3>Email</h3>
+                <label>
+                  Получатели
+                  <input
+                    value={emailDraft.recipients}
+                    onChange={(event) => setEmailDraft((current) => ({ ...current, recipients: event.target.value }))}
+                    placeholder="name@example.com, team@example.com"
+                  />
+                </label>
+                <label>
+                  Комментарий
+                  <textarea
+                    value={emailDraft.message}
+                    onChange={(event) => setEmailDraft((current) => ({ ...current, message: event.target.value }))}
+                    rows={3}
+                    placeholder="Короткое сопроводительное сообщение"
+                  />
+                </label>
+                <button className="button button-secondary" type="submit" disabled={!canExportSelected || isSendingEmail}>
+                  {isSendingEmail ? 'Отправляем...' : 'Отправить протокол'}
+                </button>
+              </form>
 
               <dl className="detail-grid">
                 <div>

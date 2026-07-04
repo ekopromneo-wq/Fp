@@ -1,6 +1,7 @@
 import { createRecordingQueue } from './queue.js';
 import { getAuthUser, requireAuth } from './auth.js';
 import { query, transaction } from './db.js';
+import { sendRecordingEmail } from './email.js';
 import { Readable } from 'node:stream';
 import { deleteRecordingAudio, getRecordingAudioStream, saveRecordingAudio } from './storage.js';
 
@@ -1039,6 +1040,24 @@ export function registerRecordingRoutes(app) {
       return c.json(result, 201);
     } catch (error) {
       return c.json({ error: error.message || 'Failed to summarize recording' }, 400);
+    }
+  });
+
+  app.post('/api/recordings/:id/email', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const recording = await getRecording(c.req.param('id'), user.id);
+
+    if (!recording) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    try {
+      const delivery = await sendRecordingEmail(recording, body);
+
+      return c.json({ delivery });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to send recording email' }, 400);
     }
   });
 

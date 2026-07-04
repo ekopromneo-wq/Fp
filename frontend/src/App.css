@@ -452,7 +452,8 @@ h3 {
   flex: 1 1 160px;
 }
 
-.recording-edit-panel {
+.recording-edit-panel,
+.email-send-panel {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
@@ -462,8 +463,38 @@ h3 {
   padding: 12px;
 }
 
-.recording-edit-panel .button {
+.recording-edit-panel .button,
+.email-send-panel .button {
   width: 100%;
+}
+
+.recording-edit-panel label,
+.email-send-panel label {
+  display: grid;
+  gap: 6px;
+  color: #69756d;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.recording-edit-panel input,
+.recording-edit-panel select,
+.email-send-panel input,
+.email-send-panel textarea {
+  width: 100%;
+  border: 1px solid #cbd4cd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #19201d;
+  padding: 9px 10px;
+  text-transform: none;
+}
+
+.email-send-panel textarea {
+  min-height: 78px;
+  resize: vertical;
+  line-height: 1.4;
 }
 
 .recording-edit-actions {
@@ -490,7 +521,8 @@ h3 {
 
 .detail-grid,
 .detail-section,
-.recording-edit-panel {
+.recording-edit-panel,
+.email-send-panel {
   align-self: start;
 }
 
