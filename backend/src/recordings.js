@@ -1,6 +1,6 @@
 import { createRecordingQueue } from './queue.js';
 import { query, transaction } from './db.js';
-import { saveRecordingAudio } from './storage.js';
+import { deleteRecordingAudio, saveRecordingAudio } from './storage.js';
 
 const queue = createRecordingQueue();
 
@@ -202,6 +202,24 @@ export async function attachRecordingAudio(recordingId, file) {
   return mapRecording(result.rows[0]);
 }
 
+export async function deleteRecording(id) {
+  const result = await query('delete from recordings where id = $1 returning storage_key', [id]);
+
+  if (result.rowCount === 0) {
+    return null;
+  }
+
+  const storageKey = result.rows[0].storage_key;
+
+  if (storageKey) {
+    await deleteRecordingAudio(storageKey).catch((error) => {
+      console.error(`Failed to delete audio object ${storageKey}`, error);
+    });
+  }
+
+  return { id };
+}
+
 export function registerRecordingRoutes(app) {
   app.get('/api/recordings', async (c) => {
     return c.json({
@@ -251,5 +269,15 @@ export function registerRecordingRoutes(app) {
     }
 
     return c.json({ job }, 202);
+  });
+
+  app.delete('/api/recordings/:id', async (c) => {
+    const deleted = await deleteRecording(c.req.param('id'));
+
+    if (!deleted) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    return c.json({ recording: deleted });
   });
 }

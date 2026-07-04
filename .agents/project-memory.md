@@ -1,0 +1,22 @@
+# VoxMate Project Memory
+
+## 2026-07-04
+
+- Local Docker Compose stack:
+  - Frontend: http://localhost:4173
+  - Backend API: http://localhost:4000
+  - MinIO console: http://localhost:9001
+  - MinIO default credentials: `minioadmin` / `minioadmin`
+- Recordings API currently supports:
+  - `GET /api/recordings` for the latest 50 recordings.
+  - `POST /api/recordings` to create recording metadata.
+  - `POST /api/recordings/:id/audio` to attach an uploaded audio file.
+  - `GET /api/recordings/:id` for details, jobs, and latest transcript.
+  - `POST /api/recordings/:id/jobs` to enqueue processing.
+  - `DELETE /api/recordings/:id` to remove the DB row and delete the MinIO object when `storage_key` is present.
+- Frontend `frontend/src/App.jsx` is a basic recordings UI:
+  - Lists recordings from the backend.
+  - Uploads audio files by creating a recording first, then posting multipart `file`.
+  - Deletes recordings via the backend `DELETE` endpoint.
+  - Styles live in `frontend/src/App.css`.
+- On this Windows + Docker setup, Vite/nodemon may not always see bind-mounted file changes immediately. Recreating the relevant service with `docker-compose up -d --force-recreate web` or `api` refreshed the running code.

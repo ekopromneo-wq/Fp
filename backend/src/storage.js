@@ -40,3 +40,11 @@ export async function saveRecordingAudio(recordingId, file) {
     fileSizeBytes: buffer.length,
   };
 }
+
+export async function deleteRecordingAudio(storageKey) {
+  if (!storageKey) {
+    return;
+  }
+
+  await storageClient.removeObject(audioBucket, storageKey);
+}
