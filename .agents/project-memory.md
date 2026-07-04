@@ -33,8 +33,9 @@
   - Default ASR model: `openai/whisper-large-v3`.
   - Default ASR language: `ru`.
   - OpenRouter audio calls require funded balance; after funding, the uploaded test file transcribed successfully.
-- LLM summaries:
-  - `POST /api/recordings/:id/summary` generates a Russian JSON summary with `summary`, `actionItems`, and `topics`.
-  - Summaries are stored in `recording_summaries` and returned in recording details as `recording.summary`.
+- LLM protocol + tasks:
+  - `POST /api/recordings/:id/summary` generates a Russian JSON summary, protocol, topics, and structured tasks.
+  - Summaries/protocol are stored in `recording_summaries` and returned in recording details as `recording.summary`.
+  - Extracted tasks are stored in `recording_tasks` with assignee, description, due text, and status; returned as `recording.tasks`.
   - Default LLM model: `openai/gpt-4o-mini`.
 - On this Windows + Docker setup, Vite/nodemon may not always see bind-mounted file changes immediately. Recreating the relevant service with `docker-compose up -d --force-recreate web` or `api` refreshed the running code.

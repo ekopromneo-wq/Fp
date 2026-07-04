@@ -100,6 +100,31 @@ const migrations = [
       create index if not exists recording_summaries_recording_id_idx on recording_summaries(recording_id);
     `,
   },
+  {
+    id: '005_recording_protocol_tasks',
+    sql: `
+      alter table recording_summaries
+        add column if not exists protocol jsonb not null default '{"agenda":[],"decisions":[],"risks":[]}'::jsonb;
+
+      create table if not exists recording_tasks (
+        id uuid primary key default gen_random_uuid(),
+        recording_id uuid not null references recordings(id) on delete cascade,
+        summary_id uuid references recording_summaries(id) on delete set null,
+        transcript_id uuid references transcripts(id) on delete set null,
+        assignee text,
+        description text not null,
+        due_text text,
+        status text not null default 'extracted'
+          check (status in ('extracted', 'confirmed', 'sent', 'done', 'dismissed')),
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      );
+
+      create index if not exists recording_tasks_recording_id_idx on recording_tasks(recording_id);
+      create index if not exists recording_tasks_summary_id_idx on recording_tasks(summary_id);
+      create index if not exists recording_tasks_status_idx on recording_tasks(status);
+    `,
+  },
 ];
 
 export async function runMigrations() {

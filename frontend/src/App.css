@@ -450,6 +450,60 @@ audio {
   padding-left: 18px;
 }
 
+.protocol-grid,
+.task-list {
+  display: grid;
+  gap: 10px;
+}
+
+.protocol-grid div,
+.task-row {
+  border: 1px solid #e2e7e0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.protocol-grid h4 {
+  margin: 0 0 6px;
+  color: #26312b;
+  font-size: 0.84rem;
+}
+
+.protocol-grid ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #27322c;
+  line-height: 1.45;
+}
+
+.task-row {
+  display: grid;
+  gap: 6px;
+}
+
+.task-row div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #27322c;
+  font-size: 0.88rem;
+}
+
+.task-row strong {
+  overflow-wrap: anywhere;
+}
+
+.task-row span {
+  flex: 0 0 auto;
+  color: #66736b;
+}
+
+.task-row p {
+  color: #27322c;
+  line-height: 1.45;
+}
+
 .topic-list {
   display: flex;
   flex-wrap: wrap;

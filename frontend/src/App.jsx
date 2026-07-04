@@ -364,7 +364,7 @@ function App() {
     }
 
     setIsSummarizing(true);
-    setStatus(`Готовим резюме "${recording.title}"...`);
+    setStatus(`Готовим протокол "${recording.title}"...`);
 
     try {
       const response = await apiFetch(`/api/recordings/${recording.id}/summary`, {
@@ -373,14 +373,18 @@ function App() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Не удалось сделать резюме');
+        throw new Error(data.error || 'Не удалось сделать протокол');
       }
 
-      setSelectedRecording((current) => (current?.id === recording.id ? { ...current, summary: data.summary } : current));
-      setRecordings((current) => current.map((item) => (item.id === recording.id ? { ...item, summary: data.summary } : item)));
-      setStatus(`Резюме "${recording.title}" готово`);
+      setSelectedRecording((current) =>
+        current?.id === recording.id ? { ...current, summary: data.summary, tasks: data.tasks || [] } : current,
+      );
+      setRecordings((current) =>
+        current.map((item) => (item.id === recording.id ? { ...item, summary: data.summary, tasks: data.tasks || [] } : item)),
+      );
+      setStatus(`Протокол "${recording.title}" готов`);
     } catch (error) {
-      setStatus(error.message || 'Ошибка создания резюме');
+      setStatus(error.message || 'Ошибка создания протокола');
     } finally {
       setIsSummarizing(false);
     }
@@ -554,7 +558,7 @@ function App() {
                   onClick={() => handleSummarize(selectedRecording)}
                   disabled={!selectedRecording.transcript || isSummarizing}
                 >
-                  {isSummarizing ? 'Готовим...' : 'Сделать резюме'}
+                  {isSummarizing ? 'Готовим...' : 'Сделать протокол'}
                 </button>
               </div>
 
@@ -624,7 +628,72 @@ function App() {
                     ) : null}
                   </div>
                 ) : (
-                  <p className="muted-text">Резюме пока нет. Сделай его после появления стенограммы.</p>
+                  <p className="muted-text">Протокола пока нет. Сделай его после появления стенограммы.</p>
+                )}
+              </section>
+
+              {selectedRecording.summary?.protocol ? (
+                <section className="detail-section">
+                  <h3>Протокол</h3>
+                  <div className="protocol-grid">
+                    <div>
+                      <h4>Повестка</h4>
+                      {selectedRecording.summary.protocol.agenda?.length ? (
+                        <ul>
+                          {selectedRecording.summary.protocol.agenda.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="muted-text">Не выделена.</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <h4>Решения</h4>
+                      {selectedRecording.summary.protocol.decisions?.length ? (
+                        <ul>
+                          {selectedRecording.summary.protocol.decisions.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="muted-text">Не выделены.</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <h4>Риски</h4>
+                      {selectedRecording.summary.protocol.risks?.length ? (
+                        <ul>
+                          {selectedRecording.summary.protocol.risks.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="muted-text">Не выделены.</p>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              ) : null}
+
+              <section className="detail-section">
+                <h3>Задачи</h3>
+                {selectedRecording.tasks?.length ? (
+                  <div className="task-list">
+                    {selectedRecording.tasks.map((task) => (
+                      <div className="task-row" key={task.id}>
+                        <div>
+                          <strong>{task.assignee || 'Исполнитель не указан'}</strong>
+                          <span>{task.dueText || 'Срок не указан'}</span>
+                        </div>
+                        <p>{task.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted-text">Задач пока нет. Они появятся после генерации протокола, если модель найдёт поручения.</p>
                 )}
               </section>
 

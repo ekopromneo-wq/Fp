@@ -60,10 +60,59 @@ function mapSummary(row) {
         summary: row.summary,
         actionItems: row.action_items,
         topics: row.topics,
+        protocol: row.protocol || { agenda: [], decisions: [], risks: [] },
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       }
     : null;
+}
+
+function mapTask(row) {
+  return {
+    id: row.id,
+    recordingId: row.recording_id,
+    summaryId: row.summary_id,
+    transcriptId: row.transcript_id,
+    assignee: row.assignee,
+    description: row.description,
+    dueText: row.due_text,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function normalizeProtocol(input) {
+  const protocol = input && typeof input === 'object' ? input : {};
+
+  return {
+    agenda: Array.isArray(protocol.agenda) ? protocol.agenda.map(String).filter(Boolean) : [],
+    decisions: Array.isArray(protocol.decisions) ? protocol.decisions.map(String).filter(Boolean) : [],
+    risks: Array.isArray(protocol.risks) ? protocol.risks.map(String).filter(Boolean) : [],
+  };
+}
+
+function normalizeTask(input) {
+  if (typeof input === 'string') {
+    const description = input.trim();
+    return description ? { assignee: null, description, dueText: null } : null;
+  }
+
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const description = String(input.description || input.action || input.task || '').trim();
+
+  if (!description) {
+    return null;
+  }
+
+  return {
+    assignee: input.assignee || input.owner || input.who ? String(input.assignee || input.owner || input.who).trim() : null,
+    description,
+    dueText: input.dueText || input.deadline || input.when ? String(input.dueText || input.deadline || input.when).trim() : null,
+  };
 }
 
 function parseJsonObject(text) {
@@ -108,11 +157,11 @@ async function generateSummaryWithOpenRouter(transcriptText) {
         {
           role: 'system',
           content:
-            'Ты помощник VoxMate. Верни строго JSON с полями summary:string, actionItems:string[], topics:string[]. Пиши по-русски, кратко и конкретно.',
+            'Ты помощник VoxMate. Верни строго JSON без markdown. Поля: summary:string, topics:string[], protocol:{agenda:string[],decisions:string[],risks:string[]}, tasks:{assignee:string|null,description:string,dueText:string|null}[]. Пиши по-русски, кратко и конкретно. Если исполнитель или срок не названы явно, ставь null.',
         },
         {
           role: 'user',
-          content: `Сделай краткое резюме стенограммы, список action items и ключевые темы.\n\nСтенограмма:\n${transcriptText}`,
+          content: `Сделай структурированный протокол стенограммы и извлеки задачи в формате кто-что-когда.\n\nСтенограмма:\n${transcriptText}`,
         },
       ],
     }),
@@ -126,12 +175,15 @@ async function generateSummaryWithOpenRouter(transcriptText) {
 
   const content = body?.choices?.[0]?.message?.content;
   const parsed = parseJsonObject(content);
+  const tasks = (Array.isArray(parsed.tasks) ? parsed.tasks : parsed.actionItems || []).map(normalizeTask).filter(Boolean);
 
   return {
     model,
     summary: String(parsed.summary || '').trim(),
-    actionItems: Array.isArray(parsed.actionItems) ? parsed.actionItems.map(String) : [],
+    actionItems: tasks.map((task) => task.description),
     topics: Array.isArray(parsed.topics) ? parsed.topics.map(String) : [],
+    protocol: normalizeProtocol(parsed.protocol),
+    tasks,
   };
 }
 
@@ -183,7 +235,7 @@ export async function getRecording(id, ownerId) {
     return null;
   }
 
-  const [jobs, transcript, summary] = await Promise.all([
+  const [jobs, transcript, summary, tasks] = await Promise.all([
     query(
       `
         select id, recording_id, queue_job_id, status, error, created_at, updated_at
@@ -205,11 +257,20 @@ export async function getRecording(id, ownerId) {
     ),
     query(
       `
-        select id, recording_id, transcript_id, model, summary, action_items, topics, created_at, updated_at
+        select id, recording_id, transcript_id, model, summary, action_items, topics, protocol, created_at, updated_at
         from recording_summaries
         where recording_id = $1
         order by created_at desc
         limit 1
+      `,
+      [id],
+    ),
+    query(
+      `
+        select id, recording_id, summary_id, transcript_id, assignee, description, due_text, status, created_at, updated_at
+        from recording_tasks
+        where recording_id = $1 and status <> 'dismissed'
+        order by created_at asc
       `,
       [id],
     ),
@@ -220,6 +281,7 @@ export async function getRecording(id, ownerId) {
     jobs: jobs.rows.map(mapJob),
     transcript: mapTranscript(transcript.rows[0]),
     summary: mapSummary(summary.rows[0]),
+    tasks: tasks.rows.map(mapTask),
   };
 }
 
@@ -235,23 +297,44 @@ export async function summarizeRecording(recordingId, ownerId) {
   }
 
   const generated = await generateSummaryWithOpenRouter(recording.transcript.text);
-  const result = await query(
-    `
-      insert into recording_summaries (recording_id, transcript_id, model, summary, action_items, topics)
-      values ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
-      returning id, recording_id, transcript_id, model, summary, action_items, topics, created_at, updated_at
-    `,
-    [
-      recordingId,
-      recording.transcript.id,
-      generated.model,
-      generated.summary,
-      JSON.stringify(generated.actionItems),
-      JSON.stringify(generated.topics),
-    ],
-  );
 
-  return mapSummary(result.rows[0]);
+  return transaction(async (client) => {
+    const result = await client.query(
+      `
+        insert into recording_summaries (recording_id, transcript_id, model, summary, action_items, topics, protocol)
+        values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb)
+        returning id, recording_id, transcript_id, model, summary, action_items, topics, protocol, created_at, updated_at
+      `,
+      [
+        recordingId,
+        recording.transcript.id,
+        generated.model,
+        generated.summary,
+        JSON.stringify(generated.actionItems),
+        JSON.stringify(generated.topics),
+        JSON.stringify(generated.protocol),
+      ],
+    );
+    const summary = mapSummary(result.rows[0]);
+
+    await client.query('delete from recording_tasks where recording_id = $1', [recordingId]);
+
+    const tasks = [];
+    for (const task of generated.tasks) {
+      const inserted = await client.query(
+        `
+          insert into recording_tasks (recording_id, summary_id, transcript_id, assignee, description, due_text)
+          values ($1, $2, $3, $4, $5, $6)
+          returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, status, created_at, updated_at
+        `,
+        [recordingId, summary.id, recording.transcript.id, task.assignee || null, task.description, task.dueText || null],
+      );
+
+      tasks.push(mapTask(inserted.rows[0]));
+    }
+
+    return { summary, tasks };
+  });
 }
 
 export async function getRecordingAudio(id, ownerId) {
@@ -475,13 +558,13 @@ export function registerRecordingRoutes(app) {
     const user = getAuthUser(c);
 
     try {
-      const summary = await summarizeRecording(c.req.param('id'), user.id);
+      const result = await summarizeRecording(c.req.param('id'), user.id);
 
-      if (!summary) {
+      if (!result) {
         return c.json({ error: 'Recording not found' }, 404);
       }
 
-      return c.json({ summary }, 201);
+      return c.json(result, 201);
     } catch (error) {
       return c.json({ error: error.message || 'Failed to summarize recording' }, 400);
     }
