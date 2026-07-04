@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { checkDependencies } from './health.js';
 import { registerRecordingRoutes } from './recordings.js';
 import { runMigrations } from './migrations.js';
+import { ensureAudioBucket } from './storage.js';
 
 dotenv.config();
 
@@ -63,6 +64,7 @@ registerRecordingRoutes(app);
 
 async function main() {
   await runMigrations();
+  await ensureAudioBucket();
 
   serve(
     {

@@ -54,6 +54,15 @@ const migrations = [
       create index if not exists transcripts_recording_id_idx on transcripts(recording_id);
     `,
   },
+  {
+    id: '002_recording_file_metadata',
+    sql: `
+      alter table recordings
+        add column if not exists original_filename text,
+        add column if not exists mime_type text,
+        add column if not exists file_size_bytes bigint;
+    `,
+  },
 ];
 
 export async function runMigrations() {

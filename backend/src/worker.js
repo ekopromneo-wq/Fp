@@ -3,6 +3,7 @@ import { Worker } from 'bullmq';
 import { query, transaction } from './db.js';
 import { runMigrations } from './migrations.js';
 import { createRedisConnection, RECORDING_QUEUE_NAME } from './queue.js';
+import { ensureAudioBucket } from './storage.js';
 
 dotenv.config();
 
@@ -29,9 +30,19 @@ async function processRecording(data) {
     );
   });
 
-  const recording = await query('select title from recordings where id = $1', [recordingId]);
+  const recording = await query(
+    `
+      select title, original_filename, mime_type, file_size_bytes, storage_key
+      from recordings
+      where id = $1
+    `,
+    [recordingId],
+  );
   const title = recording.rows[0]?.title || 'recording';
-  const transcriptText = `Mock transcript for "${title}". ASR integration will replace this worker step.`;
+  const file = recording.rows[0];
+  const transcriptText = file?.storage_key
+    ? `Audio file received for "${title}": ${file.original_filename || 'unnamed file'}, ${file.mime_type || 'unknown type'}, ${file.file_size_bytes || 0} bytes. ASR integration will replace this worker step.`
+    : `Mock transcript for "${title}". No audio file is attached yet.`;
 
   await transaction(async (client) => {
     await client.query(
@@ -76,6 +87,7 @@ async function processRecording(data) {
 
 async function main() {
   await runMigrations();
+  await ensureAudioBucket();
 
   const worker = new Worker(
     RECORDING_QUEUE_NAME,

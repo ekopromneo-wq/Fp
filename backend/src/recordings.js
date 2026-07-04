@@ -1,5 +1,6 @@
 import { createRecordingQueue } from './queue.js';
 import { query, transaction } from './db.js';
+import { saveRecordingAudio } from './storage.js';
 
 const queue = createRecordingQueue();
 
@@ -12,6 +13,9 @@ function mapRecording(row) {
     source: row.source,
     durationSeconds: row.duration_seconds,
     storageKey: row.storage_key,
+    originalFilename: row.original_filename,
+    mimeType: row.mime_type,
+    fileSizeBytes: row.file_size_bytes === null ? null : Number(row.file_size_bytes),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -48,6 +52,7 @@ export async function listRecordings() {
   const result = await query(
     `
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
+      , original_filename, mime_type, file_size_bytes
       from recordings
       order by created_at desc
       limit 50
@@ -65,7 +70,8 @@ export async function createRecording(input) {
     `
       insert into recordings (title, source, duration_seconds, storage_key)
       values ($1, $2, $3, $4)
-      returning id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
+      returning id, owner_id, title, status, source, duration_seconds, storage_key,
+        original_filename, mime_type, file_size_bytes, created_at, updated_at
     `,
     [title, source, input.durationSeconds || null, input.storageKey || null],
   );
@@ -77,6 +83,7 @@ export async function getRecording(id) {
   const result = await query(
     `
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
+      , original_filename, mime_type, file_size_bytes
       from recordings
       where id = $1
     `,
@@ -167,6 +174,34 @@ export async function enqueueRecording(recordingId) {
   return mapJob(updated.rows[0]);
 }
 
+export async function attachRecordingAudio(recordingId, file) {
+  const recording = await query('select id from recordings where id = $1', [recordingId]);
+
+  if (recording.rowCount === 0) {
+    return null;
+  }
+
+  const metadata = await saveRecordingAudio(recordingId, file);
+  const result = await query(
+    `
+      update recordings
+      set
+        storage_key = $1,
+        original_filename = $2,
+        mime_type = $3,
+        file_size_bytes = $4,
+        status = 'uploaded',
+        updated_at = now()
+      where id = $5
+      returning id, owner_id, title, status, source, duration_seconds, storage_key,
+        original_filename, mime_type, file_size_bytes, created_at, updated_at
+    `,
+    [metadata.storageKey, metadata.originalFilename, metadata.mimeType, metadata.fileSizeBytes, recordingId],
+  );
+
+  return mapRecording(result.rows[0]);
+}
+
 export function registerRecordingRoutes(app) {
   app.get('/api/recordings', async (c) => {
     return c.json({
@@ -183,6 +218,23 @@ export function registerRecordingRoutes(app) {
 
   app.get('/api/recordings/:id', async (c) => {
     const recording = await getRecording(c.req.param('id'));
+
+    if (!recording) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    return c.json({ recording });
+  });
+
+  app.post('/api/recordings/:id/audio', async (c) => {
+    const formData = await c.req.raw.formData().catch(() => null);
+    const file = formData?.get('file');
+
+    if (!file || typeof file.arrayBuffer !== 'function') {
+      return c.json({ error: 'Expected multipart form-data with file field named "file"' }, 400);
+    }
+
+    const recording = await attachRecordingAudio(c.req.param('id'), file);
 
     if (!recording) {
       return c.json({ error: 'Recording not found' }, 404);
