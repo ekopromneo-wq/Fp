@@ -32,7 +32,8 @@ services:
       - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
       - S3_BUCKET=${S3_BUCKET:-voxmate-audio}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_ASR_MODEL=${OPENROUTER_ASR_MODEL:-gpt-4o-transcribe}
+      - OPENROUTER_ASR_MODEL=${OPENROUTER_ASR_MODEL:-openai/whisper-large-v3}
+      - OPENROUTER_ASR_LANGUAGE=${OPENROUTER_ASR_LANGUAGE:-ru}
       - OPENROUTER_LLM_MODEL=${OPENROUTER_LLM_MODEL:-gpt-4o-mini}
     depends_on:
       db:
@@ -63,7 +64,8 @@ services:
       - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
       - S3_BUCKET=${S3_BUCKET:-voxmate-audio}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_ASR_MODEL=${OPENROUTER_ASR_MODEL:-gpt-4o-transcribe}
+      - OPENROUTER_ASR_MODEL=${OPENROUTER_ASR_MODEL:-openai/whisper-large-v3}
+      - OPENROUTER_ASR_LANGUAGE=${OPENROUTER_ASR_LANGUAGE:-ru}
       - OPENROUTER_LLM_MODEL=${OPENROUTER_LLM_MODEL:-gpt-4o-mini}
     depends_on:
       db:

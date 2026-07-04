@@ -28,4 +28,9 @@
   - Shows login/register before the recordings workspace.
   - Shows selected recording details, audio playback, latest transcript, job history, and a processing trigger.
   - Styles live in `frontend/src/App.css`.
+- Worker ASR:
+  - Uses `OPENROUTER_API_KEY` from local `.env`; never commit the key.
+  - Default ASR model: `openai/whisper-large-v3`.
+  - Default ASR language: `ru`.
+  - OpenRouter audio calls require funded balance; after funding, the uploaded test file transcribed successfully.
 - On this Windows + Docker setup, Vite/nodemon may not always see bind-mounted file changes immediately. Recreating the relevant service with `docker-compose up -d --force-recreate web` or `api` refreshed the running code.

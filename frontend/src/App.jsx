@@ -45,6 +45,10 @@ function getAudioUrl(recording) {
   return recording?.storageKey ? `${apiBaseUrl}/api/recordings/${recording.id}/audio` : '';
 }
 
+function isProcessingStatus(status) {
+  return status === 'queued' || status === 'processing';
+}
+
 function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage }) {
   const [email, setEmail] = useState(demoEmail);
   const [password, setPassword] = useState(demoPassword);
@@ -214,13 +218,15 @@ function App() {
     }
   }
 
-  async function loadRecordingDetail(recordingId) {
+  async function loadRecordingDetail(recordingId, options = {}) {
     if (!recordingId) {
       setSelectedRecording(null);
       return;
     }
 
-    setIsDetailLoading(true);
+    if (!options.quiet) {
+      setIsDetailLoading(true);
+    }
 
     try {
       const response = await apiFetch(`/api/recordings/${recordingId}`);
@@ -236,11 +242,16 @@ function App() {
 
       const data = await response.json();
       setSelectedRecording(data.recording);
+      setRecordings((current) =>
+        current.map((recording) => (recording.id === data.recording.id ? { ...recording, ...data.recording } : recording)),
+      );
     } catch (error) {
       setStatus(error.message || 'Не удалось открыть запись');
       setSelectedRecording(null);
     } finally {
-      setIsDetailLoading(false);
+      if (!options.quiet) {
+        setIsDetailLoading(false);
+      }
     }
   }
 
@@ -259,6 +270,18 @@ function App() {
       loadRecordingDetail(selectedRecordingId);
     }
   }, [selectedRecordingId, currentUser?.id]);
+
+  useEffect(() => {
+    if (!currentUser || !selectedRecordingId || !isProcessingStatus(selectedRecording?.status)) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      loadRecordingDetail(selectedRecordingId, { quiet: true });
+    }, 2000);
+
+    return () => window.clearInterval(intervalId);
+  }, [currentUser?.id, selectedRecordingId, selectedRecording?.status]);
 
   async function handleFileChange(event) {
     const file = event.target.files?.[0];

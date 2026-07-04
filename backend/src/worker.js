@@ -3,9 +3,68 @@ import { Worker } from 'bullmq';
 import { query, transaction } from './db.js';
 import { runMigrations } from './migrations.js';
 import { createRedisConnection, RECORDING_QUEUE_NAME } from './queue.js';
-import { ensureAudioBucket } from './storage.js';
+import { ensureAudioBucket, getRecordingAudioBuffer } from './storage.js';
 
 dotenv.config();
+
+function getAudioFormat(file) {
+  const filename = file?.original_filename || '';
+  const extension = filename.includes('.') ? filename.split('.').pop().toLowerCase() : '';
+
+  if (extension) {
+    return extension === 'mpeg' ? 'mp3' : extension;
+  }
+
+  if (file?.mime_type?.includes('/')) {
+    return file.mime_type.split('/').pop().toLowerCase();
+  }
+
+  return 'mp3';
+}
+
+async function transcribeWithOpenRouter(file) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+
+  if (!apiKey || !file?.storage_key) {
+    return null;
+  }
+
+  const audioBuffer = await getRecordingAudioBuffer(file.storage_key);
+
+  if (!audioBuffer) {
+    return null;
+  }
+
+  const response = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'http://localhost:4173',
+      'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'VoxMate',
+    },
+    body: JSON.stringify({
+      input_audio: {
+        data: audioBuffer.toString('base64'),
+        format: getAudioFormat(file),
+      },
+      model: process.env.OPENROUTER_ASR_MODEL || 'openai/whisper-large-v3',
+      language: process.env.OPENROUTER_ASR_LANGUAGE || 'ru',
+    }),
+  });
+
+  const responseBody = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const message = responseBody?.error?.message || responseBody?.message || `OpenRouter ASR failed with ${response.status}`;
+    throw new Error(message);
+  }
+
+  return {
+    text: responseBody?.text || '',
+    usage: responseBody?.usage || null,
+  };
+}
 
 async function processRecording(data) {
   const { jobId, recordingId } = data;
@@ -40,9 +99,12 @@ async function processRecording(data) {
   );
   const title = recording.rows[0]?.title || 'recording';
   const file = recording.rows[0];
-  const transcriptText = file?.storage_key
-    ? `Audio file received for "${title}": ${file.original_filename || 'unnamed file'}, ${file.mime_type || 'unknown type'}, ${file.file_size_bytes || 0} bytes. ASR integration will replace this worker step.`
-    : `Mock transcript for "${title}". No audio file is attached yet.`;
+  const transcription = await transcribeWithOpenRouter(file);
+  const transcriptText =
+    transcription?.text ||
+    (file?.storage_key
+      ? `Audio file received for "${title}", but OpenRouter ASR is not configured.`
+      : `Mock transcript for "${title}". No audio file is attached yet.`);
 
   await transaction(async (client) => {
     await client.query(
@@ -60,6 +122,7 @@ async function processRecording(data) {
             endMs: 3000,
             speaker: 'speaker_1',
             text: transcriptText,
+            usage: transcription?.usage || null,
           },
         ]),
       ],

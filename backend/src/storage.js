@@ -56,3 +56,19 @@ export async function getRecordingAudioStream(storageKey) {
 
   return storageClient.getObject(audioBucket, storageKey);
 }
+
+export async function getRecordingAudioBuffer(storageKey) {
+  const stream = await getRecordingAudioStream(storageKey);
+
+  if (!stream) {
+    return null;
+  }
+
+  const chunks = [];
+
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+
+  return Buffer.concat(chunks);
+}
