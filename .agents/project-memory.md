@@ -13,6 +13,7 @@
   - `POST /api/recordings/:id/audio` to attach an uploaded audio file.
   - `GET /api/recordings/:id` for details, jobs, and latest transcript.
   - `POST /api/recordings/:id/jobs` to enqueue processing.
+  - `PATCH /api/recordings/:recordingId/tasks/:taskId` to edit extracted task fields and status.
   - `DELETE /api/recordings/:id` to remove the DB row and delete the MinIO object when `storage_key` is present.
   - `GET /api/recordings/:id/audio` to stream the MinIO object through the backend.
 - Auth API currently supports cookie-based sessions:
@@ -27,6 +28,7 @@
   - Deletes recordings via the backend `DELETE` endpoint.
   - Shows login/register before the recordings workspace.
   - Shows selected recording details, audio playback, latest transcript, job history, and a processing trigger.
+  - Shows extracted tasks with inline editing for assignee, due text, description, confirmation, and dismissal.
   - Styles live in `frontend/src/App.css`.
 - Worker ASR:
   - Uses `OPENROUTER_API_KEY` from local `.env`; never commit the key.

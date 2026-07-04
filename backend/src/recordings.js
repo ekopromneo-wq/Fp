@@ -337,6 +337,50 @@ export async function summarizeRecording(recordingId, ownerId) {
   });
 }
 
+export async function updateRecordingTask(recordingId, taskId, ownerId, input) {
+  const data = input && typeof input === 'object' ? input : {};
+  const hasAssignee = Object.prototype.hasOwnProperty.call(data, 'assignee');
+  const hasDescription = Object.prototype.hasOwnProperty.call(data, 'description');
+  const hasDueText = Object.prototype.hasOwnProperty.call(data, 'dueText');
+  const hasStatus = Object.prototype.hasOwnProperty.call(data, 'status');
+  const assignee =
+    hasAssignee && typeof data.assignee === 'string' && data.assignee.trim() ? data.assignee.trim() : null;
+  const dueText = hasDueText && typeof data.dueText === 'string' && data.dueText.trim() ? data.dueText.trim() : null;
+  const description = hasDescription && typeof data.description === 'string' ? data.description.trim() : null;
+  const status = hasStatus && typeof data.status === 'string' ? data.status.trim() : null;
+  const allowedStatuses = new Set(['extracted', 'confirmed', 'sent', 'done', 'dismissed']);
+
+  if (hasDescription && !description) {
+    throw new Error('Task description is required');
+  }
+
+  if (hasStatus && !allowedStatuses.has(status)) {
+    throw new Error('Unsupported task status');
+  }
+
+  const result = await query(
+    `
+      update recording_tasks task
+      set
+        assignee = case when $4 then $5 else task.assignee end,
+        description = case when $6 then $7 else task.description end,
+        due_text = case when $8 then $9 else task.due_text end,
+        status = case when $10 then $11 else task.status end,
+        updated_at = now()
+      from recordings recording
+      where task.id = $1
+        and task.recording_id = $2
+        and recording.id = task.recording_id
+        and (recording.owner_id = $3 or recording.owner_id is null)
+      returning task.id, task.recording_id, task.summary_id, task.transcript_id,
+        task.assignee, task.description, task.due_text, task.status, task.created_at, task.updated_at
+    `,
+    [taskId, recordingId, ownerId, hasAssignee, assignee, hasDescription, description, hasDueText, dueText, hasStatus, status],
+  );
+
+  return result.rowCount ? mapTask(result.rows[0]) : null;
+}
+
 export async function getRecordingAudio(id, ownerId) {
   const result = await query(
     `
@@ -567,6 +611,23 @@ export function registerRecordingRoutes(app) {
       return c.json(result, 201);
     } catch (error) {
       return c.json({ error: error.message || 'Failed to summarize recording' }, 400);
+    }
+  });
+
+  app.patch('/api/recordings/:recordingId/tasks/:taskId', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+
+    try {
+      const task = await updateRecordingTask(c.req.param('recordingId'), c.req.param('taskId'), user.id, body);
+
+      if (!task) {
+        return c.json({ error: 'Task not found' }, 404);
+      }
+
+      return c.json({ task });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to update task' }, 400);
     }
   });
 

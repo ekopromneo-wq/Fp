@@ -125,6 +125,8 @@ function App() {
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [savingTaskId, setSavingTaskId] = useState(null);
+  const [taskDrafts, setTaskDrafts] = useState({});
   const [processingId, setProcessingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
@@ -388,6 +390,95 @@ function App() {
     } finally {
       setIsSummarizing(false);
     }
+  }
+
+  function getTaskDraft(task) {
+    return (
+      taskDrafts[task.id] || {
+        assignee: task.assignee || '',
+        dueText: task.dueText || '',
+        description: task.description || '',
+      }
+    );
+  }
+
+  function updateTaskDraft(task, field, value) {
+    setTaskDrafts((current) => ({
+      ...current,
+      [task.id]: {
+        ...getTaskDraft(task),
+        [field]: value,
+      },
+    }));
+  }
+
+  function applyTaskUpdate(task) {
+    setSelectedRecording((current) => {
+      if (!current?.tasks) {
+        return current;
+      }
+
+      const tasks =
+        task.status === 'dismissed'
+          ? current.tasks.filter((item) => item.id !== task.id)
+          : current.tasks.map((item) => (item.id === task.id ? task : item));
+
+      return { ...current, tasks };
+    });
+  }
+
+  async function updateTask(task, patch, successMessage) {
+    if (!selectedRecording) {
+      return;
+    }
+
+    setSavingTaskId(task.id);
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/tasks/${task.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось обновить задачу');
+      }
+
+      applyTaskUpdate(data.task);
+      setTaskDrafts((current) => {
+        const next = { ...current };
+        delete next[task.id];
+        return next;
+      });
+      setStatus(successMessage);
+    } catch (error) {
+      setStatus(error.message || 'Ошибка обновления задачи');
+    } finally {
+      setSavingTaskId(null);
+    }
+  }
+
+  async function handleSaveTask(task) {
+    const draft = getTaskDraft(task);
+
+    await updateTask(
+      task,
+      {
+        assignee: draft.assignee,
+        dueText: draft.dueText,
+        description: draft.description,
+      },
+      'Задача сохранена',
+    );
+  }
+
+  async function handleConfirmTask(task) {
+    await updateTask(task, { status: 'confirmed' }, 'Задача подтверждена');
+  }
+
+  async function handleDismissTask(task) {
+    await updateTask(task, { status: 'dismissed' }, 'Задача скрыта');
   }
 
   async function handleDelete(recording) {
@@ -682,15 +773,63 @@ function App() {
                 <h3>Задачи</h3>
                 {selectedRecording.tasks?.length ? (
                   <div className="task-list">
-                    {selectedRecording.tasks.map((task) => (
-                      <div className="task-row" key={task.id}>
-                        <div>
-                          <strong>{task.assignee || 'Исполнитель не указан'}</strong>
-                          <span>{task.dueText || 'Срок не указан'}</span>
+                    {selectedRecording.tasks.map((task) => {
+                      const draft = getTaskDraft(task);
+                      const isSavingTask = savingTaskId === task.id;
+
+                      return (
+                        <div className={`task-row task-status-${task.status}`} key={task.id}>
+                          <div className="task-row-header">
+                            <strong>{task.status === 'confirmed' ? 'Подтверждена' : 'Извлечена'}</strong>
+                            <span>{formatDate(task.updatedAt)}</span>
+                          </div>
+
+                          <label>
+                            Исполнитель
+                            <input
+                              value={draft.assignee}
+                              onChange={(event) => updateTaskDraft(task, 'assignee', event.target.value)}
+                              placeholder="Не указан"
+                            />
+                          </label>
+
+                          <label>
+                            Срок
+                            <input
+                              value={draft.dueText}
+                              onChange={(event) => updateTaskDraft(task, 'dueText', event.target.value)}
+                              placeholder="Не указан"
+                            />
+                          </label>
+
+                          <label>
+                            Что сделать
+                            <textarea
+                              value={draft.description}
+                              onChange={(event) => updateTaskDraft(task, 'description', event.target.value)}
+                              rows={3}
+                            />
+                          </label>
+
+                          <div className="task-actions">
+                            <button className="button button-secondary" type="button" onClick={() => handleSaveTask(task)} disabled={isSavingTask}>
+                              {isSavingTask ? 'Сохраняем...' : 'Сохранить'}
+                            </button>
+                            <button
+                              className="button button-primary"
+                              type="button"
+                              onClick={() => handleConfirmTask(task)}
+                              disabled={isSavingTask || task.status === 'confirmed'}
+                            >
+                              Подтвердить
+                            </button>
+                            <button className="button button-danger" type="button" onClick={() => handleDismissTask(task)} disabled={isSavingTask}>
+                              Скрыть
+                            </button>
+                          </div>
                         </div>
-                        <p>{task.description}</p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="muted-text">Задач пока нет. Они появятся после генерации протокола, если модель найдёт поручения.</p>

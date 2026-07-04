@@ -21,7 +21,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -479,15 +480,20 @@ audio {
 
 .task-row {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
-.task-row div {
+.task-row-header {
   display: flex;
   justify-content: space-between;
   gap: 10px;
   color: #27322c;
   font-size: 0.88rem;
+}
+
+.task-status-confirmed {
+  border-color: #b8dcc8;
+  background: #f6fbf8;
 }
 
 .task-row strong {
@@ -502,6 +508,43 @@ audio {
 .task-row p {
   color: #27322c;
   line-height: 1.45;
+}
+
+.task-row label {
+  display: grid;
+  gap: 5px;
+  color: #69756d;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.task-row input,
+.task-row textarea {
+  width: 100%;
+  border: 1px solid #cbd4cd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #19201d;
+  padding: 9px 10px;
+  text-transform: none;
+}
+
+.task-row textarea {
+  min-height: 78px;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.task-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.task-actions .button {
+  min-width: 0;
+  padding: 0 8px;
 }
 
 .topic-list {
@@ -592,6 +635,10 @@ audio {
   }
 
   .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .task-actions {
     grid-template-columns: 1fr;
   }
 }
