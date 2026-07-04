@@ -819,10 +819,20 @@ export async function enqueueRecording(recordingId, ownerId) {
     return null;
   }
 
-  const queueJob = await queue.add('process-recording', {
-    jobId: job.id,
-    recordingId,
-  });
+  const queueJob = await queue.add(
+    'process-recording',
+    {
+      jobId: job.id,
+      recordingId,
+    },
+    {
+      attempts: Number(process.env.RECORDING_JOB_ATTEMPTS || 3),
+      backoff: {
+        type: 'exponential',
+        delay: Number(process.env.RECORDING_JOB_BACKOFF_MS || 15000),
+      },
+    },
+  );
 
   const updated = await query(
     `

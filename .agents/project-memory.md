@@ -48,6 +48,7 @@
   - Uses `OPENROUTER_API_KEY` from local `.env`; never commit the key.
   - Default ASR model: `openai/whisper-large-v3`.
   - Default ASR language: `ru`.
+  - Backend image includes ffmpeg; worker compresses large audio above `ASR_COMPRESS_THRESHOLD_BYTES` to mono 16 kHz MP3 before OpenRouter ASR and retries transient ASR failures.
   - OpenRouter audio calls require funded balance; after funding, the uploaded test file transcribed successfully.
 - LLM protocol + tasks:
   - `POST /api/recordings/:id/summary` generates a Russian JSON summary, protocol, topics, and structured tasks.
