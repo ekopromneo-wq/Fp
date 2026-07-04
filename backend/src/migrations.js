@@ -125,6 +125,24 @@ const migrations = [
       create index if not exists recording_tasks_status_idx on recording_tasks(status);
     `,
   },
+  {
+    id: '006_recording_speakers',
+    sql: `
+      create table if not exists recording_speakers (
+        id uuid primary key default gen_random_uuid(),
+        recording_id uuid not null references recordings(id) on delete cascade,
+        label text not null,
+        display_name text not null,
+        contact_name text,
+        contact_email text,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (recording_id, label)
+      );
+
+      create index if not exists recording_speakers_recording_id_idx on recording_speakers(recording_id);
+    `,
+  },
 ];
 
 export async function runMigrations() {

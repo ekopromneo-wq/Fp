@@ -452,13 +452,15 @@ audio {
 }
 
 .protocol-grid,
-.task-list {
+.task-list,
+.speaker-list {
   display: grid;
   gap: 10px;
 }
 
 .protocol-grid div,
-.task-row {
+.task-row,
+.speaker-row {
   border: 1px solid #e2e7e0;
   border-radius: 8px;
   background: #ffffff;
@@ -483,7 +485,13 @@ audio {
   gap: 8px;
 }
 
-.task-row-header {
+.speaker-row {
+  display: grid;
+  gap: 8px;
+}
+
+.task-row-header,
+.speaker-row-header {
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -529,8 +537,18 @@ audio {
   text-transform: uppercase;
 }
 
+.speaker-row label {
+  display: grid;
+  gap: 5px;
+  color: #69756d;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .task-row input,
-.task-row textarea {
+.task-row textarea,
+.speaker-row input {
   width: 100%;
   border: 1px solid #cbd4cd;
   border-radius: 8px;
@@ -538,6 +556,10 @@ audio {
   color: #19201d;
   padding: 9px 10px;
   text-transform: none;
+}
+
+.speaker-row .button {
+  width: 100%;
 }
 
 .task-row textarea {

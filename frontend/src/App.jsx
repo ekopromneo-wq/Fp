@@ -129,6 +129,8 @@ function App() {
   const [deletingTaskId, setDeletingTaskId] = useState(null);
   const [isAddingTask, setIsAddingTask] = useState(false);
   const [taskDrafts, setTaskDrafts] = useState({});
+  const [speakerDrafts, setSpeakerDrafts] = useState({});
+  const [savingSpeakerLabel, setSavingSpeakerLabel] = useState(null);
   const [newTaskDraft, setNewTaskDraft] = useState({ assignee: '', dueText: '', description: '' });
   const [processingId, setProcessingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
@@ -575,6 +577,77 @@ function App() {
     }
   }
 
+  function getSpeakerDraft(speaker) {
+    return (
+      speakerDrafts[speaker.label] || {
+        displayName: speaker.displayName || '',
+        contactName: speaker.contactName || '',
+        contactEmail: speaker.contactEmail || '',
+      }
+    );
+  }
+
+  function updateSpeakerDraft(speaker, field, value) {
+    setSpeakerDrafts((current) => ({
+      ...current,
+      [speaker.label]: {
+        ...getSpeakerDraft(speaker),
+        [field]: value,
+      },
+    }));
+  }
+
+  function applySpeakerUpdate(speaker) {
+    setSelectedRecording((current) => {
+      if (!current?.speakers) {
+        return current;
+      }
+
+      const speakers = current.speakers.map((item) => (item.label === speaker.label ? speaker : item));
+
+      return { ...current, speakers };
+    });
+  }
+
+  async function handleSaveSpeaker(speaker) {
+    if (!selectedRecording) {
+      return;
+    }
+
+    const draft = getSpeakerDraft(speaker);
+
+    if (!draft.displayName.trim()) {
+      setStatus('Заполни имя спикера');
+      return;
+    }
+
+    setSavingSpeakerLabel(speaker.label);
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/speakers/${encodeURIComponent(speaker.label)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(draft),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось сохранить спикера');
+      }
+
+      applySpeakerUpdate(data.speaker);
+      setSpeakerDrafts((current) => {
+        const next = { ...current };
+        delete next[speaker.label];
+        return next;
+      });
+      setStatus('Спикер сохранён');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка сохранения спикера');
+    } finally {
+      setSavingSpeakerLabel(null);
+    }
+  }
+
   async function handleDelete(recording) {
     const confirmed = window.confirm(`Удалить запись "${recording.title}"?`);
 
@@ -784,6 +857,60 @@ function App() {
                   <p className="transcript-text">{selectedRecording.transcript.text}</p>
                 ) : (
                   <p className="muted-text">Стенограммы пока нет. Запусти обработку записи.</p>
+                )}
+              </section>
+
+              <section className="detail-section">
+                <h3>Спикеры</h3>
+                {selectedRecording.speakers?.length ? (
+                  <div className="speaker-list">
+                    {selectedRecording.speakers.map((speaker) => {
+                      const draft = getSpeakerDraft(speaker);
+                      const isSavingSpeaker = savingSpeakerLabel === speaker.label;
+
+                      return (
+                        <div className="speaker-row" key={speaker.label}>
+                          <div className="speaker-row-header">
+                            <strong>{speaker.label}</strong>
+                            <span>{speaker.id ? 'Сохранён' : 'Из стенограммы'}</span>
+                          </div>
+
+                          <label>
+                            Имя в протоколе
+                            <input
+                              value={draft.displayName}
+                              onChange={(event) => updateSpeakerDraft(speaker, 'displayName', event.target.value)}
+                              placeholder="Спикер"
+                            />
+                          </label>
+
+                          <label>
+                            Контакт
+                            <input
+                              value={draft.contactName}
+                              onChange={(event) => updateSpeakerDraft(speaker, 'contactName', event.target.value)}
+                              placeholder="Имя контакта"
+                            />
+                          </label>
+
+                          <label>
+                            Email
+                            <input
+                              value={draft.contactEmail}
+                              onChange={(event) => updateSpeakerDraft(speaker, 'contactEmail', event.target.value)}
+                              placeholder="name@example.com"
+                            />
+                          </label>
+
+                          <button className="button button-secondary" type="button" onClick={() => handleSaveSpeaker(speaker)} disabled={isSavingSpeaker}>
+                            {isSavingSpeaker ? 'Сохраняем...' : 'Сохранить спикера'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="muted-text">Спикеры появятся после стенограммы с сегментами ASR.</p>
                 )}
               </section>
 

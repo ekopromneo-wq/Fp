@@ -82,6 +82,68 @@ function mapTask(row) {
   };
 }
 
+function mapSpeaker(row) {
+  return {
+    id: row.id,
+    recordingId: row.recording_id,
+    label: row.label,
+    displayName: row.display_name,
+    contactName: row.contact_name,
+    contactEmail: row.contact_email,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function formatSpeakerLabel(label) {
+  const normalized = String(label || 'speaker_1').trim() || 'speaker_1';
+  const match = normalized.match(/^speaker[_ -]?(\d+)$/i);
+
+  return match ? `Спикер ${match[1]}` : normalized;
+}
+
+function extractSpeakerLabels(segments) {
+  const labels = new Set();
+  const items = Array.isArray(segments) ? segments : [];
+
+  for (const segment of items) {
+    const label = typeof segment?.speaker === 'string' ? segment.speaker.trim() : '';
+
+    if (label) {
+      labels.add(label);
+    }
+  }
+
+  return [...labels].sort((a, b) => a.localeCompare(b));
+}
+
+function mergeSpeakers(transcriptRow, speakerRows) {
+  const storedSpeakers = speakerRows.map(mapSpeaker);
+  const storedByLabel = new Map(storedSpeakers.map((speaker) => [speaker.label, speaker]));
+  const labels = transcriptRow ? extractSpeakerLabels(transcriptRow.segments) : [];
+
+  if (transcriptRow && labels.length === 0) {
+    labels.push('speaker_1');
+  }
+
+  for (const label of labels) {
+    if (!storedByLabel.has(label)) {
+      storedByLabel.set(label, {
+        id: null,
+        recordingId: transcriptRow.recording_id,
+        label,
+        displayName: formatSpeakerLabel(label),
+        contactName: null,
+        contactEmail: null,
+        createdAt: null,
+        updatedAt: null,
+      });
+    }
+  }
+
+  return [...storedByLabel.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
 function normalizeProtocol(input) {
   const protocol = input && typeof input === 'object' ? input : {};
 
@@ -235,7 +297,7 @@ export async function getRecording(id, ownerId) {
     return null;
   }
 
-  const [jobs, transcript, summary, tasks] = await Promise.all([
+  const [jobs, transcript, summary, tasks, speakers] = await Promise.all([
     query(
       `
         select id, recording_id, queue_job_id, status, error, created_at, updated_at
@@ -274,14 +336,26 @@ export async function getRecording(id, ownerId) {
       `,
       [id],
     ),
+    query(
+      `
+        select id, recording_id, label, display_name, contact_name, contact_email, created_at, updated_at
+        from recording_speakers
+        where recording_id = $1
+        order by label asc
+      `,
+      [id],
+    ),
   ]);
+
+  const transcriptRow = transcript.rows[0];
 
   return {
     ...mapRecording(result.rows[0]),
     jobs: jobs.rows.map(mapJob),
-    transcript: mapTranscript(transcript.rows[0]),
+    transcript: mapTranscript(transcriptRow),
     summary: mapSummary(summary.rows[0]),
     tasks: tasks.rows.map(mapTask),
+    speakers: mergeSpeakers(transcriptRow, speakers.rows),
   };
 }
 
@@ -440,6 +514,37 @@ export async function deleteRecordingTask(recordingId, taskId, ownerId) {
   );
 
   return result.rowCount ? { id: result.rows[0].id } : null;
+}
+
+export async function updateRecordingSpeaker(recordingId, label, ownerId, input) {
+  const data = input && typeof input === 'object' ? input : {};
+  const displayName = typeof data.displayName === 'string' && data.displayName.trim() ? data.displayName.trim() : formatSpeakerLabel(label);
+  const contactName = typeof data.contactName === 'string' && data.contactName.trim() ? data.contactName.trim() : null;
+  const contactEmail = typeof data.contactEmail === 'string' && data.contactEmail.trim() ? data.contactEmail.trim() : null;
+
+  if (!String(label || '').trim()) {
+    throw new Error('Speaker label is required');
+  }
+
+  const result = await query(
+    `
+      insert into recording_speakers (recording_id, label, display_name, contact_name, contact_email)
+      select recording.id, $2, $4, $5, $6
+      from recordings recording
+      where recording.id = $1
+        and (recording.owner_id = $3 or recording.owner_id is null)
+      on conflict (recording_id, label)
+      do update set
+        display_name = excluded.display_name,
+        contact_name = excluded.contact_name,
+        contact_email = excluded.contact_email,
+        updated_at = now()
+      returning id, recording_id, label, display_name, contact_name, contact_email, created_at, updated_at
+    `,
+    [recordingId, label, ownerId, displayName, contactName, contactEmail],
+  );
+
+  return result.rowCount ? mapSpeaker(result.rows[0]) : null;
 }
 
 export async function getRecordingAudio(id, ownerId) {
@@ -718,6 +823,23 @@ export function registerRecordingRoutes(app) {
     }
 
     return c.json({ task: deleted });
+  });
+
+  app.patch('/api/recordings/:recordingId/speakers/:label', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+
+    try {
+      const speaker = await updateRecordingSpeaker(c.req.param('recordingId'), c.req.param('label'), user.id, body);
+
+      if (!speaker) {
+        return c.json({ error: 'Recording not found' }, 404);
+      }
+
+      return c.json({ speaker });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to update speaker' }, 400);
+    }
   });
 
   app.delete('/api/recordings/:id', requireAuth, async (c) => {

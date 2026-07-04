@@ -16,6 +16,7 @@
   - `POST /api/recordings/:recordingId/tasks` to add a manual confirmed task.
   - `PATCH /api/recordings/:recordingId/tasks/:taskId` to edit extracted task fields and status.
   - `DELETE /api/recordings/:recordingId/tasks/:taskId` to hard-delete a task.
+  - `PATCH /api/recordings/:recordingId/speakers/:label` to rename an ASR speaker label and attach manual contact fields.
   - `DELETE /api/recordings/:id` to remove the DB row and delete the MinIO object when `storage_key` is present.
   - `GET /api/recordings/:id/audio` to stream the MinIO object through the backend.
 - Auth API currently supports cookie-based sessions:
@@ -31,6 +32,7 @@
   - Shows login/register before the recordings workspace.
   - Shows selected recording details, audio playback, latest transcript, job history, and a processing trigger.
   - Shows extracted/manual tasks with inline editing for assignee, due text, description, confirmation, dismissal, hard delete, and manual add.
+  - Shows transcript speaker labels with inline editing for display name, contact name, and email.
   - Styles live in `frontend/src/App.css`.
 - Worker ASR:
   - Uses `OPENROUTER_API_KEY` from local `.env`; never commit the key.
@@ -42,4 +44,8 @@
   - Summaries/protocol are stored in `recording_summaries` and returned in recording details as `recording.summary`.
   - Extracted tasks are stored in `recording_tasks` with assignee, description, due text, and status; returned as `recording.tasks`.
   - Default LLM model: `openai/gpt-4o-mini`.
+- Speakers:
+  - Recording details derive speaker labels from latest transcript `segments[].speaker`.
+  - Manual speaker names and contact hints are stored in `recording_speakers`.
+  - Current ASR fallback creates a single `speaker_1` segment; full automatic diarization remains a later provider/service step.
 - On this Windows + Docker setup, Vite/nodemon may not always see bind-mounted file changes immediately. Recreating the relevant service with `docker-compose up -d --force-recreate web` or `api` refreshed the running code.
