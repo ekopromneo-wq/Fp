@@ -223,6 +223,7 @@ function App() {
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [recordings, setRecordings] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [activePage, setActivePage] = useState('library');
   const [selectedRecordingId, setSelectedRecordingId] = useState(null);
   const [selectedRecording, setSelectedRecording] = useState(null);
   const [status, setStatus] = useState('Загружаем записи...');
@@ -245,6 +246,10 @@ function App() {
   const [savingSpeakerLabel, setSavingSpeakerLabel] = useState(null);
   const [newTaskDraft, setNewTaskDraft] = useState({ assignee: '', dueText: '', description: '' });
   const [emailDraft, setEmailDraft] = useState({ recipients: '', message: '' });
+  const [smtpDraft, setSmtpDraft] = useState({ host: '', port: '587', secure: false, user: '', pass: '', from: '' });
+  const [smtpHasPassword, setSmtpHasPassword] = useState(false);
+  const [isSettingsLoading, setIsSettingsLoading] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [processingId, setProcessingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
@@ -313,6 +318,7 @@ function App() {
     setCurrentUser(null);
     setRecordings([]);
     setProjects([]);
+    setActivePage('library');
     setSelectedRecordingId(null);
     setSelectedRecording(null);
     setStatus('');
@@ -413,6 +419,62 @@ function App() {
     }
   }
 
+  async function loadSmtpSettings() {
+    setIsSettingsLoading(true);
+
+    try {
+      const response = await apiFetch('/api/settings/smtp');
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось загрузить настройки SMTP');
+      }
+
+      setSmtpDraft({
+        host: data.smtp?.host || '',
+        port: String(data.smtp?.port || 587),
+        secure: Boolean(data.smtp?.secure),
+        user: data.smtp?.user || '',
+        pass: '',
+        from: data.smtp?.from || '',
+      });
+      setSmtpHasPassword(Boolean(data.smtp?.hasPassword));
+    } catch (error) {
+      setStatus(error.message || 'Ошибка загрузки настроек SMTP');
+    } finally {
+      setIsSettingsLoading(false);
+    }
+  }
+
+  async function handleSaveSmtpSettings(event) {
+    event.preventDefault();
+    setIsSavingSettings(true);
+    setStatus('Сохраняем SMTP-настройки...');
+
+    try {
+      const response = await apiFetch('/api/settings/smtp', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          ...smtpDraft,
+          port: Number(smtpDraft.port || 587),
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось сохранить SMTP-настройки');
+      }
+
+      setSmtpDraft((current) => ({ ...current, pass: '' }));
+      setSmtpHasPassword(Boolean(data.smtp?.hasPassword));
+      setStatus('SMTP-настройки сохранены');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка сохранения SMTP-настроек');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  }
+
   useEffect(() => {
     loadCurrentUser();
   }, []);
@@ -429,6 +491,12 @@ function App() {
       loadRecordingDetail(selectedRecordingId);
     }
   }, [selectedRecordingId, currentUser?.id]);
+
+  useEffect(() => {
+    if (currentUser && activePage === 'settings') {
+      loadSmtpSettings();
+    }
+  }, [currentUser?.id, activePage]);
 
   useEffect(() => {
     setRecordingDraft({
@@ -1025,7 +1093,7 @@ function App() {
       <section className="topbar" aria-labelledby="page-title">
         <div>
           <p className="eyebrow">VoxMate</p>
-          <h1 id="page-title">Записи</h1>
+          <h1 id="page-title">{activePage === 'settings' ? 'Настройки' : 'Записи'}</h1>
         </div>
 
         <div className="topbar-right">
@@ -1035,14 +1103,32 @@ function App() {
           </div>
 
           <div className="actions">
-            <button className="button button-secondary" type="button" onClick={() => loadRecordings()} disabled={isLoading || isUploading}>
-              Обновить
-            </button>
+            {activePage === 'settings' ? (
+              <button className="button button-secondary" type="button" onClick={() => setActivePage('library')}>
+                Записи
+              </button>
+            ) : (
+              <>
+                <button className="button button-secondary" type="button" onClick={() => loadRecordings()} disabled={isLoading || isUploading}>
+                  Обновить
+                </button>
 
-            <label className={`button button-primary ${isUploading ? 'is-disabled' : ''}`}>
-              <input type="file" accept="audio/*,video/webm,.webm,.mp3,.wav,.m4a,.ogg" onChange={handleFileChange} disabled={isUploading} />
-              {isUploading ? 'Загрузка...' : 'Загрузить запись'}
-            </label>
+                <label className={`button button-primary ${isUploading ? 'is-disabled' : ''}`}>
+                  <input type="file" accept="audio/*,video/webm,.webm,.mp3,.wav,.m4a,.ogg" onChange={handleFileChange} disabled={isUploading} />
+                  {isUploading ? 'Загрузка...' : 'Загрузить запись'}
+                </label>
+              </>
+            )}
+
+            <button
+              className={`button icon-button ${activePage === 'settings' ? 'button-primary' : 'button-secondary'}`}
+              type="button"
+              onClick={() => setActivePage('settings')}
+              aria-label="Настройки"
+              title="Настройки"
+            >
+              ⚙
+            </button>
 
             <button className="button button-secondary" type="button" onClick={handleLogout}>
               Выйти
@@ -1051,6 +1137,90 @@ function App() {
         </div>
       </section>
 
+      {activePage === 'settings' ? (
+        <section className="settings-page" aria-label="Настройки SMTP">
+          <section className="settings-panel">
+            <div className="settings-header">
+              <div>
+                <p className="eyebrow">SMTP</p>
+                <h2>Отправка протоколов</h2>
+              </div>
+              {isSettingsLoading ? <span className="muted-text">Загружаем...</span> : null}
+            </div>
+
+            <form className="settings-form" onSubmit={handleSaveSmtpSettings}>
+              <label>
+                SMTP host
+                <input
+                  value={smtpDraft.host}
+                  onChange={(event) => setSmtpDraft((current) => ({ ...current, host: event.target.value }))}
+                  placeholder="smtp.example.com"
+                />
+              </label>
+
+              <label>
+                Порт
+                <input
+                  value={smtpDraft.port}
+                  onChange={(event) => setSmtpDraft((current) => ({ ...current, port: event.target.value }))}
+                  inputMode="numeric"
+                  placeholder="587"
+                />
+              </label>
+
+              <label className="settings-toggle">
+                <input
+                  checked={smtpDraft.secure}
+                  onChange={(event) => setSmtpDraft((current) => ({ ...current, secure: event.target.checked }))}
+                  type="checkbox"
+                />
+                TLS/SSL
+              </label>
+
+              <label>
+                Пользователь
+                <input
+                  value={smtpDraft.user}
+                  onChange={(event) => setSmtpDraft((current) => ({ ...current, user: event.target.value }))}
+                  placeholder="smtp-user"
+                />
+              </label>
+
+              <label>
+                Пароль
+                <input
+                  value={smtpDraft.pass}
+                  onChange={(event) => setSmtpDraft((current) => ({ ...current, pass: event.target.value }))}
+                  type="password"
+                  placeholder={smtpHasPassword ? 'Пароль сохранен, оставь пустым чтобы не менять' : 'Пароль SMTP'}
+                />
+              </label>
+
+              <label>
+                От кого
+                <input
+                  value={smtpDraft.from}
+                  onChange={(event) => setSmtpDraft((current) => ({ ...current, from: event.target.value }))}
+                  placeholder="VoxMate <no-reply@example.com>"
+                />
+              </label>
+
+              <button className="button button-primary" type="submit" disabled={isSavingSettings || isSettingsLoading}>
+                {isSavingSettings ? 'Сохраняем...' : 'Сохранить SMTP'}
+              </button>
+            </form>
+
+            <p className="settings-note">
+              Эти настройки используются для кнопки отправки протокола по Email. Если поле пароля пустое, сохраненный пароль не меняется.
+            </p>
+          </section>
+
+          <section className="status-line" aria-live="polite">
+            {status || 'Настройки будут применены к следующим отправкам протоколов.'}
+          </section>
+        </section>
+      ) : (
+        <>
       <section className="library-controls" aria-label="Фильтры библиотеки">
         <label>
           Поиск
@@ -1584,6 +1754,8 @@ function App() {
           ) : null}
         </aside>
       </section>
+        </>
+      )}
     </main>
   );
 }

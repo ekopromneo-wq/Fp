@@ -1,5 +1,5 @@
 import { createRecordingQueue } from './queue.js';
-import { getAuthUser, requireAuth } from './auth.js';
+import { getAuthUser, getUserSmtpConfig, requireAuth } from './auth.js';
 import { query, transaction } from './db.js';
 import { sendRecordingEmail } from './email.js';
 import { Readable } from 'node:stream';
@@ -1053,7 +1053,8 @@ export function registerRecordingRoutes(app) {
     }
 
     try {
-      const delivery = await sendRecordingEmail(recording, body);
+      const smtpConfig = await getUserSmtpConfig(user.id);
+      const delivery = await sendRecordingEmail(recording, body, smtpConfig);
 
       return c.json({ delivery });
     } catch (error) {

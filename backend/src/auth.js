@@ -74,6 +74,35 @@ function mapUser(row) {
   };
 }
 
+function normalizeSmtpConfig(input = {}, previous = {}) {
+  const host = typeof input.host === 'string' ? input.host.trim() : '';
+  const port = Number(input.port || 587);
+  const user = typeof input.user === 'string' ? input.user.trim() : '';
+  const from = typeof input.from === 'string' ? input.from.trim() : '';
+  const passInput = typeof input.pass === 'string' ? input.pass : '';
+  const pass = passInput || previous.pass || '';
+
+  return {
+    host,
+    port: Number.isFinite(port) && port > 0 ? port : 587,
+    secure: Boolean(input.secure),
+    user,
+    pass,
+    from,
+  };
+}
+
+function publicSmtpConfig(config = {}) {
+  return {
+    host: config.host || '',
+    port: config.port || 587,
+    secure: Boolean(config.secure),
+    user: config.user || '',
+    from: config.from || '',
+    hasPassword: Boolean(config.pass),
+  };
+}
+
 async function createSession(userId) {
   const token = randomBytes(32).toString('base64url');
   const tokenHash = hashToken(token);
@@ -139,10 +168,36 @@ export function getAuthUser(c) {
   return c.get('currentUser');
 }
 
+export async function getUserSmtpConfig(userId) {
+  const result = await query('select smtp_config from app_users where id = $1', [userId]);
+  return result.rows[0]?.smtp_config || null;
+}
+
 export function registerAuthRoutes(app) {
   app.get('/api/auth/me', async (c) => {
     const user = await getCurrentUser(c);
     return c.json({ user });
+  });
+
+  app.get('/api/settings/smtp', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const config = await getUserSmtpConfig(user.id);
+
+    return c.json({ smtp: publicSmtpConfig(config || {}) });
+  });
+
+  app.patch('/api/settings/smtp', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const previous = (await getUserSmtpConfig(user.id)) || {};
+    const config = normalizeSmtpConfig(body, previous);
+
+    await query('update app_users set smtp_config = $1::jsonb, updated_at = now() where id = $2', [
+      JSON.stringify(config),
+      user.id,
+    ]);
+
+    return c.json({ smtp: publicSmtpConfig(config) });
   });
 
   app.post('/api/auth/register', async (c) => {

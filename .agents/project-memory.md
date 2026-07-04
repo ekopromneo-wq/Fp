@@ -28,6 +28,7 @@
   - `POST /api/auth/login`
   - `POST /api/auth/logout`
   - `GET /api/auth/me`
+  - `GET /api/settings/smtp` and `PATCH /api/settings/smtp` for per-user SMTP settings.
   - Recording routes require auth; legacy `owner_id is null` recordings remain visible in dev so previous smoke data does not disappear.
 - Frontend `frontend/src/App.jsx` is a basic recordings UI:
   - Lists recordings from the backend.
@@ -38,6 +39,7 @@
   - Shows library search, project filter, project creation, title/project editing, and AI title generation for the selected recording.
   - Exports the selected recording as Markdown from the frontend: copy to clipboard or download `.md` with summary, protocol, tasks, speakers, and transcript.
   - Sends the selected recording protocol/tasks by email when SMTP env vars are configured.
+  - Has a settings page opened by the gear button before logout; SMTP settings are stored per user in `app_users.smtp_config`.
   - Shows extracted/manual tasks with inline editing for assignee, due text, description, confirmation, dismissal, hard delete, and manual add.
   - Shows transcript speaker labels with inline editing for display name, contact name, and email.
   - Styles live in `frontend/src/App.css`.

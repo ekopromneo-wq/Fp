@@ -164,6 +164,13 @@ const migrations = [
       create index if not exists recordings_project_id_idx on recordings(project_id);
     `,
   },
+  {
+    id: '008_user_smtp_config',
+    sql: `
+      alter table app_users
+        add column if not exists smtp_config jsonb;
+    `,
+  },
 ];
 
 export async function runMigrations() {

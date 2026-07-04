@@ -1,11 +1,11 @@
 import nodemailer from 'nodemailer';
 
-function getSmtpConfig() {
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT || 587);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  const from = process.env.SMTP_FROM || user;
+function getSmtpConfig(input = {}) {
+  const host = input.host || process.env.SMTP_HOST;
+  const port = Number(input.port || process.env.SMTP_PORT || 587);
+  const user = input.user || process.env.SMTP_USER;
+  const pass = input.pass || process.env.SMTP_PASS;
+  const from = input.from || process.env.SMTP_FROM || user;
 
   if (!host || !from) {
     throw new Error('SMTP is not configured');
@@ -14,7 +14,8 @@ function getSmtpConfig() {
   return {
     host,
     port,
-    secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || port === 465,
+    secure:
+      input.secure === true || String(input.secure ?? process.env.SMTP_SECURE ?? '').toLowerCase() === 'true' || port === 465,
     auth: user && pass ? { user, pass } : undefined,
     from,
   };
@@ -151,8 +152,8 @@ function buildEmailContent(recording, message = '') {
   return { text, html };
 }
 
-export async function sendRecordingEmail(recording, input = {}) {
-  const config = getSmtpConfig();
+export async function sendRecordingEmail(recording, input = {}, smtpConfig = {}) {
+  const config = getSmtpConfig(smtpConfig || {});
   const to = normalizeRecipients(input.recipients);
   const subject = String(input.subject || '').trim() || `VoxMate: ${recording.title}`;
   const { text, html } = buildEmailContent(recording, input.message);
