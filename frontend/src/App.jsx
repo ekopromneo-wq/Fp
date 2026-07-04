@@ -45,6 +45,110 @@ function getAudioUrl(recording) {
   return recording?.storageKey ? `${apiBaseUrl}/api/recordings/${recording.id}/audio` : '';
 }
 
+function escapeTableCell(value) {
+  return String(value || '-').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+}
+
+function formatMarkdownList(items) {
+  return items?.length ? items.map((item) => `- ${item}`).join('\n') : '- не выделено';
+}
+
+function buildRecordingExport(recording) {
+  const summary = recording.summary;
+  const protocol = summary?.protocol;
+  const tasks = recording.tasks || [];
+  const speakers = recording.speakers || [];
+  const lines = [
+    `# ${recording.title}`,
+    '',
+    `Файл: ${recording.originalFilename || 'не прикреплен'}`,
+    `Дата загрузки: ${formatDate(recording.createdAt)}`,
+    `Статус: ${recording.status}`,
+    `Проект: ${recording.project?.name || 'без проекта'}`,
+    '',
+  ];
+
+  lines.push('## Резюме', '', summary?.summary || 'Резюме пока нет.', '');
+
+  lines.push('## Протокол', '');
+  if (protocol) {
+    lines.push('### Повестка', formatMarkdownList(protocol.agenda), '');
+    lines.push('### Решения', formatMarkdownList(protocol.decisions), '');
+    lines.push('### Риски', formatMarkdownList(protocol.risks), '');
+  } else {
+    lines.push('Протокол пока не создан.', '');
+  }
+
+  lines.push('## Задачи', '');
+  if (tasks.length) {
+    lines.push('| Исполнитель | Срок | Статус | Описание |');
+    lines.push('| --- | --- | --- | --- |');
+    tasks.forEach((task) => {
+      lines.push(
+        `| ${escapeTableCell(task.assignee)} | ${escapeTableCell(task.dueText)} | ${escapeTableCell(task.status)} | ${escapeTableCell(task.description)} |`,
+      );
+    });
+    lines.push('');
+  } else {
+    lines.push('Задач пока нет.', '');
+  }
+
+  lines.push('## Спикеры', '');
+  if (speakers.length) {
+    speakers.forEach((speaker) => {
+      const displayName = speaker.displayName || speaker.label;
+      const contact = [speaker.contactName, speaker.contactEmail].filter(Boolean).join(', ');
+      lines.push(`- ${displayName}${contact ? ` (${contact})` : ''}`);
+    });
+    lines.push('');
+  } else {
+    lines.push('Спикеры пока не выделены.', '');
+  }
+
+  lines.push('## Стенограмма', '', recording.transcript?.text || 'Стенограммы пока нет.', '');
+
+  return lines.join('\n');
+}
+
+function createExportFilename(recording) {
+  const baseName = (recording.title || recording.originalFilename || 'recording')
+    .toLowerCase()
+    .replace(/[^a-zа-яё0-9]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+
+  return `${baseName || 'recording'}-protocol.md`;
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+}
+
+function downloadTextFile(filename, text) {
+  const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 function isProcessingStatus(status) {
   return status === 'queued' || status === 'processing';
 }
@@ -155,6 +259,9 @@ function App() {
     selectedRecording.status !== 'queued' &&
     selectedRecording.status !== 'processing' &&
     processingId !== selectedRecording.id;
+  const canExportSelected =
+    selectedRecording &&
+    (selectedRecording.summary || selectedRecording.transcript || selectedRecording.tasks?.length || selectedRecording.speakers?.length);
 
   const projectOptions = useMemo(() => projects, [projects]);
 
@@ -540,6 +647,28 @@ function App() {
     } finally {
       setIsSummarizing(false);
     }
+  }
+
+  async function handleCopyExport(recording) {
+    if (!recording) {
+      return;
+    }
+
+    try {
+      await copyText(buildRecordingExport(recording));
+      setStatus(`Экспорт "${recording.title}" скопирован`);
+    } catch {
+      setStatus('Не удалось скопировать экспорт');
+    }
+  }
+
+  function handleDownloadExport(recording) {
+    if (!recording) {
+      return;
+    }
+
+    downloadTextFile(createExportFilename(recording), buildRecordingExport(recording));
+    setStatus(`Экспорт "${recording.title}" скачан`);
   }
 
   function getTaskDraft(task) {
@@ -1013,6 +1142,22 @@ function App() {
                   disabled={!selectedRecording.transcript || isSummarizing}
                 >
                   {isSummarizing ? 'Готовим...' : 'Сделать протокол'}
+                </button>
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  onClick={() => handleCopyExport(selectedRecording)}
+                  disabled={!canExportSelected}
+                >
+                  Скопировать
+                </button>
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  onClick={() => handleDownloadExport(selectedRecording)}
+                  disabled={!canExportSelected}
+                >
+                  Скачать .md
                 </button>
               </div>
 

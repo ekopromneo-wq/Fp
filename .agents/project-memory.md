@@ -35,6 +35,7 @@
   - Shows login/register before the recordings workspace.
   - Shows selected recording details, audio playback, latest transcript, job history, and a processing trigger.
   - Shows library search, project filter, project creation, title/project editing, and AI title generation for the selected recording.
+  - Exports the selected recording as Markdown from the frontend: copy to clipboard or download `.md` with summary, protocol, tasks, speakers, and transcript.
   - Shows extracted/manual tasks with inline editing for assignee, due text, description, confirmation, dismissal, hard delete, and manual add.
   - Shows transcript speaker labels with inline editing for display name, contact name, and email.
   - Styles live in `frontend/src/App.css`.
