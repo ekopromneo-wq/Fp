@@ -128,6 +128,7 @@ function App() {
   const [newProjectDraft, setNewProjectDraft] = useState({ name: '', color: '#235b4f' });
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isSavingRecording, setIsSavingRecording] = useState(false);
+  const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -386,6 +387,35 @@ function App() {
       setStatus(error.message || 'Ошибка сохранения записи');
     } finally {
       setIsSavingRecording(false);
+    }
+  }
+
+  async function handleGenerateTitle() {
+    if (!selectedRecording) {
+      return;
+    }
+
+    setIsGeneratingTitle(true);
+    setStatus(`Готовим название для "${selectedRecording.title}"...`);
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/title-suggestion`, {
+        method: 'POST',
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось предложить название');
+      }
+
+      setSelectedRecording((current) => (current?.id === data.recording.id ? { ...current, ...data.recording } : current));
+      setRecordings((current) => current.map((recording) => (recording.id === data.recording.id ? { ...recording, ...data.recording } : recording)));
+      setRecordingDraft((current) => ({ ...current, title: data.recording.title }));
+      setStatus('AI-название применено');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка генерации названия');
+    } finally {
+      setIsGeneratingTitle(false);
     }
   }
 
@@ -999,6 +1029,18 @@ function App() {
                     ))}
                   </select>
                 </label>
+
+                <div className="recording-edit-actions">
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    onClick={handleGenerateTitle}
+                    disabled={isGeneratingTitle || (!selectedRecording.transcript && !selectedRecording.summary)}
+                  >
+                    {isGeneratingTitle ? 'Думаем...' : 'AI-название'}
+                  </button>
+                  {selectedRecording.autoNamed ? <span className="auto-name-badge">AI</span> : null}
+                </div>
 
                 <button className="button button-secondary" type="button" onClick={handleSaveRecordingMetadata} disabled={isSavingRecording}>
                   {isSavingRecording ? 'Сохраняем...' : 'Сохранить запись'}

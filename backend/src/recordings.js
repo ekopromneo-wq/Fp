@@ -269,6 +269,66 @@ async function generateSummaryWithOpenRouter(transcriptText) {
   };
 }
 
+async function generateTitleWithOpenRouter(recording) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+
+  if (!apiKey) {
+    throw new Error('OPENROUTER_API_KEY is not configured');
+  }
+
+  const model = process.env.OPENROUTER_LLM_MODEL || 'openai/gpt-4o-mini';
+  const speakers = (recording.speakers || [])
+    .map((speaker) => speaker.displayName || speaker.label)
+    .filter(Boolean)
+    .join(', ');
+  const summary = recording.summary?.summary || '';
+  const transcript = recording.transcript?.text || '';
+
+  if (!summary && !transcript) {
+    throw new Error('Recording has no transcript or summary yet');
+  }
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'http://localhost:4173',
+      'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'VoxMate',
+    },
+    body: JSON.stringify({
+      model,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Ты помощник VoxMate. Верни строго JSON без markdown с полем title:string. Название должно быть по-русски, короткое, 4-9 слов, без кавычек, без даты если дата не дана явно.',
+        },
+        {
+          role: 'user',
+          content: `Предложи понятное название встречи по материалам.\n\nТекущее название: ${recording.title}\nСпикеры: ${speakers || 'не указаны'}\nРезюме: ${summary || 'нет'}\nСтенограмма:\n${transcript.slice(0, 6000)}`,
+        },
+      ],
+    }),
+  });
+
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(body?.error?.message || body?.message || `OpenRouter LLM failed with ${response.status}`);
+  }
+
+  const parsed = parseJsonObject(body?.choices?.[0]?.message?.content);
+  const title = String(parsed.title || '').trim();
+
+  if (!title) {
+    throw new Error('LLM did not return a title');
+  }
+
+  return title.slice(0, 160);
+}
+
 export async function listProjects(ownerId) {
   const result = await query(
     `
@@ -527,6 +587,34 @@ export async function updateRecordingMetadata(recordingId, ownerId, input) {
   );
 
   return result.rowCount ? mapRecording(result.rows[0]) : null;
+}
+
+export async function generateRecordingTitle(recordingId, ownerId) {
+  const recording = await getRecording(recordingId, ownerId);
+
+  if (!recording) {
+    return null;
+  }
+
+  const title = await generateTitleWithOpenRouter(recording);
+  const result = await query(
+    `
+      update recordings
+      set title = $3, auto_named = true, updated_at = now()
+      where recordings.id = $1
+        and (recordings.owner_id = $2 or recordings.owner_id is null)
+      returning
+        recordings.id, recordings.owner_id, recordings.project_id, recordings.title, recordings.status,
+        recordings.source, recordings.duration_seconds, recordings.storage_key, recordings.created_at,
+        recordings.updated_at, recordings.original_filename, recordings.mime_type, recordings.file_size_bytes,
+        recordings.auto_named,
+        (select name from projects where projects.id = recordings.project_id) as project_name,
+        (select color from projects where projects.id = recordings.project_id) as project_color
+    `,
+    [recordingId, ownerId, title],
+  );
+
+  return mapRecording(result.rows[0]);
 }
 
 export async function createRecordingTask(recordingId, ownerId, input) {
@@ -890,6 +978,22 @@ export function registerRecordingRoutes(app) {
       return c.json({ recording });
     } catch (error) {
       return c.json({ error: error.message || 'Failed to update recording' }, 400);
+    }
+  });
+
+  app.post('/api/recordings/:id/title-suggestion', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+
+    try {
+      const recording = await generateRecordingTitle(c.req.param('id'), user.id);
+
+      if (!recording) {
+        return c.json({ error: 'Recording not found' }, 404);
+      }
+
+      return c.json({ recording });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to generate recording title' }, 400);
     }
   });
 

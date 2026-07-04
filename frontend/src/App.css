@@ -445,6 +445,22 @@ h3 {
   width: 100%;
 }
 
+.recording-edit-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.auto-name-badge {
+  border-radius: 999px;
+  padding: 5px 8px;
+  color: #235b4f;
+  background: #e3f0ea;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
