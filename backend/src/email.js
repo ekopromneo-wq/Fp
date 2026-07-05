@@ -152,6 +152,8 @@ function buildEmailContent(recording, message = '') {
   return { text, html };
 }
 
+export { buildEmailContent };
+
 export async function sendRecordingEmail(recording, input = {}, smtpConfig = {}) {
   const config = getSmtpConfig(smtpConfig || {});
   const to = normalizeRecipients(input.recipients);

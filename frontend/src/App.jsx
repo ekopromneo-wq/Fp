@@ -244,6 +244,9 @@ function App() {
   const [recordingDraft, setRecordingDraft] = useState({ title: '', projectId: '' });
   const [newProjectDraft, setNewProjectDraft] = useState({ name: '', color: '#235b4f' });
   const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [meetingBotDraft, setMeetingBotDraft] = useState({ meetingUrl: '', title: '' });
+  const [isJoiningMeeting, setIsJoiningMeeting] = useState(false);
+  const [isStoppingMeetingBot, setIsStoppingMeetingBot] = useState(false);
   const [isSavingRecording, setIsSavingRecording] = useState(false);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -252,16 +255,37 @@ function App() {
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [summaryLength, setSummaryLength] = useState('medium');
   const [savingTaskId, setSavingTaskId] = useState(null);
   const [deletingTaskId, setDeletingTaskId] = useState(null);
   const [isAddingTask, setIsAddingTask] = useState(false);
   const [taskDrafts, setTaskDrafts] = useState({});
   const [speakerDrafts, setSpeakerDrafts] = useState({});
+  const [speakerMatches, setSpeakerMatches] = useState({});
+  const [isLoadingSpeakerMatches, setIsLoadingSpeakerMatches] = useState(false);
   const [savingSpeakerLabel, setSavingSpeakerLabel] = useState(null);
   const [newTaskDraft, setNewTaskDraft] = useState({ assignee: '', dueText: '', description: '' });
   const [emailDraft, setEmailDraft] = useState({ recipients: '', message: '' });
   const [smtpDraft, setSmtpDraft] = useState({ host: '', port: '587', secure: false, user: '', pass: '', from: '' });
   const [smtpHasPassword, setSmtpHasPassword] = useState(false);
+  const [telegramSettingsDraft, setTelegramSettingsDraft] = useState({ chatId: '', botToken: '' });
+  const [telegramHasToken, setTelegramHasToken] = useState(false);
+  const [isSavingTelegramSettings, setIsSavingTelegramSettings] = useState(false);
+  const [bitrixSettingsDraft, setBitrixSettingsDraft] = useState({ webhookUrl: '', defaultResponsibleId: '', defaultGroupId: '' });
+  const [bitrixHasWebhook, setBitrixHasWebhook] = useState(false);
+  const [isSavingBitrixSettings, setIsSavingBitrixSettings] = useState(false);
+  const [diarizationSettingsDraft, setDiarizationSettingsDraft] = useState({
+    method: 'shopot',
+    shopotApiKey: '',
+    geminiModel: 'google/gemini-2.5-pro',
+    speech2textApiKey: '',
+  });
+  const [diarizationHasShopotKey, setDiarizationHasShopotKey] = useState(false);
+  const [diarizationHasSpeech2textKey, setDiarizationHasSpeech2textKey] = useState(false);
+  const [isSavingDiarizationSettings, setIsSavingDiarizationSettings] = useState(false);
+  const [telegramDraft, setTelegramDraft] = useState({ chatId: '', message: '' });
+  const [isSendingTelegram, setIsSendingTelegram] = useState(false);
+  const [isSendingBitrixTaskId, setIsSendingBitrixTaskId] = useState(null);
   const [isSettingsLoading, setIsSettingsLoading] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
@@ -489,6 +513,155 @@ function App() {
     }
   }
 
+  async function loadTelegramSettings() {
+    setIsSettingsLoading(true);
+
+    try {
+      const response = await apiFetch('/api/settings/telegram');
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось загрузить настройки Telegram');
+      }
+
+      setTelegramSettingsDraft({ chatId: data.telegram?.chatId || '', botToken: '' });
+      setTelegramHasToken(Boolean(data.telegram?.hasToken));
+    } catch (error) {
+      setStatus(error.message || 'Ошибка загрузки настроек Telegram');
+    } finally {
+      setIsSettingsLoading(false);
+    }
+  }
+
+  async function handleSaveTelegramSettings(event) {
+    event.preventDefault();
+    setIsSavingTelegramSettings(true);
+    setStatus('Сохраняем настройки Telegram...');
+
+    try {
+      const response = await apiFetch('/api/settings/telegram', {
+        method: 'PATCH',
+        body: JSON.stringify(telegramSettingsDraft),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось сохранить настройки Telegram');
+      }
+
+      setTelegramSettingsDraft((current) => ({ ...current, botToken: '' }));
+      setTelegramHasToken(Boolean(data.telegram?.hasToken));
+      setStatus('Настройки Telegram сохранены');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка сохранения настроек Telegram');
+    } finally {
+      setIsSavingTelegramSettings(false);
+    }
+  }
+
+  async function loadBitrixSettings() {
+    setIsSettingsLoading(true);
+
+    try {
+      const response = await apiFetch('/api/settings/bitrix');
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось загрузить настройки Битрикс24');
+      }
+
+      setBitrixSettingsDraft({
+        webhookUrl: '',
+        defaultResponsibleId: data.bitrix?.defaultResponsibleId || '',
+        defaultGroupId: data.bitrix?.defaultGroupId || '',
+      });
+      setBitrixHasWebhook(Boolean(data.bitrix?.hasWebhook));
+    } catch (error) {
+      setStatus(error.message || 'Ошибка загрузки настроек Битрикс24');
+    } finally {
+      setIsSettingsLoading(false);
+    }
+  }
+
+  async function handleSaveBitrixSettings(event) {
+    event.preventDefault();
+    setIsSavingBitrixSettings(true);
+    setStatus('Сохраняем настройки Битрикс24...');
+
+    try {
+      const response = await apiFetch('/api/settings/bitrix', {
+        method: 'PATCH',
+        body: JSON.stringify(bitrixSettingsDraft),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось сохранить настройки Битрикс24');
+      }
+
+      setBitrixSettingsDraft((current) => ({ ...current, webhookUrl: '' }));
+      setBitrixHasWebhook(Boolean(data.bitrix?.hasWebhook));
+      setStatus('Настройки Битрикс24 сохранены');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка сохранения настроек Битрикс24');
+    } finally {
+      setIsSavingBitrixSettings(false);
+    }
+  }
+
+  async function loadDiarizationSettings() {
+    setIsSettingsLoading(true);
+
+    try {
+      const response = await apiFetch('/api/settings/diarization');
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось загрузить настройки диаризации');
+      }
+
+      setDiarizationSettingsDraft({
+        method: data.diarization?.method || 'shopot',
+        shopotApiKey: '',
+        geminiModel: data.diarization?.geminiModel || 'google/gemini-2.5-pro',
+        speech2textApiKey: '',
+      });
+      setDiarizationHasShopotKey(Boolean(data.diarization?.hasShopotKey));
+      setDiarizationHasSpeech2textKey(Boolean(data.diarization?.hasSpeech2textKey));
+    } catch (error) {
+      setStatus(error.message || 'Ошибка загрузки настроек диаризации');
+    } finally {
+      setIsSettingsLoading(false);
+    }
+  }
+
+  async function handleSaveDiarizationSettings(event) {
+    event.preventDefault();
+    setIsSavingDiarizationSettings(true);
+    setStatus('Сохраняем настройки диаризации...');
+
+    try {
+      const response = await apiFetch('/api/settings/diarization', {
+        method: 'PATCH',
+        body: JSON.stringify(diarizationSettingsDraft),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось сохранить настройки диаризации');
+      }
+
+      setDiarizationSettingsDraft((current) => ({ ...current, shopotApiKey: '', speech2textApiKey: '' }));
+      setDiarizationHasShopotKey(Boolean(data.diarization?.hasShopotKey));
+      setDiarizationHasSpeech2textKey(Boolean(data.diarization?.hasSpeech2textKey));
+      setStatus('Настройки диаризации сохранены');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка сохранения настроек диаризации');
+    } finally {
+      setIsSavingDiarizationSettings(false);
+    }
+  }
+
   useEffect(() => {
     loadCurrentUser();
   }, []);
@@ -509,6 +682,9 @@ function App() {
   useEffect(() => {
     if (currentUser && activePage === 'settings') {
       loadSmtpSettings();
+      loadTelegramSettings();
+      loadBitrixSettings();
+      loadDiarizationSettings();
     }
   }, [currentUser?.id, activePage]);
 
@@ -555,6 +731,61 @@ function App() {
       setStatus(error.message || 'Ошибка создания проекта');
     } finally {
       setIsCreatingProject(false);
+    }
+  }
+
+  async function handleJoinMeeting(event) {
+    event.preventDefault();
+
+    if (!meetingBotDraft.meetingUrl.trim()) {
+      setStatus('Укажи ссылку на встречу');
+      return;
+    }
+
+    setIsJoiningMeeting(true);
+    setStatus('Отправляем бота на встречу...');
+
+    try {
+      const response = await apiFetch('/api/recordings/meeting-bot', {
+        method: 'POST',
+        body: JSON.stringify(meetingBotDraft),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось отправить бота на встречу');
+      }
+
+      setMeetingBotDraft({ meetingUrl: '', title: '' });
+      await loadRecordings(data.recording.id);
+      setStatus(`Бот отправлен на встречу "${data.recording.title}"`);
+    } catch (error) {
+      setStatus(error.message || 'Ошибка отправки бота на встречу');
+    } finally {
+      setIsJoiningMeeting(false);
+    }
+  }
+
+  async function handleStopMeetingBot(recording) {
+    setIsStoppingMeetingBot(true);
+    setStatus('Останавливаем бота...');
+
+    try {
+      const response = await apiFetch(`/api/recordings/${recording.id}/meeting-bot/stop`, {
+        method: 'POST',
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось остановить бота');
+      }
+
+      await loadRecordings(recording.id);
+      setStatus('Бот остановлен');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка остановки бота');
+    } finally {
+      setIsStoppingMeetingBot(false);
     }
   }
 
@@ -882,6 +1113,7 @@ function App() {
     try {
       const response = await apiFetch(`/api/recordings/${recording.id}/summary`, {
         method: 'POST',
+        body: JSON.stringify({ length: summaryLength }),
       });
       const data = await response.json();
 
@@ -956,6 +1188,69 @@ function App() {
       setStatus(error.message || 'Ошибка отправки письма');
     } finally {
       setIsSendingEmail(false);
+    }
+  }
+
+  async function handleSendTelegram(event) {
+    event.preventDefault();
+
+    if (!selectedRecording) {
+      return;
+    }
+
+    setIsSendingTelegram(true);
+    setStatus(`Отправляем "${selectedRecording.title}" в Telegram...`);
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/telegram`, {
+        method: 'POST',
+        body: JSON.stringify(telegramDraft),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось отправить в Telegram');
+      }
+
+      setStatus(`Протокол "${selectedRecording.title}" отправлен в Telegram`);
+    } catch (error) {
+      setStatus(error.message || 'Ошибка отправки в Telegram');
+    } finally {
+      setIsSendingTelegram(false);
+    }
+  }
+
+  async function handleSendTaskToBitrix(task) {
+    if (!selectedRecording) {
+      return;
+    }
+
+    setIsSendingBitrixTaskId(task.id);
+    setStatus(`Отправляем задачу в Битрикс24...`);
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/bitrix`, {
+        method: 'POST',
+        body: JSON.stringify({ taskIds: [task.id] }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось отправить задачу в Битрикс24');
+      }
+
+      const result = data.results?.[0];
+
+      if (result && !result.ok) {
+        throw new Error(result.error || 'Битрикс24 отклонил задачу');
+      }
+
+      await loadRecordingDetail(selectedRecording.id, { quiet: true });
+      setStatus('Задача отправлена в Битрикс24');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка отправки в Битрикс24');
+    } finally {
+      setIsSendingBitrixTaskId(null);
     }
   }
 
@@ -1171,6 +1466,53 @@ function App() {
     });
   }
 
+  function applySpeakerCandidate(speaker, candidate) {
+    setSpeakerDrafts((current) => ({
+      ...current,
+      [speaker.label]: {
+        ...getSpeakerDraft(speaker),
+        contactName: candidate.name,
+        contactEmail: candidate.email,
+      },
+    }));
+  }
+
+  async function handleMatchSpeakersToBitrix() {
+    if (!selectedRecording) {
+      return;
+    }
+
+    setIsLoadingSpeakerMatches(true);
+    setStatus('Ищем совпадения спикеров в Битрикс24...');
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/bitrix-speaker-matches`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось сопоставить спикеров с Битрикс24');
+      }
+
+      const matchesByLabel = Object.fromEntries((data.matches || []).map((match) => [match.label, match]));
+      setSpeakerMatches(matchesByLabel);
+
+      for (const speaker of selectedRecording.speakers || []) {
+        const match = matchesByLabel[speaker.label];
+        const draft = getSpeakerDraft(speaker);
+
+        if (match?.autoMatch && !draft.contactEmail) {
+          applySpeakerCandidate(speaker, match.autoMatch);
+        }
+      }
+
+      setStatus('Спикеры сопоставлены с Битрикс24');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка сопоставления спикеров с Битрикс24');
+    } finally {
+      setIsLoadingSpeakerMatches(false);
+    }
+  }
+
   async function handleSaveSpeaker(speaker) {
     if (!selectedRecording) {
       return;
@@ -1350,6 +1692,68 @@ function App() {
           <section className="settings-panel">
             <div className="settings-header">
               <div>
+                <p className="eyebrow">Диаризация</p>
+                <h2>Способ разметки по спикерам</h2>
+              </div>
+              {isSettingsLoading ? <span className="muted-text">Загружаем...</span> : null}
+            </div>
+
+            <form className="settings-form" onSubmit={handleSaveDiarizationSettings}>
+              <label>
+                Способ
+                <select
+                  value={diarizationSettingsDraft.method}
+                  onChange={(event) => setDiarizationSettingsDraft((current) => ({ ...current, method: event.target.value }))}
+                >
+                  <option value="shopot">Shopot (облачная диаризация)</option>
+                  <option value="gemini">Gemini через OpenRouter (аудио + определение имён)</option>
+                  <option value="speech2text">Speech2Text (облачная диаризация)</option>
+                  <option value="off">Выключено (только текстовая разметка по стенограмме)</option>
+                </select>
+              </label>
+
+              <label>
+                Shopot API-ключ
+                <input
+                  value={diarizationSettingsDraft.shopotApiKey}
+                  onChange={(event) => setDiarizationSettingsDraft((current) => ({ ...current, shopotApiKey: event.target.value }))}
+                  type="password"
+                  placeholder={diarizationHasShopotKey ? 'Ключ сохранен, оставь пустым чтобы не менять' : 'shpt_...'}
+                />
+              </label>
+
+              <label>
+                Модель Gemini (через OpenRouter)
+                <input
+                  value={diarizationSettingsDraft.geminiModel}
+                  onChange={(event) => setDiarizationSettingsDraft((current) => ({ ...current, geminiModel: event.target.value }))}
+                  placeholder="google/gemini-2.5-pro"
+                />
+              </label>
+
+              <label>
+                Speech2Text API-ключ
+                <input
+                  value={diarizationSettingsDraft.speech2textApiKey}
+                  onChange={(event) => setDiarizationSettingsDraft((current) => ({ ...current, speech2textApiKey: event.target.value }))}
+                  type="password"
+                  placeholder={diarizationHasSpeech2textKey ? 'Ключ сохранен, оставь пустым чтобы не менять' : 'API-ключ speech2text.ru'}
+                />
+              </label>
+
+              <button className="button button-primary" type="submit" disabled={isSavingDiarizationSettings || isSettingsLoading}>
+                {isSavingDiarizationSettings ? 'Сохраняем...' : 'Сохранить диаризацию'}
+              </button>
+            </form>
+
+            <p className="settings-note">
+              Shopot — специализированный сервис диаризации (быстро, точные таймкоды). Gemini — распознаёт спикеров и по возможности определяет их имена прямо по аудио, используя общий ключ OpenRouter (без отдельной настройки). Speech2Text — ещё один облачный сервис диаризации (только метки «Спикер N», без определения имён). «Выключено» — только LLM-разметка по тексту стенограммы.
+            </p>
+          </section>
+
+          <section className="settings-panel">
+            <div className="settings-header">
+              <div>
                 <p className="eyebrow">SMTP</p>
                 <h2>Отправка протоколов</h2>
               </div>
@@ -1423,6 +1827,93 @@ function App() {
             </p>
           </section>
 
+          <section className="settings-panel">
+            <div className="settings-header">
+              <div>
+                <p className="eyebrow">Telegram</p>
+                <h2>Отправка протоколов в Telegram</h2>
+              </div>
+              {isSettingsLoading ? <span className="muted-text">Загружаем...</span> : null}
+            </div>
+
+            <form className="settings-form" onSubmit={handleSaveTelegramSettings}>
+              <label>
+                Токен бота
+                <input
+                  value={telegramSettingsDraft.botToken}
+                  onChange={(event) => setTelegramSettingsDraft((current) => ({ ...current, botToken: event.target.value }))}
+                  type="password"
+                  placeholder={telegramHasToken ? 'Токен сохранен, оставь пустым чтобы не менять' : '123456:AA...'}
+                />
+              </label>
+
+              <label>
+                Chat ID по умолчанию
+                <input
+                  value={telegramSettingsDraft.chatId}
+                  onChange={(event) => setTelegramSettingsDraft((current) => ({ ...current, chatId: event.target.value }))}
+                  placeholder="636211143"
+                />
+              </label>
+
+              <button className="button button-primary" type="submit" disabled={isSavingTelegramSettings || isSettingsLoading}>
+                {isSavingTelegramSettings ? 'Сохраняем...' : 'Сохранить Telegram'}
+              </button>
+            </form>
+
+            <p className="settings-note">
+              Токен получают у @BotFather. Chat ID — это чат, куда бот уже написал хотя бы раз (можно переопределить при отправке конкретной записи).
+            </p>
+          </section>
+
+          <section className="settings-panel">
+            <div className="settings-header">
+              <div>
+                <p className="eyebrow">Битрикс24</p>
+                <h2>Создание задач в Битрикс24</h2>
+              </div>
+              {isSettingsLoading ? <span className="muted-text">Загружаем...</span> : null}
+            </div>
+
+            <form className="settings-form" onSubmit={handleSaveBitrixSettings}>
+              <label>
+                Входящий вебхук
+                <input
+                  value={bitrixSettingsDraft.webhookUrl}
+                  onChange={(event) => setBitrixSettingsDraft((current) => ({ ...current, webhookUrl: event.target.value }))}
+                  type="password"
+                  placeholder={bitrixHasWebhook ? 'Вебхук сохранен, оставь пустым чтобы не менять' : 'https://portal.bitrix24.ru/rest/1/xxxx/'}
+                />
+              </label>
+
+              <label>
+                Ответственный по умолчанию (ID)
+                <input
+                  value={bitrixSettingsDraft.defaultResponsibleId}
+                  onChange={(event) => setBitrixSettingsDraft((current) => ({ ...current, defaultResponsibleId: event.target.value }))}
+                  placeholder="1"
+                />
+              </label>
+
+              <label>
+                Группа/проект (ID, опционально)
+                <input
+                  value={bitrixSettingsDraft.defaultGroupId}
+                  onChange={(event) => setBitrixSettingsDraft((current) => ({ ...current, defaultGroupId: event.target.value }))}
+                  placeholder=""
+                />
+              </label>
+
+              <button className="button button-primary" type="submit" disabled={isSavingBitrixSettings || isSettingsLoading}>
+                {isSavingBitrixSettings ? 'Сохраняем...' : 'Сохранить Битрикс24'}
+              </button>
+            </form>
+
+            <p className="settings-note">
+              Вебхук создаётся в Битрикс24: Приложения → Разработчикам → Входящий вебхук, с правом на раздел «Задачи».
+            </p>
+          </section>
+
           <section className="status-line" aria-live="polite">
             {status || 'Настройки будут применены к следующим отправкам протоколов.'}
           </section>
@@ -1466,6 +1957,22 @@ function App() {
           />
           <button className="button button-secondary" type="submit" disabled={isCreatingProject}>
             {isCreatingProject ? 'Создаём...' : 'Создать'}
+          </button>
+        </form>
+
+        <form className="meeting-bot-form" onSubmit={handleJoinMeeting}>
+          <input
+            value={meetingBotDraft.meetingUrl}
+            onChange={(event) => setMeetingBotDraft((current) => ({ ...current, meetingUrl: event.target.value }))}
+            placeholder="Ссылка на встречу (Zoom, Meet, Телемост...)"
+          />
+          <input
+            value={meetingBotDraft.title}
+            onChange={(event) => setMeetingBotDraft((current) => ({ ...current, title: event.target.value }))}
+            placeholder="Название встречи (необязательно)"
+          />
+          <button className="button button-secondary" type="submit" disabled={isJoiningMeeting}>
+            {isJoiningMeeting ? 'Отправляем...' : 'Пригласить бота'}
           </button>
         </form>
       </section>
@@ -1548,6 +2055,31 @@ function App() {
                 <span className={`status-pill status-${selectedRecording.status}`}>{selectedRecording.status}</span>
               </div>
 
+              {selectedRecording.source === 'meeting_bot' ? (
+                <section className="detail-section meeting-bot-status">
+                  <h3>Бот на встрече</h3>
+                  <p className="muted-text">
+                    Ссылка:{' '}
+                    <a href={selectedRecording.meetingUrl} target="_blank" rel="noreferrer">
+                      {selectedRecording.meetingUrl}
+                    </a>
+                  </p>
+                  {selectedRecording.status === 'queued' || selectedRecording.status === 'processing' ? (
+                    <>
+                      <p className="muted-text">Бот подключается или уже записывает встречу. Транскрипт появится автоматически после её завершения.</p>
+                      <button
+                        className="button button-danger"
+                        type="button"
+                        onClick={() => handleStopMeetingBot(selectedRecording)}
+                        disabled={isStoppingMeetingBot}
+                      >
+                        {isStoppingMeetingBot ? 'Останавливаем...' : 'Остановить бота'}
+                      </button>
+                    </>
+                  ) : null}
+                </section>
+              ) : null}
+
               <div className="detail-actions">
                 <button
                   className="button button-primary"
@@ -1557,6 +2089,24 @@ function App() {
                 >
                   {processingId === selectedRecording.id ? 'Запускаем...' : 'Запустить обработку'}
                 </button>
+                <div className="summary-length-toggle" role="group" aria-label="Длина резюме">
+                  {[
+                    { value: 'brief', label: 'Кратко' },
+                    { value: 'medium', label: 'Средне' },
+                    { value: 'long', label: 'Подробно' },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`summary-length-option${summaryLength === option.value ? ' active' : ''}`}
+                      onClick={() => setSummaryLength(option.value)}
+                      disabled={isSummarizing}
+                      aria-pressed={summaryLength === option.value}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
                 <button
                   className="button button-secondary"
                   type="button"
@@ -1648,6 +2198,30 @@ function App() {
                 </button>
               </form>
 
+              <form className="email-send-panel" onSubmit={handleSendTelegram}>
+                <h3>Telegram</h3>
+                <label>
+                  Chat ID (необязательно)
+                  <input
+                    value={telegramDraft.chatId}
+                    onChange={(event) => setTelegramDraft((current) => ({ ...current, chatId: event.target.value }))}
+                    placeholder="По умолчанию из настроек"
+                  />
+                </label>
+                <label>
+                  Комментарий
+                  <textarea
+                    value={telegramDraft.message}
+                    onChange={(event) => setTelegramDraft((current) => ({ ...current, message: event.target.value }))}
+                    rows={3}
+                    placeholder="Короткое сопроводительное сообщение"
+                  />
+                </label>
+                <button className="button button-secondary" type="submit" disabled={!canExportSelected || isSendingTelegram}>
+                  {isSendingTelegram ? 'Отправляем...' : 'Отправить в Telegram'}
+                </button>
+              </form>
+
               <dl className="detail-grid">
                 <div>
                   <dt>Файл</dt>
@@ -1689,12 +2263,27 @@ function App() {
               </section>
 
               <section className="detail-section">
-                <h3>Спикеры</h3>
+                <div className="speaker-section-header">
+                  <h3>Спикеры</h3>
+                  {selectedRecording.speakers?.length ? (
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      onClick={handleMatchSpeakersToBitrix}
+                      disabled={isLoadingSpeakerMatches}
+                    >
+                      {isLoadingSpeakerMatches ? 'Ищем...' : 'Подобрать по Битрикс24'}
+                    </button>
+                  ) : null}
+                </div>
                 {selectedRecording.speakers?.length ? (
                   <div className="speaker-list">
                     {selectedRecording.speakers.map((speaker) => {
                       const draft = getSpeakerDraft(speaker);
                       const isSavingSpeaker = savingSpeakerLabel === speaker.label;
+                      const match = speakerMatches[speaker.label];
+                      const hasMultipleCandidates = (match?.candidates?.length || 0) > 1;
+                      const isSpeakerSaved = Boolean(speaker.id) && !speakerDrafts[speaker.label];
 
                       return (
                         <div className="speaker-row" key={speaker.label}>
@@ -1711,6 +2300,29 @@ function App() {
                               placeholder="Спикер"
                             />
                           </label>
+
+                          {hasMultipleCandidates ? (
+                            <label>
+                              Похожие сотрудники в Битрикс24
+                              <select
+                                value=""
+                                onChange={(event) => {
+                                  const candidate = match.candidates.find((item) => item.id === event.target.value);
+
+                                  if (candidate) {
+                                    applySpeakerCandidate(speaker, candidate);
+                                  }
+                                }}
+                              >
+                                <option value="">Выбери сотрудника...</option>
+                                {match.candidates.map((candidate) => (
+                                  <option value={candidate.id} key={candidate.id}>
+                                    {candidate.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          ) : null}
 
                           <label>
                             Контакт
@@ -1731,7 +2343,7 @@ function App() {
                           </label>
 
                           <button className="button button-secondary" type="button" onClick={() => handleSaveSpeaker(speaker)} disabled={isSavingSpeaker}>
-                            {isSavingSpeaker ? 'Сохраняем...' : 'Сохранить спикера'}
+                            {isSavingSpeaker ? 'Сохраняем...' : isSpeakerSaved ? 'Сохранён' : 'Сохранить спикера'}
                           </button>
                         </div>
                       );
@@ -1922,6 +2534,18 @@ function App() {
                             >
                               {isDeletingTask ? 'Удаляем...' : 'Удалить'}
                             </button>
+                            {task.externalRefs?.bitrix24 ? (
+                              <span className="bitrix-sent-badge">В Б24 #{task.externalRefs.bitrix24.taskId}</span>
+                            ) : (
+                              <button
+                                className="button button-secondary"
+                                type="button"
+                                onClick={() => handleSendTaskToBitrix(task)}
+                                disabled={isSavingTask || isSendingBitrixTaskId === task.id}
+                              >
+                                {isSendingBitrixTaskId === task.id ? 'Отправляем...' : 'В Битрикс24'}
+                              </button>
+                            )}
                           </div>
                         </div>
                       );

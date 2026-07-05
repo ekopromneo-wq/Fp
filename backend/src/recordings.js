@@ -1,7 +1,18 @@
 import { createRecordingQueue } from './queue.js';
-import { getAuthUser, getUserSmtpConfig, requireAuth } from './auth.js';
+import {
+  getAuthUser,
+  getUserBitrixConfig,
+  getUserDiarizationConfig,
+  getUserSmtpConfig,
+  getUserTelegramConfig,
+  requireAuth,
+} from './auth.js';
 import { query, transaction } from './db.js';
 import { sendRecordingEmail } from './email.js';
+import { sendRecordingTelegram } from './telegram.js';
+import { sendTasksToBitrix, matchRecordingSpeakersToBitrix } from './bitrix.js';
+import { joinMeeting, stopMeeting } from './meetingBot.js';
+import { detectPlatform, isSupportedMeetingUrl as isSelfHostedMeetingUrl, startRecorderJob, stopRecorderJob } from './recorderBot.js';
 import { Readable } from 'node:stream';
 import { deleteRecordingAudio, getRecordingAudioStream, saveRecordingAudio } from './storage.js';
 
@@ -28,6 +39,9 @@ function mapRecording(row) {
     mimeType: row.mime_type,
     fileSizeBytes: row.file_size_bytes === null ? null : Number(row.file_size_bytes),
     autoNamed: Boolean(row.auto_named),
+    meetingUrl: row.meeting_url || null,
+    meetingBotTaskId: row.meeting_bot_task_id || null,
+    recorderEngine: row.recorder_engine || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -98,6 +112,7 @@ function mapTask(row) {
     description: row.description,
     dueText: row.due_text,
     status: row.status,
+    externalRefs: row.external_refs || {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -217,13 +232,26 @@ function parseJsonObject(text) {
   }
 }
 
-async function generateSummaryWithOpenRouter(transcriptText) {
+const SUMMARY_LENGTHS = new Set(['brief', 'medium', 'long']);
+
+const SUMMARY_LENGTH_INSTRUCTIONS = {
+  brief: 'Длина: очень кратко. summary — 2-3 предложения с самой сутью. protocol и tasks — только самое важное (максимум по 3 пункта в каждом разделе agenda/decisions/risks).',
+  medium: 'Длина: средняя. summary — 1-3 абзаца. protocol — по несколько пунктов на раздел. tasks — все явно упомянутые задачи.',
+  long: 'Длина: подробная. summary — ОБЯЗАТЕЛЬНО не менее 4-6 абзацев (от 300 слов), пересказывающих ход обсуждения по порядку: кто что поднял, какие аргументы приводились, к чему пришли. Не сокращай и не обобщай в одно предложение. protocol — детальный разбор по каждому разделу (agenda/decisions/risks), ничего не упускай. tasks — все задачи с максимальной детализацией (кто, что, когда, в каком контексте это прозвучало).',
+};
+
+function normalizeSummaryLength(length) {
+  return SUMMARY_LENGTHS.has(length) ? length : 'medium';
+}
+
+async function generateSummaryWithOpenRouter(transcriptText, length = 'medium') {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
     throw new Error('OPENROUTER_API_KEY is not configured');
   }
 
+  const summaryLength = normalizeSummaryLength(length);
   const model = process.env.OPENROUTER_LLM_MODEL || 'openai/gpt-4o-mini';
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -240,7 +268,8 @@ async function generateSummaryWithOpenRouter(transcriptText) {
         {
           role: 'system',
           content:
-            'Ты помощник VoxMate. Верни строго JSON без markdown. Поля: summary:string, topics:string[], protocol:{agenda:string[],decisions:string[],risks:string[]}, tasks:{assignee:string|null,description:string,dueText:string|null}[]. Пиши по-русски, кратко и конкретно. Если исполнитель или срок не названы явно, ставь null.',
+            'Ты помощник VoxMate. Верни строго JSON без markdown. Поля: summary:string, topics:string[], protocol:{agenda:string[],decisions:string[],risks:string[]}, tasks:{assignee:string|null,description:string,dueText:string|null}[]. Пиши по-русски, конкретно. Если исполнитель или срок не названы явно, ставь null.\n\n' +
+            SUMMARY_LENGTH_INSTRUCTIONS[summaryLength],
         },
         {
           role: 'user',
@@ -373,7 +402,8 @@ export async function listRecordings(ownerId, filters = {}) {
         recordings.id, recordings.owner_id, recordings.project_id, recordings.title, recordings.status,
         recordings.source, recordings.duration_seconds, recordings.storage_key, recordings.created_at,
         recordings.updated_at, recordings.original_filename, recordings.mime_type, recordings.file_size_bytes,
-        recordings.auto_named, projects.name as project_name, projects.color as project_color
+        recordings.auto_named, recordings.meeting_url, recordings.meeting_bot_task_id,
+        projects.name as project_name, projects.color as project_color
       from recordings
       left join projects on projects.id = recordings.project_id
       where (recordings.owner_id = $1 or recordings.owner_id is null)
@@ -414,11 +444,219 @@ export async function createRecording(input, ownerId) {
   return mapRecording(result.rows[0]);
 }
 
+/**
+ * Sends the Speech2Text bot to join a live meeting (Zoom/Meet/Telemost/etc)
+ * and creates a text-only recording that fills in once the bot finishes -
+ * there's no audio file to attach, since the bot records on Speech2Text's
+ * own infrastructure. A background poller in the worker (see worker.js)
+ * checks progress and ingests the transcript when the task completes.
+ */
+export async function createMeetingBotRecording(input, ownerId) {
+  const meetingUrl = typeof input.meetingUrl === 'string' ? input.meetingUrl.trim() : '';
+
+  if (!meetingUrl) {
+    throw new Error('Meeting URL is required');
+  }
+
+  const diarizationConfig = (await getUserDiarizationConfig(ownerId)) || {};
+  const apiKey = diarizationConfig.speech2textApiKey || process.env.SPEECH2TEXT_API_KEY;
+
+  if (!apiKey) {
+    throw new Error('Speech2Text is not configured');
+  }
+
+  const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : 'Встреча по ссылке';
+
+  const inserted = await query(
+    `
+      insert into recordings (owner_id, title, source, status, meeting_url)
+      values ($1, $2, 'meeting_bot', 'queued', $3)
+      returning id
+    `,
+    [ownerId, title, meetingUrl],
+  );
+  const recordingId = inserted.rows[0].id;
+
+  try {
+    const task = await joinMeeting(
+      {
+        meetingUrl,
+        title,
+        lang: input.lang,
+        speakers: input.speakers,
+        botName: input.botName,
+        accessCode: input.accessCode,
+      },
+      apiKey,
+    );
+
+    await transaction(async (client) => {
+      await client.query('update recordings set meeting_bot_task_id = $1, status = $2, updated_at = now() where id = $3', [
+        task.id,
+        'processing',
+        recordingId,
+      ]);
+      await client.query(
+        `insert into processing_jobs (recording_id, queue_job_id, status) values ($1, $2, 'processing')`,
+        [recordingId, task.id],
+      );
+    });
+  } catch (error) {
+    await query('update recordings set status = $1, updated_at = now() where id = $2', ['failed', recordingId]);
+    throw error;
+  }
+
+  return getRecording(recordingId, ownerId);
+}
+
+export async function stopMeetingBotRecording(recordingId, ownerId) {
+  const result = await query(
+    'select meeting_bot_task_id from recordings where id = $1 and (owner_id = $2 or owner_id is null)',
+    [recordingId, ownerId],
+  );
+  const taskId = result.rows[0]?.meeting_bot_task_id;
+
+  if (!taskId) {
+    return null;
+  }
+
+  const diarizationConfig = (await getUserDiarizationConfig(ownerId)) || {};
+  const apiKey = diarizationConfig.speech2textApiKey || process.env.SPEECH2TEXT_API_KEY;
+
+  if (!apiKey) {
+    throw new Error('Speech2Text is not configured');
+  }
+
+  await stopMeeting(taskId, apiKey);
+
+  await transaction(async (client) => {
+    await client.query('update recordings set status = $1, updated_at = now() where id = $2', ['failed', recordingId]);
+    await client.query(
+      `
+        update processing_jobs
+        set status = 'failed', error = 'Остановлено пользователем', updated_at = now()
+        where recording_id = $1 and status = 'processing'
+      `,
+      [recordingId],
+    );
+  });
+
+  return getRecording(recordingId, ownerId);
+}
+
+/**
+ * Sends our own recorder-bot (Playwright + OS-level audio capture, no third
+ * party involved) to join a live meeting on a platform we can operate
+ * ourselves (currently: Yandex Telemost). Once the meeting ends, the bot
+ * uploads the finished audio file to our /api/internal/recorder-bot/callback
+ * route, which hands it to the same file-based diarization pipeline as a
+ * manual upload - see attachRecordingAudio/enqueueRecording below.
+ */
+export async function createSelfHostedMeetingRecording(input, ownerId) {
+  const meetingUrl = typeof input.meetingUrl === 'string' ? input.meetingUrl.trim() : '';
+  const platform = detectPlatform(meetingUrl);
+
+  if (!platform) {
+    throw new Error('Meeting URL is not supported by the self-hosted recorder yet');
+  }
+
+  const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : 'Встреча по ссылке';
+
+  const inserted = await query(
+    `
+      insert into recordings (owner_id, title, source, status, meeting_url, recorder_engine)
+      values ($1, $2, 'recorder_bot', 'queued', $3, 'self_hosted')
+      returning id
+    `,
+    [ownerId, title, meetingUrl],
+  );
+  const recordingId = inserted.rows[0].id;
+
+  try {
+    const job = await startRecorderJob({
+      recordingId,
+      meetingUrl,
+      title,
+      platform,
+      botName: input.botName,
+    });
+
+    await transaction(async (client) => {
+      await client.query('update recordings set meeting_bot_task_id = $1, status = $2, updated_at = now() where id = $3', [
+        job.jobId,
+        'processing',
+        recordingId,
+      ]);
+      await client.query(
+        `insert into processing_jobs (recording_id, queue_job_id, status) values ($1, $2, 'processing')`,
+        [recordingId, job.jobId],
+      );
+    });
+  } catch (error) {
+    await query('update recordings set status = $1, updated_at = now() where id = $2', ['failed', recordingId]);
+    throw error;
+  }
+
+  return getRecording(recordingId, ownerId);
+}
+
+export async function stopSelfHostedMeetingRecording(recordingId, ownerId) {
+  const result = await query(
+    'select meeting_bot_task_id from recordings where id = $1 and (owner_id = $2 or owner_id is null) and recorder_engine = $3',
+    [recordingId, ownerId, 'self_hosted'],
+  );
+  const jobId = result.rows[0]?.meeting_bot_task_id;
+
+  if (!jobId) {
+    return null;
+  }
+
+  await stopRecorderJob(jobId);
+
+  return getRecording(recordingId, ownerId);
+}
+
+/**
+ * Called by the recorder-bot service once a self-hosted meeting recording
+ * has finished (or failed). Reuses the exact same attach+enqueue path as a
+ * manual file upload, so the diarization pipeline needs no changes.
+ */
+export async function completeSelfHostedMeetingRecording(recordingId, file, errorMessage) {
+  const result = await query('select owner_id from recordings where id = $1', [recordingId]);
+  const ownerId = result.rows[0]?.owner_id;
+
+  if (result.rowCount === 0) {
+    return null;
+  }
+
+  if (errorMessage || !file) {
+    await transaction(async (client) => {
+      await client.query('update recordings set status = $1, updated_at = now() where id = $2', ['failed', recordingId]);
+      await client.query(
+        `
+          update processing_jobs
+          set status = 'failed', error = $1, updated_at = now()
+          where recording_id = $2 and status = 'processing'
+        `,
+        [errorMessage || 'Recorder-bot did not return an audio file', recordingId],
+      );
+    });
+
+    return getRecording(recordingId, ownerId);
+  }
+
+  await attachRecordingAudio(recordingId, file, ownerId);
+  await enqueueRecording(recordingId, ownerId);
+
+  return getRecording(recordingId, ownerId);
+}
+
 export async function getRecording(id, ownerId) {
   const result = await query(
     `
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
-      , original_filename, mime_type, file_size_bytes, auto_named, project_id,
+      , original_filename, mime_type, file_size_bytes, auto_named, project_id, meeting_url, meeting_bot_task_id,
+        recorder_engine,
         (select name from projects where projects.id = recordings.project_id) as project_name,
         (select color from projects where projects.id = recordings.project_id) as project_color
       from recordings
@@ -463,7 +701,7 @@ export async function getRecording(id, ownerId) {
     ),
     query(
       `
-        select id, recording_id, summary_id, transcript_id, assignee, description, due_text, status, created_at, updated_at
+        select id, recording_id, summary_id, transcript_id, assignee, description, due_text, status, external_refs, created_at, updated_at
         from recording_tasks
         where recording_id = $1 and status <> 'dismissed'
         order by created_at asc
@@ -493,7 +731,7 @@ export async function getRecording(id, ownerId) {
   };
 }
 
-export async function summarizeRecording(recordingId, ownerId) {
+export async function summarizeRecording(recordingId, ownerId, length = 'medium') {
   const recording = await getRecording(recordingId, ownerId);
 
   if (!recording) {
@@ -504,7 +742,7 @@ export async function summarizeRecording(recordingId, ownerId) {
     throw new Error('Recording has no transcript yet');
   }
 
-  const generated = await generateSummaryWithOpenRouter(recording.transcript.text);
+  const generated = await generateSummaryWithOpenRouter(recording.transcript.text, length);
 
   return transaction(async (client) => {
     const result = await client.query(
@@ -533,7 +771,7 @@ export async function summarizeRecording(recordingId, ownerId) {
         `
           insert into recording_tasks (recording_id, summary_id, transcript_id, assignee, description, due_text)
           values ($1, $2, $3, $4, $5, $6)
-          returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, status, created_at, updated_at
+          returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, status, external_refs, created_at, updated_at
         `,
         [recordingId, summary.id, recording.transcript.id, task.assignee || null, task.description, task.dueText || null],
       );
@@ -654,7 +892,7 @@ export async function createRecordingTask(recordingId, ownerId, input) {
       from recordings recording
       where recording.id = $1
         and (recording.owner_id = $2 or recording.owner_id is null)
-      returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, status, created_at, updated_at
+      returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, status, external_refs, created_at, updated_at
     `,
     [recordingId, ownerId, assignee, description, dueText],
   );
@@ -698,7 +936,7 @@ export async function updateRecordingTask(recordingId, taskId, ownerId, input) {
         and recording.id = task.recording_id
         and (recording.owner_id = $3 or recording.owner_id is null)
       returning task.id, task.recording_id, task.summary_id, task.transcript_id,
-        task.assignee, task.description, task.due_text, task.status, task.created_at, task.updated_at
+        task.assignee, task.description, task.due_text, task.status, task.external_refs, task.created_at, task.updated_at
     `,
     [taskId, recordingId, ownerId, hasAssignee, assignee, hasDescription, description, hasDueText, dueText, hasStatus, status],
   );
@@ -939,6 +1177,68 @@ export function registerRecordingRoutes(app) {
     return c.json({ recording }, 201);
   });
 
+  app.post('/api/recordings/meeting-bot', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+
+    try {
+      const recording = isSelfHostedMeetingUrl(body.meetingUrl)
+        ? await createSelfHostedMeetingRecording(body, user.id)
+        : await createMeetingBotRecording(body, user.id);
+
+      return c.json({ recording }, 201);
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to send the bot to the meeting' }, 400);
+    }
+  });
+
+  app.post('/api/recordings/:id/meeting-bot/stop', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+
+    try {
+      const recording =
+        (await stopSelfHostedMeetingRecording(c.req.param('id'), user.id)) ||
+        (await stopMeetingBotRecording(c.req.param('id'), user.id));
+
+      if (!recording) {
+        return c.json({ error: 'Recording not found or has no active bot' }, 404);
+      }
+
+      return c.json({ recording });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to stop the meeting bot' }, 400);
+    }
+  });
+
+  app.post('/api/internal/recorder-bot/callback', async (c) => {
+    const secret = c.req.header('X-Internal-Secret') || '';
+
+    if (!process.env.RECORDER_BOT_INTERNAL_SECRET || secret !== process.env.RECORDER_BOT_INTERNAL_SECRET) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const formData = await c.req.raw.formData().catch(() => null);
+    const recordingId = formData?.get('recordingId');
+    const errorMessage = formData?.get('error') || null;
+    const file = formData?.get('file');
+
+    if (!recordingId) {
+      return c.json({ error: 'recordingId is required' }, 400);
+    }
+
+    const recording = await completeSelfHostedMeetingRecording(
+      recordingId,
+      file && typeof file.arrayBuffer === 'function' ? file : null,
+      errorMessage,
+    );
+
+    if (!recording) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    return c.json({ recording });
+  });
+
   app.get('/api/recordings/:id', requireAuth, async (c) => {
     const user = getAuthUser(c);
     const recording = await getRecording(c.req.param('id'), user.id);
@@ -1039,9 +1339,10 @@ export function registerRecordingRoutes(app) {
 
   app.post('/api/recordings/:id/summary', requireAuth, async (c) => {
     const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
 
     try {
-      const result = await summarizeRecording(c.req.param('id'), user.id);
+      const result = await summarizeRecording(c.req.param('id'), user.id, body.length);
 
       if (!result) {
         return c.json({ error: 'Recording not found' }, 404);
@@ -1069,6 +1370,96 @@ export function registerRecordingRoutes(app) {
       return c.json({ delivery });
     } catch (error) {
       return c.json({ error: error.message || 'Failed to send recording email' }, 400);
+    }
+  });
+
+  app.post('/api/recordings/:id/telegram', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const recording = await getRecording(c.req.param('id'), user.id);
+
+    if (!recording) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    try {
+      const telegramConfig = await getUserTelegramConfig(user.id);
+      const delivery = await sendRecordingTelegram(recording, body, telegramConfig || {});
+
+      return c.json({ delivery });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to send recording to Telegram' }, 400);
+    }
+  });
+
+  app.post('/api/recordings/:recordingId/bitrix', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const recordingId = c.req.param('recordingId');
+    const recording = await getRecording(recordingId, user.id);
+
+    if (!recording) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    const requestedIds = Array.isArray(body.taskIds) ? new Set(body.taskIds) : null;
+    const candidateTasks = (recording.tasks || []).filter((task) => {
+      if (requestedIds) {
+        return requestedIds.has(task.id);
+      }
+
+      return !task.externalRefs?.bitrix24;
+    });
+
+    if (!candidateTasks.length) {
+      return c.json({ error: 'No tasks to send' }, 400);
+    }
+
+    try {
+      const bitrixConfig = await getUserBitrixConfig(user.id);
+      const results = await sendTasksToBitrix(recording, candidateTasks, bitrixConfig || {});
+
+      await transaction(async (client) => {
+        for (const result of results) {
+          if (!result.ok) {
+            continue;
+          }
+
+          await client.query(
+            `
+              update recording_tasks
+              set
+                status = 'sent',
+                external_refs = external_refs || jsonb_build_object('bitrix24', jsonb_build_object('taskId', $2::text, 'sentAt', now())),
+                updated_at = now()
+              where id = $1
+            `,
+            [result.taskId, String(result.bitrixTaskId)],
+          );
+        }
+      });
+
+      return c.json({ results });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to send tasks to Bitrix24' }, 400);
+    }
+  });
+
+  app.get('/api/recordings/:recordingId/bitrix-speaker-matches', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const recording = await getRecording(c.req.param('recordingId'), user.id);
+
+    if (!recording) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    try {
+      const bitrixConfig = await getUserBitrixConfig(user.id);
+      const matches = await matchRecordingSpeakersToBitrix(recording.speakers || [], bitrixConfig || {});
+
+      return c.json({ matches });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to match speakers against Bitrix24' }, 400);
     }
   });
 

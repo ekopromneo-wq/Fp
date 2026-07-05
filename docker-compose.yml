@@ -45,6 +45,14 @@ services:
       - SMTP_USER=${SMTP_USER:-}
       - SMTP_PASS=${SMTP_PASS:-}
       - SMTP_FROM=${SMTP_FROM:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_DEFAULT_CHAT_ID=${TELEGRAM_DEFAULT_CHAT_ID:-}
+      - BITRIX_WEBHOOK_URL=${BITRIX_WEBHOOK_URL:-}
+      - BITRIX_DEFAULT_RESPONSIBLE_ID=${BITRIX_DEFAULT_RESPONSIBLE_ID:-}
+      - BITRIX_DEFAULT_GROUP_ID=${BITRIX_DEFAULT_GROUP_ID:-}
+      - SPEECH2TEXT_API_KEY=${SPEECH2TEXT_API_KEY:-}
+      - RECORDER_BOT_URL=${RECORDER_BOT_URL:-http://recorder-bot:8100}
+      - RECORDER_BOT_INTERNAL_SECRET=${RECORDER_BOT_INTERNAL_SECRET:-}
     depends_on:
       db:
         condition: service_healthy
@@ -81,6 +89,8 @@ services:
       - ASR_COMPRESSED_BITRATE=${ASR_COMPRESSED_BITRATE:-32k}
       - ASR_MAX_RETRIES=${ASR_MAX_RETRIES:-3}
       - DIARIZER_URL=${DIARIZER_URL:-http://diarizer:8000}
+      - SHOPOT_API_KEY=${SHOPOT_API_KEY:-}
+      - SPEECH2TEXT_API_KEY=${SPEECH2TEXT_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
@@ -108,6 +118,20 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+
+  recorder-bot:
+    build: ./recorder-bot
+    shm_size: '2gb'
+    environment:
+      - PORT=8100
+      - API_INTERNAL_URL=${API_INTERNAL_URL:-http://api:4000}
+      - RECORDER_BOT_INTERNAL_SECRET=${RECORDER_BOT_INTERNAL_SECRET:-}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8100/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
 
   db:
     image: postgres:16-alpine

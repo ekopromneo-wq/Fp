@@ -171,6 +171,39 @@ const migrations = [
         add column if not exists smtp_config jsonb;
     `,
   },
+  {
+    id: '009_telegram_bitrix_channels',
+    sql: `
+      alter table app_users
+        add column if not exists telegram_config jsonb,
+        add column if not exists bitrix_config jsonb;
+
+      alter table recording_tasks
+        add column if not exists external_refs jsonb not null default '{}'::jsonb;
+    `,
+  },
+  {
+    id: '010_user_diarization_config',
+    sql: `
+      alter table app_users
+        add column if not exists diarization_config jsonb;
+    `,
+  },
+  {
+    id: '011_meeting_bot_recordings',
+    sql: `
+      alter table recordings
+        add column if not exists meeting_bot_task_id text,
+        add column if not exists meeting_url text;
+    `,
+  },
+  {
+    id: '012_recorder_bot',
+    sql: `
+      alter table recordings
+        add column if not exists recorder_engine text;
+    `,
+  },
 ];
 
 export async function runMigrations() {

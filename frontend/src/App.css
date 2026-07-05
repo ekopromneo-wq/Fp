@@ -226,6 +226,44 @@ h3 {
   background: #fde9e6;
 }
 
+.summary-length-toggle {
+  display: inline-flex;
+  border: 1px solid #c9d2cb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.summary-length-option {
+  min-height: 40px;
+  padding: 0 12px;
+  border: none;
+  border-right: 1px solid #c9d2cb;
+  background: #ffffff;
+  color: #19201d;
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.summary-length-option:last-child {
+  border-right: none;
+}
+
+.summary-length-option:hover:not(:disabled):not(.active) {
+  background: #eef3ef;
+}
+
+.summary-length-option.active {
+  background: #235b4f;
+  color: #ffffff;
+}
+
+.summary-length-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .icon-button {
   width: 40px;
   min-width: 40px;
@@ -302,6 +340,13 @@ h3 {
 
 .project-color-input {
   padding: 3px !important;
+}
+
+.meeting-bot-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
 }
 
 .settings-page {
@@ -620,6 +665,18 @@ h3 {
   font-weight: 900;
 }
 
+.bitrix-sent-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0 10px;
+  min-height: 34px;
+  color: #235b4f;
+  background: #e3f0ea;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -861,6 +918,18 @@ audio {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.speaker-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.speaker-section-header h3 {
+  margin: 0;
 }
 
 .jobs-header .button {

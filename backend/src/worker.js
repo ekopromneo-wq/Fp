@@ -11,6 +11,10 @@ import { runMigrations } from './migrations.js';
 import { createRedisConnection, RECORDING_QUEUE_NAME } from './queue.js';
 import { ensureAudioBucket, getRecordingAudioBuffer } from './storage.js';
 import { trySplitTranscriptBySpeaker } from './speakerSplit.js';
+import { transcribeWithShopot } from './shopotDiarizer.js';
+import { transcribeWithGeminiAudio } from './geminiDiarizer.js';
+import { transcribeWithSpeech2Text, checkSpeech2TextStatus, fetchSpeech2TextResult, parseSpeech2TextResult } from './speech2textDiarizer.js';
+import { getUserDiarizationConfig } from './auth.js';
 
 dotenv.config();
 
@@ -184,76 +188,6 @@ async function transcribeWithOpenRouter(file, audioBuffer) {
   return null;
 }
 
-function formatDiarizerSpeakerLabel(label) {
-  const match = String(label || '').match(/SPEAKER_?(\d+)/i);
-
-  return match ? `Спикер ${Number(match[1]) + 1}` : String(label || 'Спикер 1');
-}
-
-function mergeDiarizerSegments(segments) {
-  const merged = [];
-
-  for (const segment of segments) {
-    const speaker = formatDiarizerSpeakerLabel(segment.speaker);
-    const last = merged[merged.length - 1];
-
-    if (last && last.speaker === speaker) {
-      last.text = `${last.text} ${segment.text}`.trim();
-      last.endMs = Math.round((segment.end || 0) * 1000);
-    } else {
-      merged.push({
-        speaker,
-        text: segment.text,
-        startMs: Math.round((segment.start || 0) * 1000),
-        endMs: Math.round((segment.end || 0) * 1000),
-      });
-    }
-  }
-
-  return merged;
-}
-
-async function transcribeWithDiarizer(file, audioBuffer) {
-  const diarizerUrl = process.env.DIARIZER_URL;
-
-  if (!diarizerUrl || !audioBuffer) {
-    return null;
-  }
-
-  try {
-    const formData = new FormData();
-    formData.append(
-      'file',
-      new Blob([audioBuffer], { type: file?.mime_type || 'application/octet-stream' }),
-      file?.original_filename || 'audio',
-    );
-
-    const response = await fetch(`${diarizerUrl}/diarize`, { method: 'POST', body: formData });
-    const body = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      throw new Error(body?.detail || `Diarizer failed with ${response.status}`);
-    }
-
-    const rawSegments = Array.isArray(body?.segments) ? body.segments.filter((segment) => segment.text?.trim()) : [];
-
-    if (!rawSegments.length) {
-      return null;
-    }
-
-    const segments = mergeDiarizerSegments(rawSegments);
-
-    return {
-      text: segments.map((segment) => `${segment.speaker}\n${segment.text}`).join('\n\n'),
-      segments,
-      speakerCount: new Set(segments.map((segment) => segment.speaker)).size,
-    };
-  } catch (error) {
-    console.warn('Diarizer transcription failed, falling back to OpenRouter ASR:', error.message);
-    return null;
-  }
-}
-
 async function processRecording(data) {
   const { jobId, recordingId } = data;
 
@@ -279,7 +213,7 @@ async function processRecording(data) {
 
   const recording = await query(
     `
-      select title, original_filename, mime_type, file_size_bytes, storage_key
+      select owner_id, title, original_filename, mime_type, file_size_bytes, storage_key
       from recordings
       where id = $1
     `,
@@ -289,13 +223,24 @@ async function processRecording(data) {
   const file = recording.rows[0];
   const audioBuffer = file?.storage_key ? await getRecordingAudioBuffer(file.storage_key) : null;
 
-  const diarized = await transcribeWithDiarizer(file, audioBuffer);
+  const diarizationConfig = file?.owner_id ? (await getUserDiarizationConfig(file.owner_id)) || {} : {};
+  const diarizationMethod = diarizationConfig.method || 'shopot';
+
+  let diarized = null;
+
+  if (diarizationMethod === 'shopot') {
+    diarized = await transcribeWithShopot(file, audioBuffer, diarizationConfig);
+  } else if (diarizationMethod === 'gemini') {
+    diarized = await transcribeWithGeminiAudio(file, audioBuffer, diarizationConfig);
+  } else if (diarizationMethod === 'speech2text') {
+    diarized = await transcribeWithSpeech2Text(file, audioBuffer, diarizationConfig);
+  }
 
   let finalText;
   let finalSegments;
 
   if (diarized) {
-    console.log(`Diarized recording ${recordingId} into ${diarized.speakerCount} speakers via WhisperX`);
+    console.log(`Diarized recording ${recordingId} into ${diarized.speakerCount} speakers via ${diarizationMethod}`);
     finalText = diarized.text;
     finalSegments = diarized.segments;
   } else {
@@ -353,9 +298,105 @@ async function processRecording(data) {
   });
 }
 
+const MEETING_BOT_POLL_INTERVAL_MS = Number(process.env.MEETING_BOT_POLL_INTERVAL_MS || 30000);
+
+async function ingestCompletedMeeting(recording, statusBody) {
+  const statusCode = statusBody?.status?.code;
+
+  await transaction(async (client) => {
+    let finalText = 'В записи встречи не обнаружено речи.';
+    let finalSegments = [];
+
+    if (statusCode === 200) {
+      const result = await fetchSpeech2TextResult(recording.meeting_bot_task_id, recording.apiKey);
+      const parsed = parseSpeech2TextResult(result);
+
+      if (parsed) {
+        finalText = parsed.text;
+        finalSegments = parsed.segments;
+      }
+    }
+
+    await client.query(
+      `insert into transcripts (recording_id, job_id, language, text, segments)
+       select $1, id, 'ru', $2, $3::jsonb from processing_jobs where recording_id = $1 order by created_at desc limit 1`,
+      [recording.id, finalText, JSON.stringify(finalSegments)],
+    );
+
+    await client.query(
+      `update processing_jobs set status = 'done', error = null, updated_at = now()
+       where recording_id = $1 and status = 'processing'`,
+      [recording.id],
+    );
+
+    await client.query(`update recordings set status = 'done', updated_at = now() where id = $1`, [recording.id]);
+  });
+
+  console.log(`Meeting bot recording ${recording.id} finished (${finalSegmentsCountLabel(statusCode)})`);
+}
+
+function finalSegmentsCountLabel(statusCode) {
+  return statusCode === 200 ? 'transcript ingested' : 'no speech detected';
+}
+
+async function failMeeting(recording, message) {
+  await transaction(async (client) => {
+    await client.query(
+      `update processing_jobs set status = 'failed', error = $2, updated_at = now()
+       where recording_id = $1 and status = 'processing'`,
+      [recording.id, message],
+    );
+    await client.query(`update recordings set status = 'failed', updated_at = now() where id = $1`, [recording.id]);
+  });
+
+  console.warn(`Meeting bot recording ${recording.id} failed: ${message}`);
+}
+
+/**
+ * Periodically checks Speech2Text meeting-bot tasks that are still
+ * in-progress (bot joined/recording a live meeting) and ingests the
+ * transcript once the task completes, or marks the recording failed on
+ * error. There's no BullMQ job for this - the bot can take as long as the
+ * meeting itself, so a lightweight poll loop fits better than a queue slot.
+ */
+async function pollMeetingBotRecordings() {
+  const pending = await query(
+    `select id, owner_id, meeting_bot_task_id
+     from recordings
+     where source = 'meeting_bot' and status = 'processing' and meeting_bot_task_id is not null`,
+  );
+
+  for (const row of pending.rows) {
+    try {
+      const diarizationConfig = (await getUserDiarizationConfig(row.owner_id)) || {};
+      const apiKey = diarizationConfig.speech2textApiKey || process.env.SPEECH2TEXT_API_KEY;
+
+      if (!apiKey) {
+        continue;
+      }
+
+      const statusBody = await checkSpeech2TextStatus(row.meeting_bot_task_id, apiKey);
+      const value = statusBody?.status?.value;
+
+      if (value === 'done') {
+        await ingestCompletedMeeting({ ...row, apiKey }, statusBody);
+      } else if (value === 'error') {
+        await failMeeting(row, statusBody?.status?.description || 'Speech2Text meeting task failed');
+      }
+      // 'queued' (bot joining/recording) and 'paused' (minute limit) are left as-is.
+    } catch (error) {
+      console.warn(`Meeting bot poll failed for recording ${row.id}:`, error.message);
+    }
+  }
+}
+
 async function main() {
   await runMigrations();
   await ensureAudioBucket();
+
+  setInterval(() => {
+    pollMeetingBotRecordings().catch((error) => console.warn('Meeting bot poll loop error:', error.message));
+  }, MEETING_BOT_POLL_INTERVAL_MS);
 
   const worker = new Worker(
     RECORDING_QUEUE_NAME,

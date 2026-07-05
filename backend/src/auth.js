@@ -103,6 +103,62 @@ function publicSmtpConfig(config = {}) {
   };
 }
 
+function normalizeTelegramConfig(input = {}, previous = {}) {
+  const chatId = typeof input.chatId === 'string' ? input.chatId.trim() : '';
+  const tokenInput = typeof input.botToken === 'string' ? input.botToken.trim() : '';
+  const botToken = tokenInput || previous.botToken || '';
+
+  return { chatId, botToken };
+}
+
+function publicTelegramConfig(config = {}) {
+  return {
+    chatId: config.chatId || '',
+    hasToken: Boolean(config.botToken),
+  };
+}
+
+function normalizeBitrixConfig(input = {}, previous = {}) {
+  const defaultResponsibleId = typeof input.defaultResponsibleId === 'string' ? input.defaultResponsibleId.trim() : '';
+  const defaultGroupId = typeof input.defaultGroupId === 'string' ? input.defaultGroupId.trim() : '';
+  const webhookInput = typeof input.webhookUrl === 'string' ? input.webhookUrl.trim() : '';
+  const webhookUrl = webhookInput || previous.webhookUrl || '';
+
+  return { webhookUrl, defaultResponsibleId, defaultGroupId };
+}
+
+function publicBitrixConfig(config = {}) {
+  return {
+    defaultResponsibleId: config.defaultResponsibleId || '',
+    defaultGroupId: config.defaultGroupId || '',
+    hasWebhook: Boolean(config.webhookUrl),
+  };
+}
+
+const DIARIZATION_METHODS = new Set(['shopot', 'gemini', 'speech2text', 'off']);
+
+function normalizeDiarizationConfig(input = {}, previous = {}) {
+  const method = DIARIZATION_METHODS.has(input.method) ? input.method : previous.method || 'shopot';
+  const shopotKeyInput = typeof input.shopotApiKey === 'string' ? input.shopotApiKey.trim() : '';
+  const shopotApiKey = shopotKeyInput || previous.shopotApiKey || '';
+  const geminiModel = typeof input.geminiModel === 'string' && input.geminiModel.trim()
+    ? input.geminiModel.trim()
+    : previous.geminiModel || 'google/gemini-2.5-pro';
+  const speech2textKeyInput = typeof input.speech2textApiKey === 'string' ? input.speech2textApiKey.trim() : '';
+  const speech2textApiKey = speech2textKeyInput || previous.speech2textApiKey || '';
+
+  return { method, shopotApiKey, geminiModel, speech2textApiKey };
+}
+
+function publicDiarizationConfig(config = {}) {
+  return {
+    method: config.method || 'shopot',
+    hasShopotKey: Boolean(config.shopotApiKey),
+    geminiModel: config.geminiModel || 'google/gemini-2.5-pro',
+    hasSpeech2textKey: Boolean(config.speech2textApiKey),
+  };
+}
+
 async function createSession(userId) {
   const token = randomBytes(32).toString('base64url');
   const tokenHash = hashToken(token);
@@ -173,6 +229,21 @@ export async function getUserSmtpConfig(userId) {
   return result.rows[0]?.smtp_config || null;
 }
 
+export async function getUserTelegramConfig(userId) {
+  const result = await query('select telegram_config from app_users where id = $1', [userId]);
+  return result.rows[0]?.telegram_config || null;
+}
+
+export async function getUserBitrixConfig(userId) {
+  const result = await query('select bitrix_config from app_users where id = $1', [userId]);
+  return result.rows[0]?.bitrix_config || null;
+}
+
+export async function getUserDiarizationConfig(userId) {
+  const result = await query('select diarization_config from app_users where id = $1', [userId]);
+  return result.rows[0]?.diarization_config || null;
+}
+
 export function registerAuthRoutes(app) {
   app.get('/api/auth/me', async (c) => {
     const user = await getCurrentUser(c);
@@ -198,6 +269,69 @@ export function registerAuthRoutes(app) {
     ]);
 
     return c.json({ smtp: publicSmtpConfig(config) });
+  });
+
+  app.get('/api/settings/telegram', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const config = await getUserTelegramConfig(user.id);
+
+    return c.json({ telegram: publicTelegramConfig(config || {}) });
+  });
+
+  app.patch('/api/settings/telegram', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const previous = (await getUserTelegramConfig(user.id)) || {};
+    const config = normalizeTelegramConfig(body, previous);
+
+    await query('update app_users set telegram_config = $1::jsonb, updated_at = now() where id = $2', [
+      JSON.stringify(config),
+      user.id,
+    ]);
+
+    return c.json({ telegram: publicTelegramConfig(config) });
+  });
+
+  app.get('/api/settings/bitrix', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const config = await getUserBitrixConfig(user.id);
+
+    return c.json({ bitrix: publicBitrixConfig(config || {}) });
+  });
+
+  app.patch('/api/settings/bitrix', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const previous = (await getUserBitrixConfig(user.id)) || {};
+    const config = normalizeBitrixConfig(body, previous);
+
+    await query('update app_users set bitrix_config = $1::jsonb, updated_at = now() where id = $2', [
+      JSON.stringify(config),
+      user.id,
+    ]);
+
+    return c.json({ bitrix: publicBitrixConfig(config) });
+  });
+
+  app.get('/api/settings/diarization', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const config = await getUserDiarizationConfig(user.id);
+
+    return c.json({ diarization: publicDiarizationConfig(config || {}) });
+  });
+
+  app.patch('/api/settings/diarization', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const previous = (await getUserDiarizationConfig(user.id)) || {};
+    const config = normalizeDiarizationConfig(body, previous);
+
+    await query('update app_users set diarization_config = $1::jsonb, updated_at = now() where id = $2', [
+      JSON.stringify(config),
+      user.id,
+    ]);
+
+    return c.json({ diarization: publicDiarizationConfig(config) });
   });
 
   app.post('/api/auth/register', async (c) => {
