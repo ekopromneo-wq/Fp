@@ -21,16 +21,18 @@ export async function ensureAudioBucket() {
   }
 }
 
-export async function saveRecordingAudio(recordingId, file) {
-  const originalFilename = file.name || 'audio';
+async function putAudioObject(recordingId, buffer, originalFilename, mimeType) {
   const extension = originalFilename.includes('.') ? originalFilename.split('.').pop() : 'bin';
   const storageKey = `recordings/${recordingId}/audio-${Date.now()}.${extension}`;
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const mimeType = file.type || 'application/octet-stream';
 
   await storageClient.putObject(audioBucket, storageKey, buffer, buffer.length, {
     'Content-Type': mimeType,
-    'X-Amz-Meta-Original-Filename': originalFilename,
+    // HTTP headers (including S3 user metadata) must be ASCII - non-Latin
+    // filenames (e.g. Cyrillic) would otherwise throw ERR_INVALID_CHAR here.
+    // Nothing in this codebase reads this metadata back (the DB's
+    // original_filename column, not S3 metadata, is the source of truth),
+    // so it's safe to just percent-encode it.
+    'X-Amz-Meta-Original-Filename': encodeURIComponent(originalFilename),
   });
 
   return {
@@ -39,6 +41,31 @@ export async function saveRecordingAudio(recordingId, file) {
     mimeType,
     fileSizeBytes: buffer.length,
   };
+}
+
+export async function saveRecordingAudio(recordingId, file) {
+  const originalFilename = file.name || 'audio';
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const mimeType = file.type || 'application/octet-stream';
+
+  return putAudioObject(recordingId, buffer, originalFilename, mimeType);
+}
+
+/**
+ * Swaps a recording's stored audio object for a different buffer (used to
+ * replace an uploaded video with just its extracted audio track once
+ * processed - see videoAudio.js), deleting the previous object afterward.
+ */
+export async function replaceRecordingAudio(recordingId, previousStorageKey, buffer, originalFilename, mimeType) {
+  const metadata = await putAudioObject(recordingId, buffer, originalFilename, mimeType);
+
+  if (previousStorageKey) {
+    await deleteRecordingAudio(previousStorageKey).catch((error) => {
+      console.error(`Failed to delete replaced audio object ${previousStorageKey}`, error);
+    });
+  }
+
+  return metadata;
 }
 
 export async function deleteRecordingAudio(storageKey) {

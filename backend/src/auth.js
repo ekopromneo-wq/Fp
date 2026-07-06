@@ -135,7 +135,7 @@ function publicBitrixConfig(config = {}) {
   };
 }
 
-const DIARIZATION_METHODS = new Set(['shopot', 'gemini', 'speech2text', 'off']);
+const DIARIZATION_METHODS = new Set(['shopot', 'gemini', 'speech2text', 'kimi', 'off']);
 
 function normalizeDiarizationConfig(input = {}, previous = {}) {
   const method = DIARIZATION_METHODS.has(input.method) ? input.method : previous.method || 'shopot';
@@ -146,8 +146,11 @@ function normalizeDiarizationConfig(input = {}, previous = {}) {
     : previous.geminiModel || 'google/gemini-2.5-pro';
   const speech2textKeyInput = typeof input.speech2textApiKey === 'string' ? input.speech2textApiKey.trim() : '';
   const speech2textApiKey = speech2textKeyInput || previous.speech2textApiKey || '';
+  const kimiModel = typeof input.kimiModel === 'string' && input.kimiModel.trim()
+    ? input.kimiModel.trim()
+    : previous.kimiModel || 'moonshotai/kimi-k2.6';
 
-  return { method, shopotApiKey, geminiModel, speech2textApiKey };
+  return { method, shopotApiKey, geminiModel, speech2textApiKey, kimiModel };
 }
 
 function publicDiarizationConfig(config = {}) {
@@ -156,6 +159,7 @@ function publicDiarizationConfig(config = {}) {
     hasShopotKey: Boolean(config.shopotApiKey),
     geminiModel: config.geminiModel || 'google/gemini-2.5-pro',
     hasSpeech2textKey: Boolean(config.speech2textApiKey),
+    kimiModel: config.kimiModel || 'moonshotai/kimi-k2.6',
   };
 }
 

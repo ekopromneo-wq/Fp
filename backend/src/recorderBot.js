@@ -13,6 +13,14 @@ export function isSupportedMeetingUrl(meetingUrl) {
 export function detectPlatform(meetingUrl) {
   try {
     const host = new URL(meetingUrl).hostname.replace(/^www\./, '');
+
+    // Zoom uses many datacenter subdomains (us04web.zoom.us, us05web.zoom.us, ...)
+    // plus org vanity subdomains, so it needs a suffix check rather than an
+    // exact-hostname entry in SELF_HOSTED_PLATFORM_HOSTS.
+    if (host === 'zoom.us' || host.endsWith('.zoom.us')) {
+      return 'zoom';
+    }
+
     return SELF_HOSTED_PLATFORM_HOSTS[host] || null;
   } catch {
     return null;

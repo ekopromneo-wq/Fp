@@ -279,6 +279,7 @@ function App() {
     shopotApiKey: '',
     geminiModel: 'google/gemini-2.5-pro',
     speech2textApiKey: '',
+    kimiModel: 'moonshotai/kimi-k2.6',
   });
   const [diarizationHasShopotKey, setDiarizationHasShopotKey] = useState(false);
   const [diarizationHasSpeech2textKey, setDiarizationHasSpeech2textKey] = useState(false);
@@ -625,6 +626,7 @@ function App() {
         shopotApiKey: '',
         geminiModel: data.diarization?.geminiModel || 'google/gemini-2.5-pro',
         speech2textApiKey: '',
+        kimiModel: data.diarization?.kimiModel || 'moonshotai/kimi-k2.6',
       });
       setDiarizationHasShopotKey(Boolean(data.diarization?.hasShopotKey));
       setDiarizationHasSpeech2textKey(Boolean(data.diarization?.hasSpeech2textKey));
@@ -1634,7 +1636,7 @@ function App() {
                 >
                   <input
                     type="file"
-                    accept="audio/*,video/webm,.webm,.mp3,.wav,.m4a,.ogg"
+                    accept="audio/*,video/*,.webm,.mp3,.wav,.m4a,.ogg,.mp4,.mov,.mkv"
                     onChange={handleFileChange}
                     disabled={isUploading || isMicRecording}
                   />
@@ -1708,6 +1710,7 @@ function App() {
                   <option value="shopot">Shopot (облачная диаризация)</option>
                   <option value="gemini">Gemini через OpenRouter (аудио + определение имён)</option>
                   <option value="speech2text">Speech2Text (облачная диаризация)</option>
+                  <option value="kimi">Kimi через OpenRouter (ASR + текстовая разметка по спикерам)</option>
                   <option value="off">Выключено (только текстовая разметка по стенограмме)</option>
                 </select>
               </label>
@@ -1741,13 +1744,22 @@ function App() {
                 />
               </label>
 
+              <label>
+                Модель Kimi (через OpenRouter)
+                <input
+                  value={diarizationSettingsDraft.kimiModel}
+                  onChange={(event) => setDiarizationSettingsDraft((current) => ({ ...current, kimiModel: event.target.value }))}
+                  placeholder="moonshotai/kimi-k2.6"
+                />
+              </label>
+
               <button className="button button-primary" type="submit" disabled={isSavingDiarizationSettings || isSettingsLoading}>
                 {isSavingDiarizationSettings ? 'Сохраняем...' : 'Сохранить диаризацию'}
               </button>
             </form>
 
             <p className="settings-note">
-              Shopot — специализированный сервис диаризации (быстро, точные таймкоды). Gemini — распознаёт спикеров и по возможности определяет их имена прямо по аудио, используя общий ключ OpenRouter (без отдельной настройки). Speech2Text — ещё один облачный сервис диаризации (только метки «Спикер N», без определения имён). «Выключено» — только LLM-разметка по тексту стенограммы.
+              Shopot — специализированный сервис диаризации (быстро, точные таймкоды). Gemini — распознаёт спикеров и по возможности определяет их имена прямо по аудио, используя общий ключ OpenRouter (без отдельной настройки). Speech2Text — ещё один облачный сервис диаризации (только метки «Спикер N», без определения имён). Kimi не умеет слушать аудио сам, поэтому сначала делает обычную ASR-расшифровку, а затем раскладывает готовый текст по спикерам с определением имён — без таймкодов реплик. «Выключено» — только LLM-разметка по тексту стенограммы.
             </p>
           </section>
 

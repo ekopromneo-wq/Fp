@@ -19,14 +19,14 @@ function countWords(text) {
   return text.split(/\s+/).filter(Boolean).length;
 }
 
-async function callOpenRouterSpeakerSplit(transcriptText) {
+async function callOpenRouterSpeakerSplit(transcriptText, model) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
     throw new Error('OPENROUTER_API_KEY is not configured');
   }
 
-  const model = process.env.OPENROUTER_LLM_MODEL || 'openai/gpt-4o-mini';
+  const resolvedModel = model || process.env.OPENROUTER_LLM_MODEL || 'openai/gpt-4o-mini';
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -36,8 +36,12 @@ async function callOpenRouterSpeakerSplit(transcriptText) {
       'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'VoxMate',
     },
     body: JSON.stringify({
-      model,
+      model: resolvedModel,
       response_format: { type: 'json_object' },
+      // Reasoning models (e.g. Kimi) burn completion tokens on hidden chain-of-thought
+      // before writing the actual JSON, which can silently truncate the response to
+      // nothing on longer transcripts. This task is plain extraction, not reasoning.
+      reasoning: { enabled: false },
       messages: [
         {
           role: 'system',
@@ -87,8 +91,10 @@ function turnsToSegments(turns) {
  * Returns null (instead of throwing) when the transcript is too short to bother,
  * the API isn't configured, the call fails, or the result looks like it dropped content -
  * callers should fall back to the original single-segment transcript in that case.
+ * `model` overrides the default (env var / gpt-4o-mini), used by text-only
+ * diarization methods like Kimi that want a specific model for the split.
  */
-async function trySplitTranscriptBySpeaker(transcriptText) {
+async function trySplitTranscriptBySpeaker(transcriptText, model) {
   const text = String(transcriptText || '').trim();
 
   if (!text || countWords(text) < MIN_WORDS_TO_SPLIT) {
@@ -96,7 +102,7 @@ async function trySplitTranscriptBySpeaker(transcriptText) {
   }
 
   try {
-    const turns = await callOpenRouterSpeakerSplit(text);
+    const turns = await callOpenRouterSpeakerSplit(text, model);
 
     if (!turns.length) {
       return null;
