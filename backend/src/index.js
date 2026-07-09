@@ -12,13 +12,26 @@ dotenv.config();
 const port = Number(process.env.PORT || 4000);
 const app = new Hono();
 
+// Sessions are cookie-based (credentials: 'include' on the frontend), so
+// reflecting any Origin back here while allowing credentials would let any
+// external site ride a logged-in user's session cross-origin. Only ever set
+// Allow-Origin for an explicitly allowlisted origin.
+const corsAllowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || `http://localhost:${process.env.WEB_PORT || 4173}`)
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+
 app.use('/api/*', async (c, next) => {
   const origin = c.req.header('Origin');
 
-  c.header('Access-Control-Allow-Origin', origin || '*');
+  if (origin && corsAllowedOrigins.includes(origin)) {
+    c.header('Access-Control-Allow-Origin', origin);
+    c.header('Access-Control-Allow-Credentials', 'true');
+    c.header('Vary', 'Origin');
+  }
+
   c.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  c.header('Access-Control-Allow-Credentials', 'true');
 
   if (c.req.method === 'OPTIONS') {
     return c.body(null, 204);

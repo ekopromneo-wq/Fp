@@ -1,3 +1,4 @@
+import { bodyLimit } from 'hono/body-limit';
 import { createRecordingQueue } from './queue.js';
 import {
   getAuthUser,
@@ -11,12 +12,16 @@ import { query, transaction } from './db.js';
 import { sendRecordingEmail } from './email.js';
 import { sendRecordingTelegram } from './telegram.js';
 import { sendTasksToBitrix, matchRecordingSpeakersToBitrix } from './bitrix.js';
-import { joinMeeting, stopMeeting } from './meetingBot.js';
+import { joinMeeting, stopMeeting, isSupportedMeetingUrl } from './meetingBot.js';
 import { detectPlatform, isSupportedMeetingUrl as isSelfHostedMeetingUrl, startRecorderJob, stopRecorderJob } from './recorderBot.js';
 import { Readable } from 'node:stream';
 import { deleteRecordingAudio, getRecordingAudioStream, saveRecordingAudio } from './storage.js';
 
 const queue = createRecordingQueue();
+// Generous but bounded - real recordings in this project include multi-hour
+// meeting video uploads well into the tens of MB; this exists to stop
+// absurd/malicious payloads, not to constrain normal usage.
+const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 2 * 1024 * 1024 * 1024);
 
 function mapRecording(row) {
   return {
@@ -456,6 +461,10 @@ export async function createMeetingBotRecording(input, ownerId) {
 
   if (!meetingUrl) {
     throw new Error('Meeting URL is required');
+  }
+
+  if (!isSupportedMeetingUrl(meetingUrl)) {
+    throw new Error('Meeting URL is not a supported conference platform');
   }
 
   const diarizationConfig = (await getUserDiarizationConfig(ownerId)) || {};
@@ -1308,23 +1317,31 @@ export function registerRecordingRoutes(app) {
     }
   });
 
-  app.post('/api/recordings/:id/audio', requireAuth, async (c) => {
-    const user = getAuthUser(c);
-    const formData = await c.req.raw.formData().catch(() => null);
-    const file = formData?.get('file');
+  app.post(
+    '/api/recordings/:id/audio',
+    requireAuth,
+    bodyLimit({
+      maxSize: MAX_UPLOAD_BYTES,
+      onError: (c) => c.json({ error: 'File too large' }, 413),
+    }),
+    async (c) => {
+      const user = getAuthUser(c);
+      const formData = await c.req.raw.formData().catch(() => null);
+      const file = formData?.get('file');
 
-    if (!file || typeof file.arrayBuffer !== 'function') {
-      return c.json({ error: 'Expected multipart form-data with file field named "file"' }, 400);
-    }
+      if (!file || typeof file.arrayBuffer !== 'function') {
+        return c.json({ error: 'Expected multipart form-data with file field named "file"' }, 400);
+      }
 
-    const recording = await attachRecordingAudio(c.req.param('id'), file, user.id);
+      const recording = await attachRecordingAudio(c.req.param('id'), file, user.id);
 
-    if (!recording) {
-      return c.json({ error: 'Recording not found' }, 404);
-    }
+      if (!recording) {
+        return c.json({ error: 'Recording not found' }, 404);
+      }
 
-    return c.json({ recording });
-  });
+      return c.json({ recording });
+    },
+  );
 
   app.post('/api/recordings/:id/jobs', requireAuth, async (c) => {
     const user = getAuthUser(c);
