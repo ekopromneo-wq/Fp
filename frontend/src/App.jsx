@@ -1,9 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import './App.css';
-import uploadIcon from './assets/icons/upload.png';
-import microphoneIcon from './assets/icons/microphone.png';
-import refreshIcon from './assets/icons/refresh.png';
-import settingsIcon from './assets/icons/settings.png';
+import Topbar from './components/Topbar.jsx';
+import DiarizationSettingsPanel from './components/settings/DiarizationSettingsPanel.jsx';
+import SmtpSettingsPanel from './components/settings/SmtpSettingsPanel.jsx';
+import TelegramSettingsPanel from './components/settings/TelegramSettingsPanel.jsx';
+import BitrixSettingsPanel from './components/settings/BitrixSettingsPanel.jsx';
+import JobsList from './components/JobsList.jsx';
+import SpeakerRow from './components/SpeakerRow.jsx';
+import TaskForm from './components/TaskForm.jsx';
+import TaskRow from './components/TaskRow.jsx';
+import RecordingCard from './components/RecordingCard.jsx';
+import useMicRecorder from './hooks/useMicRecorder.js';
+import useIsMobile from './hooks/useIsMobile.js';
+import useUiStore from './store/uiStore.js';
+import VoicePanel from './components/VoicePanel/VoicePanel.jsx';
+import { formatDate, formatFileSize } from './lib/format.js';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 const demoEmail = import.meta.env.VITE_DEMO_EMAIL || 'demo@voxmate.local';
@@ -18,31 +29,6 @@ function apiFetch(path, options = {}) {
       ...(options.headers || {}),
     },
   });
-}
-
-function formatDate(value) {
-  if (!value) {
-    return '-';
-  }
-
-  return new Intl.DateTimeFormat('ru-RU', {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value));
-}
-
-function formatFileSize(bytes) {
-  if (!bytes) {
-    return 'без файла';
-  }
-
-  if (bytes < 1024 * 1024) {
-    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  }
-
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function getAudioUrl(recording) {
@@ -220,14 +206,6 @@ function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage
 }
 
 function App() {
-  const mediaRecorderRef = useRef(null);
-  const micStreamRef = useRef(null);
-  const micChunksRef = useRef([]);
-  const micStartedAtRef = useRef(null);
-  const micAudioContextRef = useRef(null);
-  const micAnalyserRef = useRef(null);
-  const micLevelFrameRef = useRef(null);
-  const micLevelPercentRef = useRef(0);
   const [currentUser, setCurrentUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState('login');
@@ -252,8 +230,6 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [isMicRecording, setIsMicRecording] = useState(false);
-  const [micLevel, setMicLevel] = useState(0);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [summaryLength, setSummaryLength] = useState('medium');
   const [savingTaskId, setSavingTaskId] = useState(null);
@@ -294,12 +270,18 @@ function App() {
   const [deletingId, setDeletingId] = useState(null);
   const [isJobsCollapsed, setIsJobsCollapsed] = useState(false);
 
+  const { isMicRecording, micLevel, analyserRef: micAnalyserRef, handleMicRecordingToggle } = useMicRecorder(
+    uploadRecordingFile,
+    setStatus,
+  );
+  const isMobile = useIsMobile();
+  const isVoicePanelOpen = useUiStore((state) => state.isVoicePanelOpen);
+  const openVoicePanel = useUiStore((state) => state.openVoicePanel);
+  const closeVoicePanel = useUiStore((state) => state.closeVoicePanel);
+  const handleMicButtonClick = isMobile ? openVoicePanel : handleMicRecordingToggle;
+
   const hasRecordings = recordings.length > 0;
   const sortedRecordings = useMemo(() => recordings, [recordings]);
-  const selectedListRecording = useMemo(
-    () => sortedRecordings.find((recording) => recording.id === selectedRecordingId) || null,
-    [selectedRecordingId, sortedRecordings],
-  );
   const canProcessSelected =
     selectedRecording &&
     selectedRecording.status !== 'queued' &&
@@ -868,79 +850,6 @@ function App() {
     return () => window.clearInterval(intervalId);
   }, [currentUser?.id, selectedRecordingId, selectedRecording?.status]);
 
-  useEffect(() => {
-    return () => {
-      const recorder = mediaRecorderRef.current;
-
-      if (recorder && recorder.state !== 'inactive') {
-        recorder.onstop = null;
-        recorder.stop();
-      }
-
-      micStreamRef.current?.getTracks().forEach((track) => track.stop());
-      stopMicLevelMeter();
-    };
-  }, []);
-
-  function stopMicLevelMeter() {
-    if (micLevelFrameRef.current !== null) {
-      cancelAnimationFrame(micLevelFrameRef.current);
-      micLevelFrameRef.current = null;
-    }
-
-    micAnalyserRef.current = null;
-    micAudioContextRef.current?.close().catch(() => {});
-    micAudioContextRef.current = null;
-    micLevelPercentRef.current = 0;
-    setMicLevel(0);
-  }
-
-  function startMicLevelMeter(stream) {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-
-    if (!AudioContextClass) {
-      return;
-    }
-
-    try {
-      const audioContext = new AudioContextClass();
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.6;
-      source.connect(analyser);
-
-      micAudioContextRef.current = audioContext;
-      micAnalyserRef.current = analyser;
-
-      const levelData = new Uint8Array(analyser.fftSize);
-
-      const updateLevel = () => {
-        analyser.getByteTimeDomainData(levelData);
-
-        let sumSquares = 0;
-        for (let i = 0; i < levelData.length; i += 1) {
-          const normalized = (levelData[i] - 128) / 128;
-          sumSquares += normalized * normalized;
-        }
-
-        const rms = Math.sqrt(sumSquares / levelData.length);
-        const percent = Math.round(Math.min(1, rms * 4) * 100);
-
-        if (Math.abs(percent - micLevelPercentRef.current) >= 2) {
-          micLevelPercentRef.current = percent;
-          setMicLevel(percent / 100);
-        }
-
-        micLevelFrameRef.current = requestAnimationFrame(updateLevel);
-      };
-
-      micLevelFrameRef.current = requestAnimationFrame(updateLevel);
-    } catch {
-      // Level meter is a visual enhancement only - recording keeps working without it.
-    }
-  }
-
   async function uploadRecordingFile(file, source = 'frontend-upload') {
     setIsUploading(true);
     setStatus(`Загружаем ${file.name}...`);
@@ -989,91 +898,6 @@ function App() {
     }
 
     await uploadRecordingFile(file);
-  }
-
-  async function startMicRecording() {
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setStatus('Запись с микрофона не поддерживается в этом браузере');
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const options = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? { mimeType: 'audio/webm;codecs=opus' } : {};
-      const recorder = new MediaRecorder(stream, options);
-
-      micChunksRef.current = [];
-      micStreamRef.current = stream;
-      mediaRecorderRef.current = recorder;
-      micStartedAtRef.current = new Date();
-
-      recorder.ondataavailable = (event) => {
-        if (event.data?.size) {
-          micChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = async () => {
-        const chunks = micChunksRef.current;
-        const mimeType = recorder.mimeType || 'audio/webm';
-        const extension = mimeType.includes('ogg') ? 'ogg' : 'webm';
-        const startedAt = micStartedAtRef.current || new Date();
-        const filename = `mic-recording-${startedAt.toISOString().replace(/[:.]/g, '-')}.${extension}`;
-
-        stream.getTracks().forEach((track) => track.stop());
-        micStreamRef.current = null;
-        mediaRecorderRef.current = null;
-        micStartedAtRef.current = null;
-        stopMicLevelMeter();
-        setIsMicRecording(false);
-
-        if (!chunks.length) {
-          setStatus('Микрофонная запись пустая');
-          return;
-        }
-
-        const file = new File([new Blob(chunks, { type: mimeType })], filename, { type: mimeType });
-        micChunksRef.current = [];
-        await uploadRecordingFile(file, 'frontend-microphone');
-      };
-
-      recorder.start();
-      startMicLevelMeter(stream);
-      setIsMicRecording(true);
-      setStatus('Идёт запись с микрофона...');
-    } catch (error) {
-      micStreamRef.current?.getTracks().forEach((track) => track.stop());
-      micStreamRef.current = null;
-      mediaRecorderRef.current = null;
-      stopMicLevelMeter();
-      setIsMicRecording(false);
-      setStatus(error.name === 'NotAllowedError' ? 'Доступ к микрофону запрещён' : error.message || 'Не удалось начать запись');
-    }
-  }
-
-  function stopMicRecording() {
-    const recorder = mediaRecorderRef.current;
-
-    if (recorder && recorder.state !== 'inactive') {
-      setStatus('Останавливаем запись...');
-      recorder.stop();
-      return;
-    }
-
-    micStreamRef.current?.getTracks().forEach((track) => track.stop());
-    micStreamRef.current = null;
-    mediaRecorderRef.current = null;
-    stopMicLevelMeter();
-    setIsMicRecording(false);
-  }
-
-  function handleMicRecordingToggle() {
-    if (isMicRecording) {
-      stopMicRecording();
-      return;
-    }
-
-    startMicRecording();
   }
 
   async function handleProcess(recording) {
@@ -1610,321 +1434,67 @@ function App() {
 
   return (
     <main className="app-shell">
-      <section className="topbar" aria-labelledby="page-title">
-        <div>
-          <p className="eyebrow">VoxMate</p>
-          <h1 id="page-title">{activePage === 'settings' ? 'Настройки' : 'Записи'}</h1>
-        </div>
+      <Topbar
+        activePage={activePage}
+        setActivePage={setActivePage}
+        currentUser={currentUser}
+        isUploading={isUploading}
+        isMicRecording={isMicRecording}
+        micLevel={micLevel}
+        handleFileChange={handleFileChange}
+        handleMicRecordingToggle={handleMicButtonClick}
+        loadRecordings={loadRecordings}
+        isLoading={isLoading}
+        handleLogout={handleLogout}
+      />
 
-        <div className="topbar-right">
-          <div className="user-chip">
-            <strong>{currentUser.displayName}</strong>
-            <span>{currentUser.email}</span>
-          </div>
-
-          <div className="actions">
-            {activePage === 'settings' ? (
-              <button className="button button-secondary" type="button" onClick={() => setActivePage('library')}>
-                Записи
-              </button>
-            ) : (
-              <>
-                <label
-                  className={`button icon-button icon-button-ghost ${isUploading || isMicRecording ? 'is-disabled' : ''}`}
-                  aria-label="Загрузить запись"
-                  title="Загрузить запись"
-                >
-                  <input
-                    type="file"
-                    accept="audio/*,video/*,.webm,.mp3,.wav,.m4a,.ogg,.mp4,.mov,.mkv"
-                    onChange={handleFileChange}
-                    disabled={isUploading || isMicRecording}
-                  />
-                  <img className="icon-button-image" src={uploadIcon} alt="" />
-                </label>
-
-                <button
-                  className={`button icon-button ${isMicRecording ? 'button-danger' : 'button-secondary'}`}
-                  type="button"
-                  onClick={handleMicRecordingToggle}
-                  disabled={isUploading}
-                  aria-label={isMicRecording ? 'Остановить запись' : 'Записать с микрофона'}
-                  title={isMicRecording ? 'Остановить запись' : 'Записать с микрофона'}
-                  style={
-                    isMicRecording
-                      ? { background: `linear-gradient(to top, #f4c430 ${micLevel * 100}%, #fff7f5 ${micLevel * 100}%)` }
-                      : undefined
-                  }
-                >
-                  <img className="icon-button-image" src={microphoneIcon} alt="" />
-                </button>
-
-                <button
-                  className="button button-secondary icon-button"
-                  type="button"
-                  onClick={() => loadRecordings()}
-                  disabled={isLoading || isUploading || isMicRecording}
-                  aria-label="Обновить"
-                  title="Обновить"
-                >
-                  <img className="icon-button-image" src={refreshIcon} alt="" />
-                </button>
-              </>
-            )}
-
-            <button
-              className={`button icon-button ${activePage === 'settings' ? 'button-primary' : 'button-secondary'}`}
-              type="button"
-              onClick={() => setActivePage('settings')}
-              aria-label="Настройки"
-              title="Настройки"
-            >
-              <img className="icon-button-image" src={settingsIcon} alt="" />
-            </button>
-
-            <button className="button button-secondary" type="button" onClick={handleLogout}>
-              Выйти
-            </button>
-          </div>
-        </div>
-      </section>
+      <VoicePanel
+        isOpen={isVoicePanelOpen}
+        onClose={closeVoicePanel}
+        isMicRecording={isMicRecording}
+        analyserRef={micAnalyserRef}
+        onToggleRecording={handleMicRecordingToggle}
+        status={status}
+      />
 
       {activePage === 'settings' ? (
         <section className="settings-page" aria-label="Настройки SMTP">
-          <section className="settings-panel">
-            <div className="settings-header">
-              <div>
-                <p className="eyebrow">Диаризация</p>
-                <h2>Способ разметки по спикерам</h2>
-              </div>
-              {isSettingsLoading ? <span className="muted-text">Загружаем...</span> : null}
-            </div>
+          <DiarizationSettingsPanel
+            draft={diarizationSettingsDraft}
+            setDraft={setDiarizationSettingsDraft}
+            onSubmit={handleSaveDiarizationSettings}
+            isSaving={isSavingDiarizationSettings}
+            isSettingsLoading={isSettingsLoading}
+            hasShopotKey={diarizationHasShopotKey}
+            hasSpeech2textKey={diarizationHasSpeech2textKey}
+          />
 
-            <form className="settings-form" onSubmit={handleSaveDiarizationSettings}>
-              <label>
-                Способ
-                <select
-                  value={diarizationSettingsDraft.method}
-                  onChange={(event) => setDiarizationSettingsDraft((current) => ({ ...current, method: event.target.value }))}
-                >
-                  <option value="shopot">Shopot (облачная диаризация)</option>
-                  <option value="gemini">Gemini через OpenRouter (аудио + определение имён)</option>
-                  <option value="speech2text">Speech2Text (облачная диаризация)</option>
-                  <option value="kimi">Kimi через OpenRouter (ASR + текстовая разметка по спикерам)</option>
-                  <option value="off">Выключено (только текстовая разметка по стенограмме)</option>
-                </select>
-              </label>
+          <SmtpSettingsPanel
+            draft={smtpDraft}
+            setDraft={setSmtpDraft}
+            onSubmit={handleSaveSmtpSettings}
+            isSaving={isSavingSettings}
+            isSettingsLoading={isSettingsLoading}
+            hasPassword={smtpHasPassword}
+          />
 
-              <label>
-                Shopot API-ключ
-                <input
-                  value={diarizationSettingsDraft.shopotApiKey}
-                  onChange={(event) => setDiarizationSettingsDraft((current) => ({ ...current, shopotApiKey: event.target.value }))}
-                  type="password"
-                  placeholder={diarizationHasShopotKey ? 'Ключ сохранен, оставь пустым чтобы не менять' : 'shpt_...'}
-                />
-              </label>
+          <TelegramSettingsPanel
+            draft={telegramSettingsDraft}
+            setDraft={setTelegramSettingsDraft}
+            onSubmit={handleSaveTelegramSettings}
+            isSaving={isSavingTelegramSettings}
+            isSettingsLoading={isSettingsLoading}
+            hasToken={telegramHasToken}
+          />
 
-              <label>
-                Модель Gemini (через OpenRouter)
-                <input
-                  value={diarizationSettingsDraft.geminiModel}
-                  onChange={(event) => setDiarizationSettingsDraft((current) => ({ ...current, geminiModel: event.target.value }))}
-                  placeholder="google/gemini-2.5-pro"
-                />
-              </label>
-
-              <label>
-                Speech2Text API-ключ
-                <input
-                  value={diarizationSettingsDraft.speech2textApiKey}
-                  onChange={(event) => setDiarizationSettingsDraft((current) => ({ ...current, speech2textApiKey: event.target.value }))}
-                  type="password"
-                  placeholder={diarizationHasSpeech2textKey ? 'Ключ сохранен, оставь пустым чтобы не менять' : 'API-ключ speech2text.ru'}
-                />
-              </label>
-
-              <label>
-                Модель Kimi (через OpenRouter)
-                <input
-                  value={diarizationSettingsDraft.kimiModel}
-                  onChange={(event) => setDiarizationSettingsDraft((current) => ({ ...current, kimiModel: event.target.value }))}
-                  placeholder="moonshotai/kimi-k2.6"
-                />
-              </label>
-
-              <button className="button button-primary" type="submit" disabled={isSavingDiarizationSettings || isSettingsLoading}>
-                {isSavingDiarizationSettings ? 'Сохраняем...' : 'Сохранить диаризацию'}
-              </button>
-            </form>
-
-            <p className="settings-note">
-              Shopot — специализированный сервис диаризации (быстро, точные таймкоды). Gemini — распознаёт спикеров и по возможности определяет их имена прямо по аудио, используя общий ключ OpenRouter (без отдельной настройки). Speech2Text — ещё один облачный сервис диаризации (только метки «Спикер N», без определения имён). Kimi не умеет слушать аудио сам, поэтому сначала делает обычную ASR-расшифровку, а затем раскладывает готовый текст по спикерам с определением имён — без таймкодов реплик. «Выключено» — только LLM-разметка по тексту стенограммы.
-            </p>
-          </section>
-
-          <section className="settings-panel">
-            <div className="settings-header">
-              <div>
-                <p className="eyebrow">SMTP</p>
-                <h2>Отправка протоколов</h2>
-              </div>
-              {isSettingsLoading ? <span className="muted-text">Загружаем...</span> : null}
-            </div>
-
-            <form className="settings-form" onSubmit={handleSaveSmtpSettings}>
-              <label>
-                SMTP host
-                <input
-                  value={smtpDraft.host}
-                  onChange={(event) => setSmtpDraft((current) => ({ ...current, host: event.target.value }))}
-                  placeholder="smtp.example.com"
-                />
-              </label>
-
-              <label>
-                Порт
-                <input
-                  value={smtpDraft.port}
-                  onChange={(event) => setSmtpDraft((current) => ({ ...current, port: event.target.value }))}
-                  inputMode="numeric"
-                  placeholder="587"
-                />
-              </label>
-
-              <label className="settings-toggle">
-                <input
-                  checked={smtpDraft.secure}
-                  onChange={(event) => setSmtpDraft((current) => ({ ...current, secure: event.target.checked }))}
-                  type="checkbox"
-                />
-                TLS/SSL
-              </label>
-
-              <label>
-                Пользователь
-                <input
-                  value={smtpDraft.user}
-                  onChange={(event) => setSmtpDraft((current) => ({ ...current, user: event.target.value }))}
-                  placeholder="smtp-user"
-                />
-              </label>
-
-              <label>
-                Пароль
-                <input
-                  value={smtpDraft.pass}
-                  onChange={(event) => setSmtpDraft((current) => ({ ...current, pass: event.target.value }))}
-                  type="password"
-                  placeholder={smtpHasPassword ? 'Пароль сохранен, оставь пустым чтобы не менять' : 'Пароль SMTP'}
-                />
-              </label>
-
-              <label>
-                От кого
-                <input
-                  value={smtpDraft.from}
-                  onChange={(event) => setSmtpDraft((current) => ({ ...current, from: event.target.value }))}
-                  placeholder="VoxMate <no-reply@example.com>"
-                />
-              </label>
-
-              <button className="button button-primary" type="submit" disabled={isSavingSettings || isSettingsLoading}>
-                {isSavingSettings ? 'Сохраняем...' : 'Сохранить SMTP'}
-              </button>
-            </form>
-
-            <p className="settings-note">
-              Эти настройки используются для кнопки отправки протокола по Email. Если поле пароля пустое, сохраненный пароль не меняется.
-            </p>
-          </section>
-
-          <section className="settings-panel">
-            <div className="settings-header">
-              <div>
-                <p className="eyebrow">Telegram</p>
-                <h2>Отправка протоколов в Telegram</h2>
-              </div>
-              {isSettingsLoading ? <span className="muted-text">Загружаем...</span> : null}
-            </div>
-
-            <form className="settings-form" onSubmit={handleSaveTelegramSettings}>
-              <label>
-                Токен бота
-                <input
-                  value={telegramSettingsDraft.botToken}
-                  onChange={(event) => setTelegramSettingsDraft((current) => ({ ...current, botToken: event.target.value }))}
-                  type="password"
-                  placeholder={telegramHasToken ? 'Токен сохранен, оставь пустым чтобы не менять' : '123456:AA...'}
-                />
-              </label>
-
-              <label>
-                Chat ID по умолчанию
-                <input
-                  value={telegramSettingsDraft.chatId}
-                  onChange={(event) => setTelegramSettingsDraft((current) => ({ ...current, chatId: event.target.value }))}
-                  placeholder="636211143"
-                />
-              </label>
-
-              <button className="button button-primary" type="submit" disabled={isSavingTelegramSettings || isSettingsLoading}>
-                {isSavingTelegramSettings ? 'Сохраняем...' : 'Сохранить Telegram'}
-              </button>
-            </form>
-
-            <p className="settings-note">
-              Токен получают у @BotFather. Chat ID — это чат, куда бот уже написал хотя бы раз (можно переопределить при отправке конкретной записи).
-            </p>
-          </section>
-
-          <section className="settings-panel">
-            <div className="settings-header">
-              <div>
-                <p className="eyebrow">Битрикс24</p>
-                <h2>Создание задач в Битрикс24</h2>
-              </div>
-              {isSettingsLoading ? <span className="muted-text">Загружаем...</span> : null}
-            </div>
-
-            <form className="settings-form" onSubmit={handleSaveBitrixSettings}>
-              <label>
-                Входящий вебхук
-                <input
-                  value={bitrixSettingsDraft.webhookUrl}
-                  onChange={(event) => setBitrixSettingsDraft((current) => ({ ...current, webhookUrl: event.target.value }))}
-                  type="password"
-                  placeholder={bitrixHasWebhook ? 'Вебхук сохранен, оставь пустым чтобы не менять' : 'https://portal.bitrix24.ru/rest/1/xxxx/'}
-                />
-              </label>
-
-              <label>
-                Ответственный по умолчанию (ID)
-                <input
-                  value={bitrixSettingsDraft.defaultResponsibleId}
-                  onChange={(event) => setBitrixSettingsDraft((current) => ({ ...current, defaultResponsibleId: event.target.value }))}
-                  placeholder="1"
-                />
-              </label>
-
-              <label>
-                Группа/проект (ID, опционально)
-                <input
-                  value={bitrixSettingsDraft.defaultGroupId}
-                  onChange={(event) => setBitrixSettingsDraft((current) => ({ ...current, defaultGroupId: event.target.value }))}
-                  placeholder=""
-                />
-              </label>
-
-              <button className="button button-primary" type="submit" disabled={isSavingBitrixSettings || isSettingsLoading}>
-                {isSavingBitrixSettings ? 'Сохраняем...' : 'Сохранить Битрикс24'}
-              </button>
-            </form>
-
-            <p className="settings-note">
-              Вебхук создаётся в Битрикс24: Приложения → Разработчикам → Входящий вебхук, с правом на раздел «Задачи».
-            </p>
-          </section>
+          <BitrixSettingsPanel
+            draft={bitrixSettingsDraft}
+            setDraft={setBitrixSettingsDraft}
+            onSubmit={handleSaveBitrixSettings}
+            isSaving={isSavingBitrixSettings}
+            isSettingsLoading={isSettingsLoading}
+            hasWebhook={bitrixHasWebhook}
+          />
 
           <section className="status-line" aria-live="polite">
             {status || 'Настройки будут применены к следующим отправкам протоколов.'}
@@ -2005,48 +1575,20 @@ function App() {
           ) : null}
 
           {hasRecordings ? (
-            <div className="recording-selector">
-              <label htmlFor="recording-select">Запись</label>
-              <select
-                id="recording-select"
-                value={selectedRecordingId || ''}
-                onChange={(event) => setSelectedRecordingId(event.target.value || null)}
-              >
-                <option value="">Выбери запись</option>
-                {sortedRecordings.map((recording) => (
-                  <option value={recording.id} key={recording.id}>
-                    {recording.originalFilename || recording.title}
-                  </option>
-                ))}
-              </select>
+            <div className="recording-cards">
+              {sortedRecordings.map((recording) => (
+                <RecordingCard
+                  key={recording.id}
+                  recording={recording}
+                  isSelected={recording.id === selectedRecordingId}
+                  onSelect={setSelectedRecordingId}
+                  onDelete={handleDelete}
+                  onProcess={handleProcess}
+                  isDeleting={deletingId === recording.id}
+                  enableSwipe={isMobile}
+                />
+              ))}
             </div>
-          ) : null}
-
-          {selectedListRecording ? (
-            <article className="recording-summary">
-              <div className="recording-meta">
-                <span>{formatFileSize(selectedListRecording.fileSizeBytes)}</span>
-                <span>{formatDate(selectedListRecording.createdAt)}</span>
-                <span className={`status-pill status-${selectedListRecording.status}`}>{selectedListRecording.status}</span>
-                {selectedListRecording.project ? (
-                  <span className="project-chip" style={{ '--project-color': selectedListRecording.project.color }}>
-                    {selectedListRecording.project.name}
-                  </span>
-                ) : null}
-              </div>
-
-              <div className="recording-summary-actions">
-                <span>{selectedListRecording.title}</span>
-                <button
-                  className="button button-danger"
-                  type="button"
-                  onClick={() => handleDelete(selectedListRecording)}
-                  disabled={deletingId === selectedListRecording.id}
-                >
-                  {deletingId === selectedListRecording.id ? 'Удаляем...' : 'Удалить'}
-                </button>
-              </div>
-            </article>
           ) : null}
         </section>
 
@@ -2290,76 +1832,19 @@ function App() {
                 </div>
                 {selectedRecording.speakers?.length ? (
                   <div className="speaker-list">
-                    {selectedRecording.speakers.map((speaker) => {
-                      const draft = getSpeakerDraft(speaker);
-                      const isSavingSpeaker = savingSpeakerLabel === speaker.label;
-                      const match = speakerMatches[speaker.label];
-                      const hasMultipleCandidates = (match?.candidates?.length || 0) > 1;
-                      const isSpeakerSaved = Boolean(speaker.id) && !speakerDrafts[speaker.label];
-
-                      return (
-                        <div className="speaker-row" key={speaker.label}>
-                          <div className="speaker-row-header">
-                            <strong>{speaker.label}</strong>
-                            <span>{speaker.id ? 'Сохранён' : 'Из стенограммы'}</span>
-                          </div>
-
-                          <label>
-                            Имя в протоколе
-                            <input
-                              value={draft.displayName}
-                              onChange={(event) => updateSpeakerDraft(speaker, 'displayName', event.target.value)}
-                              placeholder="Спикер"
-                            />
-                          </label>
-
-                          {hasMultipleCandidates ? (
-                            <label>
-                              Похожие сотрудники в Битрикс24
-                              <select
-                                value=""
-                                onChange={(event) => {
-                                  const candidate = match.candidates.find((item) => item.id === event.target.value);
-
-                                  if (candidate) {
-                                    applySpeakerCandidate(speaker, candidate);
-                                  }
-                                }}
-                              >
-                                <option value="">Выбери сотрудника...</option>
-                                {match.candidates.map((candidate) => (
-                                  <option value={candidate.id} key={candidate.id}>
-                                    {candidate.name}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          ) : null}
-
-                          <label>
-                            Контакт
-                            <input
-                              value={draft.contactName}
-                              onChange={(event) => updateSpeakerDraft(speaker, 'contactName', event.target.value)}
-                              placeholder="Имя контакта"
-                            />
-                          </label>
-
-                          <label>
-                            Email
-                            <input
-                              value={draft.contactEmail}
-                              onChange={(event) => updateSpeakerDraft(speaker, 'contactEmail', event.target.value)}
-                              placeholder="name@example.com"
-                            />
-                          </label>
-
-                          <button className="button button-secondary" type="button" onClick={() => handleSaveSpeaker(speaker)} disabled={isSavingSpeaker}>
-                            {isSavingSpeaker ? 'Сохраняем...' : isSpeakerSaved ? 'Сохранён' : 'Сохранить спикера'}
-                          </button>
-                        </div>
-                      );
-                    })}
+                    {selectedRecording.speakers.map((speaker) => (
+                      <SpeakerRow
+                        key={speaker.label}
+                        speaker={speaker}
+                        draft={getSpeakerDraft(speaker)}
+                        isSaving={savingSpeakerLabel === speaker.label}
+                        match={speakerMatches[speaker.label]}
+                        isSpeakerSaved={Boolean(speaker.id) && !speakerDrafts[speaker.label]}
+                        onDraftChange={updateSpeakerDraft}
+                        onApplyCandidate={applySpeakerCandidate}
+                        onSave={handleSaveSpeaker}
+                      />
+                    ))}
                   </div>
                 ) : (
                   <p className="muted-text">Спикеры появятся после стенограммы с сегментами ASR.</p>
@@ -2449,33 +1934,7 @@ function App() {
                     <strong>Новая задача</strong>
                   </div>
 
-                  <label>
-                    Исполнитель
-                    <input
-                      value={newTaskDraft.assignee}
-                      onChange={(event) => updateNewTaskDraft('assignee', event.target.value)}
-                      placeholder="Не указан"
-                    />
-                  </label>
-
-                  <label>
-                    Срок
-                    <input
-                      value={newTaskDraft.dueText}
-                      onChange={(event) => updateNewTaskDraft('dueText', event.target.value)}
-                      placeholder="Не указан"
-                    />
-                  </label>
-
-                  <label>
-                    Что сделать
-                    <textarea
-                      value={newTaskDraft.description}
-                      onChange={(event) => updateNewTaskDraft('description', event.target.value)}
-                      rows={3}
-                      placeholder="Описание задачи"
-                    />
-                  </label>
+                  <TaskForm draft={newTaskDraft} onFieldChange={updateNewTaskDraft} />
 
                   <button className="button button-primary" type="submit" disabled={isAddingTask}>
                     {isAddingTask ? 'Добавляем...' : 'Добавить задачу'}
@@ -2484,116 +1943,33 @@ function App() {
 
                 {selectedRecording.tasks?.length ? (
                   <div className="task-list">
-                    {selectedRecording.tasks.map((task) => {
-                      const draft = getTaskDraft(task);
-                      const isSavingTask = savingTaskId === task.id;
-                      const isDeletingTask = deletingTaskId === task.id;
-
-                      return (
-                        <div className={`task-row task-status-${task.status}`} key={task.id}>
-                          <div className="task-row-header">
-                            <strong>{task.status === 'confirmed' ? 'Подтверждена' : 'Извлечена'}</strong>
-                            <span>{formatDate(task.updatedAt)}</span>
-                          </div>
-
-                          <label>
-                            Исполнитель
-                            <input
-                              value={draft.assignee}
-                              onChange={(event) => updateTaskDraft(task, 'assignee', event.target.value)}
-                              placeholder="Не указан"
-                            />
-                          </label>
-
-                          <label>
-                            Срок
-                            <input
-                              value={draft.dueText}
-                              onChange={(event) => updateTaskDraft(task, 'dueText', event.target.value)}
-                              placeholder="Не указан"
-                            />
-                          </label>
-
-                          <label>
-                            Что сделать
-                            <textarea
-                              value={draft.description}
-                              onChange={(event) => updateTaskDraft(task, 'description', event.target.value)}
-                              rows={3}
-                            />
-                          </label>
-
-                          <div className="task-actions">
-                            <button className="button button-secondary" type="button" onClick={() => handleSaveTask(task)} disabled={isSavingTask}>
-                              {isSavingTask ? 'Сохраняем...' : 'Сохранить'}
-                            </button>
-                            <button
-                              className="button button-primary"
-                              type="button"
-                              onClick={() => handleConfirmTask(task)}
-                              disabled={isSavingTask || task.status === 'confirmed'}
-                            >
-                              Подтвердить
-                            </button>
-                            <button className="button button-danger" type="button" onClick={() => handleDismissTask(task)} disabled={isSavingTask}>
-                              Скрыть
-                            </button>
-                            <button
-                              className="button button-danger"
-                              type="button"
-                              onClick={() => handleDeleteTask(task)}
-                              disabled={isSavingTask || isDeletingTask}
-                            >
-                              {isDeletingTask ? 'Удаляем...' : 'Удалить'}
-                            </button>
-                            {task.externalRefs?.bitrix24 ? (
-                              <span className="bitrix-sent-badge">В Б24 #{task.externalRefs.bitrix24.taskId}</span>
-                            ) : (
-                              <button
-                                className="button button-secondary"
-                                type="button"
-                                onClick={() => handleSendTaskToBitrix(task)}
-                                disabled={isSavingTask || isSendingBitrixTaskId === task.id}
-                              >
-                                {isSendingBitrixTaskId === task.id ? 'Отправляем...' : 'В Битрикс24'}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
+                    {selectedRecording.tasks.map((task) => (
+                      <TaskRow
+                        key={task.id}
+                        task={task}
+                        draft={getTaskDraft(task)}
+                        isSaving={savingTaskId === task.id}
+                        isDeleting={deletingTaskId === task.id}
+                        isSendingBitrix={isSendingBitrixTaskId === task.id}
+                        onFieldChange={updateTaskDraft}
+                        onSave={handleSaveTask}
+                        onConfirm={handleConfirmTask}
+                        onDismiss={handleDismissTask}
+                        onDelete={handleDeleteTask}
+                        onSendToBitrix={handleSendTaskToBitrix}
+                      />
+                    ))}
                   </div>
                 ) : (
                   <p className="muted-text">Задач пока нет. Они появятся после генерации протокола, если модель найдёт поручения.</p>
                 )}
               </section>
 
-              <section className="detail-section detail-section-jobs">
-                <div className="jobs-header">
-                  <h3>Jobs</h3>
-                  <button className="button button-secondary" type="button" onClick={() => setIsJobsCollapsed((current) => !current)}>
-                    {isJobsCollapsed ? 'Развернуть' : 'Свернуть'}
-                  </button>
-                </div>
-
-                {!isJobsCollapsed ? (
-                  selectedRecording.jobs?.length ? (
-                    <div className="job-list">
-                      {selectedRecording.jobs.map((job) => (
-                        <div className="job-row" key={job.id}>
-                          <div>
-                            <strong>{job.status}</strong>
-                            <span>{formatDate(job.createdAt)}</span>
-                          </div>
-                          {job.error ? <p>{job.error}</p> : null}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="muted-text">Обработки ещё не запускались.</p>
-                  )
-                ) : null}
-              </section>
+              <JobsList
+                jobs={selectedRecording.jobs}
+                isCollapsed={isJobsCollapsed}
+                onToggleCollapse={() => setIsJobsCollapsed((current) => !current)}
+              />
             </>
           ) : null}
         </aside>
