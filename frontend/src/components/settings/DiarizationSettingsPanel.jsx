@@ -21,43 +21,51 @@ export default function DiarizationSettingsPanel({ draft, setDraft, onSubmit, is
           </select>
         </label>
 
-        <label>
-          Shopot API-ключ
-          <input
-            value={draft.shopotApiKey}
-            onChange={(event) => setDraft((current) => ({ ...current, shopotApiKey: event.target.value }))}
-            type="password"
-            placeholder={hasShopotKey ? 'Ключ сохранен, оставь пустым чтобы не менять' : 'shpt_...'}
-          />
-        </label>
+        {draft.method === 'shopot' ? (
+          <label>
+            Shopot API-ключ
+            <input
+              value={draft.shopotApiKey}
+              onChange={(event) => setDraft((current) => ({ ...current, shopotApiKey: event.target.value }))}
+              type="password"
+              placeholder={hasShopotKey ? 'Ключ сохранен, оставь пустым чтобы не менять' : 'shpt_...'}
+            />
+          </label>
+        ) : null}
 
-        <label>
-          Модель Gemini (через OpenRouter)
-          <input
-            value={draft.geminiModel}
-            onChange={(event) => setDraft((current) => ({ ...current, geminiModel: event.target.value }))}
-            placeholder="google/gemini-2.5-pro"
-          />
-        </label>
+        {draft.method === 'gemini' ? (
+          <label>
+            Модель Gemini (через OpenRouter)
+            <input
+              value={draft.geminiModel}
+              onChange={(event) => setDraft((current) => ({ ...current, geminiModel: event.target.value }))}
+              placeholder="google/gemini-2.5-pro"
+            />
+          </label>
+        ) : null}
 
-        <label>
-          Speech2Text API-ключ
-          <input
-            value={draft.speech2textApiKey}
-            onChange={(event) => setDraft((current) => ({ ...current, speech2textApiKey: event.target.value }))}
-            type="password"
-            placeholder={hasSpeech2textKey ? 'Ключ сохранен, оставь пустым чтобы не менять' : 'API-ключ speech2text.ru'}
-          />
-        </label>
+        {draft.method === 'speech2text' ? (
+          <label>
+            Speech2Text API-ключ
+            <input
+              value={draft.speech2textApiKey}
+              onChange={(event) => setDraft((current) => ({ ...current, speech2textApiKey: event.target.value }))}
+              type="password"
+              placeholder={hasSpeech2textKey ? 'Ключ сохранен, оставь пустым чтобы не менять' : 'API-ключ speech2text.ru'}
+            />
+          </label>
+        ) : null}
 
-        <label>
-          Модель Kimi (через OpenRouter)
-          <input
-            value={draft.kimiModel}
-            onChange={(event) => setDraft((current) => ({ ...current, kimiModel: event.target.value }))}
-            placeholder="moonshotai/kimi-k2.6"
-          />
-        </label>
+        {draft.method === 'kimi' ? (
+          <label>
+            Модель Kimi (через OpenRouter)
+            <input
+              value={draft.kimiModel}
+              onChange={(event) => setDraft((current) => ({ ...current, kimiModel: event.target.value }))}
+              placeholder="moonshotai/kimi-k2.6"
+            />
+          </label>
+        ) : null}
 
         <button className="button button-primary" type="submit" disabled={isSaving || isSettingsLoading}>
           {isSaving ? 'Сохраняем...' : 'Сохранить диаризацию'}

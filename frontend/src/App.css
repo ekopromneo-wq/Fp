@@ -492,6 +492,7 @@ h3 {
 }
 
 .settings-form .button {
+  grid-column: 1 / -1;
   align-self: end;
   width: 100%;
 }
