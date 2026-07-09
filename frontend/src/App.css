@@ -845,6 +845,9 @@ audio {
   color: var(--text-primary);
   line-height: 1.5;
   white-space: pre-wrap;
+  max-height: 45em; /* ~30 lines at line-height 1.5 */
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .summary-block {
