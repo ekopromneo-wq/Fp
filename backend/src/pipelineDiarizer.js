@@ -1,0 +1,443 @@
+import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { getAudioFormat, runFfmpeg } from './ffmpeg.js';
+import { parseJsonObject } from './llmJson.js';
+import { transcribeChunkWithTimestamps } from './openrouterAsr.js';
+
+// Chunking only applies to the Whisper step (see step 2) - the voice
+// diarization step (step 4) still sees the whole recording in one call, so
+// its S1/S2/S3 labels are already globally consistent and don't need
+// cross-chunk reconciliation.
+const CHUNK_SECONDS = Number(process.env.PIPELINE_CHUNK_SECONDS || 480);
+const WHISPER_MODEL = process.env.PIPELINE_WHISPER_MODEL || 'openai/whisper-large-v3';
+const VOICE_MODEL = process.env.PIPELINE_VOICE_MODEL || 'google/gemini-2.5-pro';
+const IDENTITY_MODEL = process.env.PIPELINE_IDENTITY_MODEL || 'anthropic/claude-sonnet-5';
+const WHISPER_CONCURRENCY = Number(process.env.PIPELINE_WHISPER_CONCURRENCY || 3);
+
+const VOICE_SYSTEM_PROMPT =
+  'Ты помощник, который слушает аудиозапись встречи и определяет, кто и когда говорит - только по голосу, ' +
+  'без расшифровки слов. Прослушай запись целиком и раздели её на интервалы по говорящим. Один и тот же голос ' +
+  'всегда подписывай одинаковой меткой (S1, S2, S3, ...) на протяжении всей записи, даже если он долго молчал. ' +
+  'Текст реплик передавать не нужно - только границы по времени. ' +
+  'Верни строго JSON без markdown в формате {"intervals":[{"speaker":"S1","start":number,"end":number}]}, ' +
+  'где start/end - время в секундах от начала записи.';
+
+const IDENTITY_SYSTEM_PROMPT =
+  'Тебе дают стенограмму встречи, уже размеченную по голосовым кластерам (S1, S2, ...) с таймкодами и точным текстом. ' +
+  'Определи реальное имя и/или роль каждого кластера по содержанию: самопредставление, обращения друг к другу по имени, ' +
+  'упоминания в третьем лице, характерная для роли лексика. Для каждого кластера укажи уровень уверенности: ' +
+  '"high" (прямое самопредставление или многократное обращение по имени), "medium" (косвенные признаки), ' +
+  '"low" (нет надёжных признаков). Обязательно приведи короткую цитату-доказательство (evidence) из текста для ' +
+  'high/medium. Если уверенности нет, верни name: null. ' +
+  'Верни строго JSON без markdown в формате ' +
+  '{"speakers":{"S1":{"name":"string|null","confidence":"high|medium|low","evidence":"string"}}}.';
+
+function getFfprobeDurationSeconds(filePath) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      'ffprobe',
+      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', filePath],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', reject);
+    child.on('close', (code) => {
+      const seconds = parseFloat(stdout.trim());
+
+      if (code === 0 && Number.isFinite(seconds)) {
+        resolve(seconds);
+        return;
+      }
+
+      reject(new Error(`ffprobe failed with code ${code}: ${stderr.slice(-500)}`));
+    });
+  });
+}
+
+async function normalizeAudio(workdir, file, audioBuffer) {
+  const inputFormat = getAudioFormat(file);
+  const inputPath = path.join(workdir, `input.${inputFormat || 'audio'}`);
+  const normalizedPath = path.join(workdir, 'normalized.mp3');
+
+  await writeFile(inputPath, audioBuffer);
+  await runFfmpeg(['-y', '-i', inputPath, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '64k', normalizedPath]);
+
+  return normalizedPath;
+}
+
+/**
+ * Cuts the normalized recording into fixed-length chunks for the Whisper
+ * step only (see module-level comment). `-ss` before `-i` plus `-t` for
+ * clip length is the standard accurate-seek idiom; mp3 has no keyframe/GOP
+ * concerns like video, so `-c copy` cuts cleanly at arbitrary times.
+ */
+async function splitIntoChunks(workdir, normalizedPath) {
+  const durationSeconds = await getFfprobeDurationSeconds(normalizedPath);
+  const chunkCount = Math.max(1, Math.ceil(durationSeconds / CHUNK_SECONDS));
+  const chunks = [];
+
+  for (let i = 0; i < chunkCount; i += 1) {
+    const startSeconds = i * CHUNK_SECONDS;
+    const clipSeconds = Math.min(CHUNK_SECONDS, durationSeconds - startSeconds);
+    const chunkPath = path.join(workdir, `chunk-${i}.mp3`);
+
+    await runFfmpeg([
+      '-y',
+      '-ss',
+      String(startSeconds),
+      '-i',
+      normalizedPath,
+      '-t',
+      String(clipSeconds),
+      '-c',
+      'copy',
+      chunkPath,
+    ]);
+
+    chunks.push({
+      buffer: await readFile(chunkPath),
+      offsetMs: Math.round(startSeconds * 1000),
+    });
+  }
+
+  return chunks;
+}
+
+function batchArray(items, size) {
+  const batches = [];
+
+  for (let i = 0; i < items.length; i += size) {
+    batches.push(items.slice(i, i + size));
+  }
+
+  return batches;
+}
+
+/**
+ * Transcribes each chunk with real segment timestamps, in bounded-concurrency
+ * batches, then flattens into one absolute-timestamp segment list for the
+ * whole recording (chunk offset added back in). A chunk that comes back
+ * without a `segments` array (see transcribeChunkWithTimestamps' doc comment
+ * on provider routing) is logged and skipped rather than trusted untimed.
+ */
+async function runWhisperOnChunks(chunks) {
+  const allSegments = [];
+
+  for (const batch of batchArray(chunks, WHISPER_CONCURRENCY)) {
+    const results = await Promise.all(
+      batch.map((chunk) =>
+        transcribeChunkWithTimestamps(chunk.buffer, 'mp3', { model: WHISPER_MODEL, granularities: ['segment'] }).catch(
+          (error) => {
+            console.warn(`Pipeline: Whisper chunk at offset ${chunk.offsetMs}ms failed:`, error.message);
+            return null;
+          },
+        ),
+      ),
+    );
+
+    results.forEach((result, index) => {
+      const chunk = batch[index];
+
+      if (!result || !result.segments.length) {
+        console.warn(`Pipeline: Whisper chunk at offset ${chunk.offsetMs}ms returned no timestamped segments`);
+        return;
+      }
+
+      for (const segment of result.segments) {
+        const text = String(segment.text || '').trim();
+
+        if (!text) continue;
+
+        allSegments.push({
+          text,
+          startMs: chunk.offsetMs + Math.round(Number(segment.start || 0) * 1000),
+          endMs: chunk.offsetMs + Math.round(Number(segment.end || 0) * 1000),
+        });
+      }
+    });
+  }
+
+  return allSegments.sort((a, b) => a.startMs - b.startMs);
+}
+
+async function requestVoiceIntervals(normalizedBuffer, apiKey, model) {
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'http://localhost:4173',
+      'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'VoxMate',
+    },
+    body: JSON.stringify({
+      model,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: VOICE_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Определи интервалы речи по говорящим в этой записи.' },
+            { type: 'input_audio', input_audio: { data: normalizedBuffer.toString('base64'), format: 'mp3' } },
+          ],
+        },
+      ],
+    }),
+  });
+
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(body?.error?.message || body?.message || `Voice diarization request failed with ${response.status}`);
+  }
+
+  const parsed = parseJsonObject(body?.choices?.[0]?.message?.content);
+  const rawList = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.intervals) ? parsed.intervals : [];
+  const intervals = rawList
+    .map((interval) => ({
+      speaker: String(interval?.speaker || '').trim() || 'S1',
+      startMs: Math.round(Number(interval?.start || 0) * 1000),
+      endMs: Math.round(Number(interval?.end || 0) * 1000),
+    }))
+    .filter((interval) => interval.endMs > interval.startMs)
+    .sort((a, b) => a.startMs - b.startMs);
+
+  if (!intervals.length) {
+    throw new Error('Voice diarization returned no usable intervals');
+  }
+
+  return intervals;
+}
+
+async function runVoiceDiarization(normalizedBuffer, apiKey, model) {
+  try {
+    return await requestVoiceIntervals(normalizedBuffer, apiKey, model);
+  } catch (error) {
+    console.warn(`Pipeline: voice diarization attempt 1 failed (${error.message}), retrying once`);
+    return requestVoiceIntervals(normalizedBuffer, apiKey, model);
+  }
+}
+
+/**
+ * Assigns each precisely-timed Whisper segment to whichever voice interval
+ * it overlaps most. Segments falling in a gap between intervals (no direct
+ * overlap) fall back to the nearest interval by midpoint distance, so every
+ * segment gets a speaker rather than being dropped.
+ */
+function assignSpeakersToSegments(whisperSegments, voiceIntervals) {
+  return whisperSegments.map((segment) => {
+    let bestInterval = null;
+    let bestOverlapMs = 0;
+
+    for (const interval of voiceIntervals) {
+      const overlapMs = Math.min(segment.endMs, interval.endMs) - Math.max(segment.startMs, interval.startMs);
+
+      if (overlapMs > bestOverlapMs) {
+        bestOverlapMs = overlapMs;
+        bestInterval = interval;
+      }
+    }
+
+    if (!bestInterval) {
+      const midpointMs = (segment.startMs + segment.endMs) / 2;
+
+      bestInterval = voiceIntervals.reduce((closest, interval) => {
+        const intervalMidMs = (interval.startMs + interval.endMs) / 2;
+        const closestMidMs = closest ? (closest.startMs + closest.endMs) / 2 : Infinity;
+
+        return Math.abs(intervalMidMs - midpointMs) < Math.abs(closestMidMs - midpointMs) ? interval : closest;
+      }, null);
+    }
+
+    return {
+      speaker: bestInterval?.speaker || 'S1',
+      text: segment.text,
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+    };
+  });
+}
+
+function mergeAdjacentSameSpeaker(segments) {
+  const merged = [];
+
+  for (const segment of segments) {
+    const last = merged[merged.length - 1];
+
+    if (last && last.speaker === segment.speaker) {
+      last.text = `${last.text} ${segment.text}`.trim();
+      last.endMs = segment.endMs;
+    } else {
+      merged.push({ ...segment });
+    }
+  }
+
+  return merged;
+}
+
+function formatTimestamp(ms) {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
+}
+
+async function requestSpeakerIdentities(segments, apiKey, model) {
+  const transcript = segments
+    .map((segment) => `[${formatTimestamp(segment.startMs)}] ${segment.speaker}: ${segment.text}`)
+    .join('\n');
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'http://localhost:4173',
+      'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'VoxMate',
+    },
+    body: JSON.stringify({
+      model,
+      response_format: { type: 'json_object' },
+      // Same rationale as speakerSplit.js: keep this fast/JSON-focused rather
+      // than burning tokens on hidden chain-of-thought.
+      reasoning: { enabled: false },
+      messages: [
+        { role: 'system', content: IDENTITY_SYSTEM_PROMPT },
+        { role: 'user', content: `Определи говорящих в этой стенограмме:\n\n${transcript}` },
+      ],
+    }),
+  });
+
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(body?.error?.message || body?.message || `Speaker identity request failed with ${response.status}`);
+  }
+
+  const parsed = parseJsonObject(body?.choices?.[0]?.message?.content);
+
+  return parsed?.speakers && typeof parsed.speakers === 'object' ? parsed.speakers : {};
+}
+
+/**
+ * Relabels each voice cluster to its resolved name when Claude is
+ * high/medium confident; unresolved clusters keep a stable generic
+ * "Спикер N" label, same fallback convention the other diarizers use.
+ */
+function applyIdentities(segments, identities) {
+  const clusterOrder = [];
+
+  for (const segment of segments) {
+    if (!clusterOrder.includes(segment.speaker)) {
+      clusterOrder.push(segment.speaker);
+    }
+  }
+
+  const labelByCluster = new Map();
+  let genericIndex = 0;
+
+  for (const cluster of clusterOrder) {
+    const identity = identities[cluster];
+    const isConfident = identity?.name && (identity.confidence === 'high' || identity.confidence === 'medium');
+
+    if (isConfident) {
+      labelByCluster.set(cluster, String(identity.name).trim());
+    } else {
+      genericIndex += 1;
+      labelByCluster.set(cluster, `Спикер ${genericIndex}`);
+    }
+  }
+
+  return segments.map((segment) => ({ ...segment, speaker: labelByCluster.get(segment.speaker) || segment.speaker }));
+}
+
+function formatFinalOutput(segments) {
+  const text = segments
+    .map((segment) => `[${formatTimestamp(segment.startMs)}] ${segment.speaker}: ${segment.text}`)
+    .join('\n\n');
+
+  return {
+    text,
+    segments,
+    speakerCount: new Set(segments.map((segment) => segment.speaker)).size,
+  };
+}
+
+/**
+ * Accuracy-focused diarization pipeline: Whisper (chunked, real timestamps)
+ * for text, Gemini (whole file) for coarse voice-based speaker turns, merged
+ * by timestamp overlap, then Claude resolves the voice clusters to real
+ * names with confidence + evidence. Returns null (instead of throwing) on
+ * any failure, matching the other diarizers' contract, so worker.js's
+ * existing OpenRouter + text-based speakerSplit fallback takes over.
+ */
+export async function transcribeWithAccuratePipeline(file, audioBuffer, config = {}) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+
+  if (!apiKey || !audioBuffer) {
+    return null;
+  }
+
+  const workdir = path.join(tmpdir(), `voxmate-pipeline-${randomUUID()}`);
+  await mkdir(workdir, { recursive: true });
+
+  try {
+    const normalizedPath = await normalizeAudio(workdir, file, audioBuffer);
+    const normalizedBuffer = await readFile(normalizedPath);
+    const chunks = await splitIntoChunks(workdir, normalizedPath);
+
+    console.log(`Pipeline: split recording into ${chunks.length} chunk(s) of up to ${CHUNK_SECONDS}s for Whisper`);
+
+    const [whisperSegments, voiceIntervals] = await Promise.all([
+      runWhisperOnChunks(chunks),
+      runVoiceDiarization(normalizedBuffer, apiKey, VOICE_MODEL),
+    ]);
+
+    console.log(
+      `Pipeline: Whisper produced ${whisperSegments.length} timed segment(s), voice diarization produced ${voiceIntervals.length} interval(s)`,
+    );
+
+    if (!whisperSegments.length || !voiceIntervals.length) {
+      console.warn('Pipeline: missing Whisper segments or voice intervals, aborting');
+      return null;
+    }
+
+    const merged = mergeAdjacentSameSpeaker(assignSpeakersToSegments(whisperSegments, voiceIntervals));
+
+    let identities = {};
+
+    try {
+      identities = await requestSpeakerIdentities(merged, apiKey, IDENTITY_MODEL);
+    } catch (error) {
+      console.warn('Pipeline: speaker identity resolution failed, keeping generic labels:', error.message);
+    }
+
+    const finalSegments = mergeAdjacentSameSpeaker(applyIdentities(merged, identities));
+
+    console.log(
+      `Pipeline: resolved ${finalSegments.length} final turn(s) across ${new Set(finalSegments.map((s) => s.speaker)).size} speaker(s)`,
+    );
+
+    return formatFinalOutput(finalSegments);
+  } catch (error) {
+    console.warn('Accuracy pipeline diarization failed, falling back:', error.message);
+    return null;
+  } finally {
+    await rm(workdir, { recursive: true, force: true });
+  }
+}

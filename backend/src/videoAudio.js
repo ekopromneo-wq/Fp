@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { runFfmpeg } from './ffmpeg.js';
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'mkv', 'avi', 'wmv', 'flv']);
 
@@ -31,27 +31,6 @@ function getInputExtension(file) {
   const extension = filename.includes('.') ? filename.split('.').pop().toLowerCase() : '';
 
   return extension || 'mp4';
-}
-
-function runFfmpeg(args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    let stderr = '';
-
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-
-      reject(new Error(`ffmpeg failed with code ${code}: ${stderr.slice(-1200)}`));
-    });
-  });
 }
 
 /**

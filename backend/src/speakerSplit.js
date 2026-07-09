@@ -1,19 +1,7 @@
+import { parseJsonObject } from './llmJson.js';
+
 const MIN_WORDS_TO_SPLIT = 20;
 const MIN_COVERAGE = 0.8;
-
-function parseJsonObject(content) {
-  if (!content) {
-    throw new Error('Empty LLM response');
-  }
-
-  const cleaned = content
-    .trim()
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/```$/i, '');
-
-  return JSON.parse(cleaned);
-}
 
 function countWords(text) {
   return text.split(/\s+/).filter(Boolean).length;

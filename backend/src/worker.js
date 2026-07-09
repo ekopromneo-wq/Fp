@@ -11,6 +11,7 @@ import { isVideoContainer, extractAudioTrack } from './videoAudio.js';
 import { transcribeWithShopot } from './shopotDiarizer.js';
 import { transcribeWithGeminiAudio } from './geminiDiarizer.js';
 import { transcribeWithKimi } from './kimiDiarizer.js';
+import { transcribeWithAccuratePipeline } from './pipelineDiarizer.js';
 import { transcribeWithSpeech2Text, checkSpeech2TextStatus, fetchSpeech2TextResult, parseSpeech2TextResult } from './speech2textDiarizer.js';
 import { getUserDiarizationConfig } from './auth.js';
 
@@ -96,6 +97,8 @@ async function processRecording(data) {
     diarized = await transcribeWithSpeech2Text(file, audioBuffer, diarizationConfig);
   } else if (diarizationMethod === 'kimi') {
     diarized = await transcribeWithKimi(file, audioBuffer, diarizationConfig);
+  } else if (diarizationMethod === 'pipeline') {
+    diarized = await transcribeWithAccuratePipeline(file, audioBuffer, diarizationConfig);
   }
 
   let finalText;

@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { getAudioFormat, runFfmpeg } from './ffmpeg.js';
+import { parseJsonObject } from './llmJson.js';
 
 const SYSTEM_PROMPT =
   'Ты помощник, который слушает аудиозапись встречи и размечает её по говорящим. ' +
@@ -12,45 +13,9 @@ const SYSTEM_PROMPT =
   'Если для говорящего не удаётся уверенно определить имя, подписывай его как "Спикер 1", "Спикер 2" и т.д., сохраняя одну и ту же подпись для одного и того же голоса на протяжении всей записи, даже если он долго молчал. ' +
   'Верни строго JSON без markdown в формате {"segments":[{"speaker":"string","start":number,"end":number,"text":"string"}]}, где start/end — время реплики в секундах от начала записи.';
 
-function getFfmpegInputFormat(file) {
-  const filename = file?.original_filename || '';
-  const extension = filename.includes('.') ? filename.split('.').pop().toLowerCase() : '';
-
-  if (extension) {
-    return extension === 'mpeg' ? 'mp3' : extension;
-  }
-
-  if (file?.mime_type?.includes('/')) {
-    return file.mime_type.split('/').pop().toLowerCase();
-  }
-
-  return 'mp3';
-}
-
-function runFfmpeg(args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    let stderr = '';
-
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-
-      reject(new Error(`ffmpeg failed with code ${code}: ${stderr.slice(-1200)}`));
-    });
-  });
-}
-
 async function convertToMp3(file, audioBuffer) {
   const workdir = path.join(tmpdir(), `voxmate-gemini-${randomUUID()}`);
-  const inputFormat = getFfmpegInputFormat(file);
+  const inputFormat = getAudioFormat(file);
   const inputPath = path.join(workdir, `input.${inputFormat || 'audio'}`);
   const outputPath = path.join(workdir, 'audio.mp3');
 
@@ -64,20 +29,6 @@ async function convertToMp3(file, audioBuffer) {
   } finally {
     await rm(workdir, { recursive: true, force: true });
   }
-}
-
-function parseJsonObject(content) {
-  if (!content) {
-    throw new Error('Empty Gemini response');
-  }
-
-  const cleaned = content
-    .trim()
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/```$/i, '');
-
-  return JSON.parse(cleaned);
 }
 
 function mergeGeminiSegments(segments) {

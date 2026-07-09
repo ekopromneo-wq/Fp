@@ -135,7 +135,7 @@ function publicBitrixConfig(config = {}) {
   };
 }
 
-const DIARIZATION_METHODS = new Set(['shopot', 'gemini', 'speech2text', 'kimi', 'off']);
+const DIARIZATION_METHODS = new Set(['shopot', 'gemini', 'speech2text', 'kimi', 'pipeline', 'off']);
 
 function normalizeDiarizationConfig(input = {}, previous = {}) {
   const method = DIARIZATION_METHODS.has(input.method) ? input.method : previous.method || 'shopot';

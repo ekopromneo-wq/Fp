@@ -1,26 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { getAudioFormat, runFfmpeg } from './ffmpeg.js';
 
 const ASR_COMPRESS_THRESHOLD_BYTES = Number(process.env.ASR_COMPRESS_THRESHOLD_BYTES || 20 * 1024 * 1024);
 const ASR_MAX_RETRIES = Number(process.env.ASR_MAX_RETRIES || 3);
-
-function getAudioFormat(file) {
-  const filename = file?.original_filename || '';
-  const extension = filename.includes('.') ? filename.split('.').pop().toLowerCase() : '';
-
-  if (extension) {
-    return extension === 'mpeg' ? 'mp3' : extension;
-  }
-
-  if (file?.mime_type?.includes('/')) {
-    return file.mime_type.split('/').pop().toLowerCase();
-  }
-
-  return 'mp3';
-}
 
 function sleep(ms) {
   return new Promise((resolve) => {
@@ -30,27 +15,6 @@ function sleep(ms) {
 
 function isRetryableStatus(status) {
   return status === 408 || status === 409 || status === 425 || status === 429 || (status >= 500 && status < 600);
-}
-
-function runFfmpeg(args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    let stderr = '';
-
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-
-      reject(new Error(`ffmpeg failed with code ${code}: ${stderr.slice(-1200)}`));
-    });
-  });
 }
 
 async function prepareAudioForAsr(file, audioBuffer) {
@@ -101,6 +65,23 @@ async function prepareAudioForAsr(file, audioBuffer) {
 }
 
 async function callOpenRouterAsr(payload) {
+  const body = {
+    input_audio: {
+      data: payload.audioBuffer.toString('base64'),
+      format: payload.format,
+    },
+    model: payload.model || process.env.OPENROUTER_ASR_MODEL || 'openai/whisper-large-v3',
+    language: payload.language || process.env.OPENROUTER_ASR_LANGUAGE || 'ru',
+  };
+
+  if (payload.responseFormat) {
+    body.response_format = payload.responseFormat;
+  }
+
+  if (payload.timestampGranularities) {
+    body.timestamp_granularities = payload.timestampGranularities;
+  }
+
   const response = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
     method: 'POST',
     headers: {
@@ -109,14 +90,7 @@ async function callOpenRouterAsr(payload) {
       'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'http://localhost:4173',
       'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'VoxMate',
     },
-    body: JSON.stringify({
-      input_audio: {
-        data: payload.audioBuffer.toString('base64'),
-        format: payload.format,
-      },
-      model: process.env.OPENROUTER_ASR_MODEL || 'openai/whisper-large-v3',
-      language: process.env.OPENROUTER_ASR_LANGUAGE || 'ru',
-    }),
+    body: JSON.stringify(body),
   });
   const responseBody = await response.json().catch(() => null);
 
@@ -128,6 +102,34 @@ async function callOpenRouterAsr(payload) {
   }
 
   return responseBody;
+}
+
+/**
+ * Retries an OpenRouter /audio/transcriptions call with linear backoff,
+ * shared by both the plain-text and timestamped transcription helpers below.
+ * `attemptFn` performs one attempt and must throw an Error with a `.status`
+ * (set by callOpenRouterAsr) on HTTP failure. `describePayload` is only used
+ * to annotate the final error message once retries are exhausted.
+ */
+async function withAsrRetries(attemptFn, describePayload) {
+  for (let attempt = 1; attempt <= ASR_MAX_RETRIES; attempt += 1) {
+    try {
+      return await attemptFn();
+    } catch (error) {
+      const canRetry = isRetryableStatus(error.status) && attempt < ASR_MAX_RETRIES;
+
+      if (!canRetry) {
+        error.message = `${error.message}. ${describePayload()}`;
+        throw error;
+      }
+
+      const delayMs = attempt * 5000;
+      console.warn(`OpenRouter ASR attempt ${attempt} failed with ${error.status}; retrying in ${delayMs}ms`);
+      await sleep(delayMs);
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -145,8 +147,8 @@ export async function transcribeWithOpenRouter(file, audioBuffer) {
 
   const preparedAudio = await prepareAudioForAsr(file, audioBuffer);
 
-  for (let attempt = 1; attempt <= ASR_MAX_RETRIES; attempt += 1) {
-    try {
+  return withAsrRetries(
+    async () => {
       const responseBody = await callOpenRouterAsr({
         apiKey,
         audioBuffer: preparedAudio.buffer,
@@ -158,19 +160,47 @@ export async function transcribeWithOpenRouter(file, audioBuffer) {
         usage: responseBody?.usage || null,
         compressed: preparedAudio.compressed,
       };
-    } catch (error) {
-      const canRetry = isRetryableStatus(error.status) && attempt < ASR_MAX_RETRIES;
+    },
+    () => `Audio payload: ${Math.round(preparedAudio.buffer.length / 1024 / 1024)} MB ${preparedAudio.compressed ? '(compressed)' : '(original)'}`,
+  );
+}
 
-      if (!canRetry) {
-        error.message = `${error.message}. Audio payload: ${Math.round(preparedAudio.buffer.length / 1024 / 1024)} MB ${preparedAudio.compressed ? '(compressed)' : '(original)'}`;
-        throw error;
-      }
+/**
+ * ASR transcription with segment-level timestamps, via the same endpoint but
+ * requesting `verbose_json` + `timestamp_granularities`. Per OpenRouter's STT
+ * docs, real timestamps are only returned when the request lands on an
+ * OpenAI-compatible backing provider (OpenAI/Groq/Together) - if a response
+ * comes back without a `segments` array, callers should treat it as a failed
+ * chunk rather than trust untimed text. Used by the accuracy pipeline
+ * (pipelineDiarizer.js) on pre-chunked, pre-normalized audio - no size-based
+ * compression here, callers are expected to hand it small-enough chunks.
+ */
+export async function transcribeChunkWithTimestamps(buffer, format, { model, granularities } = {}) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
 
-      const delayMs = attempt * 5000;
-      console.warn(`OpenRouter ASR attempt ${attempt} failed with ${error.status}; retrying in ${delayMs}ms`);
-      await sleep(delayMs);
-    }
+  if (!apiKey || !buffer) {
+    return null;
   }
 
-  return null;
+  return withAsrRetries(
+    async () => {
+      const responseBody = await callOpenRouterAsr({
+        apiKey,
+        audioBuffer: buffer,
+        format,
+        model,
+        responseFormat: 'verbose_json',
+        timestampGranularities: granularities || ['segment'],
+      });
+
+      return {
+        text: responseBody?.text || '',
+        segments: Array.isArray(responseBody?.segments) ? responseBody.segments : [],
+        words: Array.isArray(responseBody?.words) ? responseBody.words : [],
+        language: responseBody?.language || null,
+        duration: responseBody?.duration || null,
+      };
+    },
+    () => `Chunk payload: ${Math.round(buffer.length / 1024 / 1024)} MB`,
+  );
 }
