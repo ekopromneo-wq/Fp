@@ -21,6 +21,11 @@ const VOICE_SYSTEM_PROMPT =
   'Ты помощник, который слушает аудиозапись встречи и определяет, кто и когда говорит - только по голосу, ' +
   'без расшифровки слов. Прослушай запись целиком и раздели её на интервалы по говорящим. Один и тот же голос ' +
   'всегда подписывай одинаковой меткой (S1, S2, S3, ...) на протяжении всей записи, даже если он долго молчал. ' +
+  'Не заводи новую метку без явной уверенности, что это действительно другой голос, а не тот же человек с иной ' +
+  'интонацией, громкостью или фоновым шумом - при сомнении переиспользуй уже существующую метку. Реальные встречи ' +
+  'почти всегда ведут разумное число участников, обычно заметно меньше 15 - если у тебя получается счёт на десятки ' +
+  'меток, это почти наверняка ошибочное переразбиение одних и тех же голосов, а не отдельные люди; в таком случае ' +
+  'пересмотри разметку и объедини близкие по звучанию кластеры. ' +
   'Текст реплик передавать не нужно - только границы по времени. ' +
   'Верни строго JSON без markdown в формате {"intervals":[{"speaker":"S1","start":number,"end":number}]}, ' +
   'где start/end - время в секундах от начала записи.';
@@ -172,6 +177,26 @@ async function runWhisperOnChunks(chunks) {
   return allSegments.sort((a, b) => a.startMs - b.startMs);
 }
 
+/**
+ * The voice-interval response schema is speaker labels + numbers only (no
+ * free-form prose) - unlike the shared parseJsonObject's other callers
+ * (which do carry natural-language text, where this would risk mangling a
+ * real apostrophe), it's safe here to retry with single quotes normalized
+ * to double quotes if strict parsing fails. Gemini occasionally emits
+ * JS-object-literal-style single-quoted strings despite `response_format`.
+ */
+function parseIntervalsJson(content) {
+  try {
+    return parseJsonObject(content);
+  } catch (error) {
+    try {
+      return parseJsonObject(content.replace(/'/g, '"'));
+    } catch {
+      throw error;
+    }
+  }
+}
+
 async function requestVoiceIntervals(normalizedBuffer, apiKey, model) {
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -203,7 +228,7 @@ async function requestVoiceIntervals(normalizedBuffer, apiKey, model) {
     throw new Error(body?.error?.message || body?.message || `Voice diarization request failed with ${response.status}`);
   }
 
-  const parsed = parseJsonObject(body?.choices?.[0]?.message?.content);
+  const parsed = parseIntervalsJson(body?.choices?.[0]?.message?.content);
   const rawList = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.intervals) ? parsed.intervals : [];
   const intervals = rawList
     .map((interval) => ({
