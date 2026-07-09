@@ -278,7 +278,13 @@ function App() {
   const isVoicePanelOpen = useUiStore((state) => state.isVoicePanelOpen);
   const openVoicePanel = useUiStore((state) => state.openVoicePanel);
   const closeVoicePanel = useUiStore((state) => state.closeVoicePanel);
+  const theme = useUiStore((state) => state.theme);
+  const toggleTheme = useUiStore((state) => state.toggleTheme);
   const handleMicButtonClick = isMobile ? openVoicePanel : handleMicRecordingToggle;
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   const hasRecordings = recordings.length > 0;
   const sortedRecordings = useMemo(() => recordings, [recordings]);
@@ -1446,6 +1452,8 @@ function App() {
         loadRecordings={loadRecordings}
         isLoading={isLoading}
         handleLogout={handleLogout}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
 
       <VoicePanel

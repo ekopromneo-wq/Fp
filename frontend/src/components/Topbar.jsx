@@ -3,6 +3,19 @@ import microphoneIcon from '../assets/icons/microphone.png';
 import refreshIcon from '../assets/icons/refresh.png';
 import settingsIcon from '../assets/icons/settings.png';
 
+function ThemeIcon({ theme }) {
+  return theme === 'dark' ? (
+    <svg className="icon-button-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
+    </svg>
+  ) : (
+    <svg className="icon-button-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+    </svg>
+  );
+}
+
 export default function Topbar({
   activePage,
   setActivePage,
@@ -15,6 +28,8 @@ export default function Topbar({
   loadRecordings,
   isLoading,
   handleLogout,
+  theme,
+  onToggleTheme,
 }) {
   return (
     <section className="topbar" aria-labelledby="page-title">
@@ -78,6 +93,16 @@ export default function Topbar({
               </button>
             </>
           )}
+
+          <button
+            className="button icon-button button-secondary"
+            type="button"
+            onClick={onToggleTheme}
+            aria-label={theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему'}
+            title={theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему'}
+          >
+            <ThemeIcon theme={theme} />
+          </button>
 
           <button
             className={`button icon-button ${activePage === 'settings' ? 'button-primary' : 'button-secondary'}`}
