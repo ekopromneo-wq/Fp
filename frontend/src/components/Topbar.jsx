@@ -2,6 +2,7 @@ import uploadIcon from '../assets/icons/upload.png';
 import microphoneIcon from '../assets/icons/microphone.png';
 import refreshIcon from '../assets/icons/refresh.png';
 import settingsIcon from '../assets/icons/settings.png';
+import { formatDuration } from '../lib/format.js';
 
 function ThemeIcon({ theme }) {
   return theme === 'dark' ? (
@@ -23,6 +24,7 @@ export default function Topbar({
   isUploading,
   isMicRecording,
   micLevel,
+  micDuration,
   handleFileChange,
   handleMicRecordingToggle,
   loadRecordings,
@@ -65,21 +67,28 @@ export default function Topbar({
                 <img className="icon-button-image" src={uploadIcon} alt="" />
               </label>
 
-              <button
-                className={`button icon-button ${isMicRecording ? 'button-danger' : 'button-secondary'}`}
-                type="button"
-                onClick={handleMicRecordingToggle}
-                disabled={isUploading}
-                aria-label={isMicRecording ? 'Остановить запись' : 'Записать с микрофона'}
-                title={isMicRecording ? 'Остановить запись' : 'Записать с микрофона'}
-                style={
-                  isMicRecording
-                    ? { background: `linear-gradient(to top, #f4c430 ${micLevel * 100}%, #fff7f5 ${micLevel * 100}%)` }
-                    : undefined
-                }
-              >
-                <img className="icon-button-image" src={microphoneIcon} alt="" />
-              </button>
+              <span className="mic-record-group">
+                <button
+                  className={`button icon-button ${isMicRecording ? 'button-danger' : 'button-secondary'}`}
+                  type="button"
+                  onClick={handleMicRecordingToggle}
+                  disabled={isUploading}
+                  aria-label={isMicRecording ? 'Остановить запись' : 'Записать с микрофона'}
+                  title={isMicRecording ? 'Остановить запись' : 'Записать с микрофона'}
+                  style={
+                    isMicRecording
+                      ? { background: `linear-gradient(to top, #f4c430 ${micLevel * 100}%, #fff7f5 ${micLevel * 100}%)` }
+                      : undefined
+                  }
+                >
+                  <img className="icon-button-image" src={microphoneIcon} alt="" />
+                </button>
+                {isMicRecording ? (
+                  <span className="mic-record-duration" aria-live="polite">
+                    {formatDuration(micDuration)}
+                  </span>
+                ) : null}
+              </span>
 
               <button
                 className="button button-secondary icon-button"

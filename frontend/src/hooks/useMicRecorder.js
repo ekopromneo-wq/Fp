@@ -9,9 +9,12 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
   const micAnalyserRef = useRef(null);
   const micLevelFrameRef = useRef(null);
   const micLevelPercentRef = useRef(0);
+  const micDurationIntervalRef = useRef(null);
+  const wakeLockRef = useRef(null);
 
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
+  const [micDuration, setMicDuration] = useState(0);
 
   function stopMicLevelMeter() {
     if (micLevelFrameRef.current !== null) {
@@ -72,6 +75,46 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
     }
   }
 
+  function stopDurationTimer() {
+    if (micDurationIntervalRef.current !== null) {
+      clearInterval(micDurationIntervalRef.current);
+      micDurationIntervalRef.current = null;
+    }
+  }
+
+  function startDurationTimer() {
+    stopDurationTimer();
+    setMicDuration(0);
+    micDurationIntervalRef.current = setInterval(() => {
+      setMicDuration((value) => value + 1);
+    }, 1000);
+  }
+
+  async function releaseWakeLock() {
+    const lock = wakeLockRef.current;
+    wakeLockRef.current = null;
+
+    if (lock) {
+      try {
+        await lock.release();
+      } catch {
+        // Already released (e.g. the tab was hidden) - nothing to do.
+      }
+    }
+  }
+
+  async function acquireWakeLock() {
+    if (!('wakeLock' in navigator)) {
+      return;
+    }
+
+    try {
+      wakeLockRef.current = await navigator.wakeLock.request('screen');
+    } catch {
+      // Wake lock is a best-effort enhancement - recording keeps working without it.
+    }
+  }
+
   async function startMicRecording() {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       setStatus('Запись с микрофона не поддерживается в этом браузере');
@@ -106,6 +149,8 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
         mediaRecorderRef.current = null;
         micStartedAtRef.current = null;
         stopMicLevelMeter();
+        stopDurationTimer();
+        releaseWakeLock();
         setIsMicRecording(false);
 
         if (!chunks.length) {
@@ -120,6 +165,8 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
 
       recorder.start();
       startMicLevelMeter(stream);
+      startDurationTimer();
+      acquireWakeLock();
       setIsMicRecording(true);
       setStatus('Идёт запись с микрофона...');
     } catch (error) {
@@ -127,6 +174,8 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
       micStreamRef.current = null;
       mediaRecorderRef.current = null;
       stopMicLevelMeter();
+      stopDurationTimer();
+      releaseWakeLock();
       setIsMicRecording(false);
       setStatus(error.name === 'NotAllowedError' ? 'Доступ к микрофону запрещён' : error.message || 'Не удалось начать запись');
     }
@@ -145,6 +194,8 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
     micStreamRef.current = null;
     mediaRecorderRef.current = null;
     stopMicLevelMeter();
+    stopDurationTimer();
+    releaseWakeLock();
     setIsMicRecording(false);
   }
 
@@ -168,12 +219,15 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
 
       micStreamRef.current?.getTracks().forEach((track) => track.stop());
       stopMicLevelMeter();
+      stopDurationTimer();
+      releaseWakeLock();
     };
   }, []);
 
   return {
     isMicRecording,
     micLevel,
+    micDuration,
     analyserRef: micAnalyserRef,
     startMicRecording,
     stopMicRecording,

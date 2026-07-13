@@ -270,7 +270,7 @@ function App() {
   const [deletingId, setDeletingId] = useState(null);
   const [isJobsCollapsed, setIsJobsCollapsed] = useState(false);
 
-  const { isMicRecording, micLevel, analyserRef: micAnalyserRef, handleMicRecordingToggle } = useMicRecorder(
+  const { isMicRecording, micLevel, micDuration, analyserRef: micAnalyserRef, handleMicRecordingToggle } = useMicRecorder(
     uploadRecordingFile,
     setStatus,
   );
@@ -1447,6 +1447,7 @@ function App() {
         isUploading={isUploading}
         isMicRecording={isMicRecording}
         micLevel={micLevel}
+        micDuration={micDuration}
         handleFileChange={handleFileChange}
         handleMicRecordingToggle={handleMicButtonClick}
         loadRecordings={loadRecordings}
@@ -1460,6 +1461,7 @@ function App() {
         isOpen={isVoicePanelOpen}
         onClose={closeVoicePanel}
         isMicRecording={isMicRecording}
+        micDuration={micDuration}
         analyserRef={micAnalyserRef}
         onToggleRecording={handleMicRecordingToggle}
         status={status}

@@ -1,6 +1,7 @@
 import Waveform from './Waveform.jsx';
+import { formatDuration } from '../../lib/format.js';
 
-export default function VoicePanel({ isOpen, onClose, isMicRecording, analyserRef, onToggleRecording, status }) {
+export default function VoicePanel({ isOpen, onClose, isMicRecording, micDuration, analyserRef, onToggleRecording, status }) {
   if (!isOpen) {
     return null;
   }
@@ -22,6 +23,7 @@ export default function VoicePanel({ isOpen, onClose, isMicRecording, analyserRe
           <div className="voice-panel-recording">
             <div className="voice-panel-pulse" />
             <Waveform analyserRef={analyserRef} isActive={isMicRecording} />
+            <p className="voice-panel-duration" aria-live="polite">{formatDuration(micDuration)}</p>
             <p className="voice-panel-status">{status || 'Идёт запись...'}</p>
           </div>
         ) : (
