@@ -4,6 +4,19 @@ import refreshIcon from '../assets/icons/refresh.png';
 import settingsIcon from '../assets/icons/settings.png';
 import { formatDuration } from '../lib/format.js';
 
+function PauseResumeIcon({ isPaused }) {
+  return isPaused ? (
+    <svg className="icon-button-image" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M8 5v14l11-7Z" />
+    </svg>
+  ) : (
+    <svg className="icon-button-image" viewBox="0 0 24 24" fill="currentColor">
+      <rect x="6" y="5" width="4" height="14" rx="1" />
+      <rect x="14" y="5" width="4" height="14" rx="1" />
+    </svg>
+  );
+}
+
 function ThemeIcon({ theme }) {
   return theme === 'dark' ? (
     <svg className="icon-button-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -23,10 +36,13 @@ export default function Topbar({
   currentUser,
   isUploading,
   isMicRecording,
+  isMicPaused,
+  canPauseMicRecording,
   micLevel,
   micDuration,
   handleFileChange,
   handleMicRecordingToggle,
+  handleMicPauseToggle,
   loadRecordings,
   isLoading,
   handleLogout,
@@ -76,15 +92,29 @@ export default function Topbar({
                   aria-label={isMicRecording ? 'Остановить запись' : 'Записать с микрофона'}
                   title={isMicRecording ? 'Остановить запись' : 'Записать с микрофона'}
                   style={
-                    isMicRecording
+                    isMicRecording && !isMicPaused
                       ? { background: `linear-gradient(to top, #f4c430 ${micLevel * 100}%, #fff7f5 ${micLevel * 100}%)` }
                       : undefined
                   }
                 >
                   <img className="icon-button-image" src={microphoneIcon} alt="" />
                 </button>
+
+                {isMicRecording && canPauseMicRecording ? (
+                  <button
+                    className="button icon-button button-secondary"
+                    type="button"
+                    onClick={handleMicPauseToggle}
+                    aria-label={isMicPaused ? 'Продолжить запись' : 'Поставить на паузу'}
+                    title={isMicPaused ? 'Продолжить запись' : 'Поставить на паузу'}
+                  >
+                    <PauseResumeIcon isPaused={isMicPaused} />
+                  </button>
+                ) : null}
+
                 {isMicRecording ? (
-                  <span className="mic-record-duration" aria-live="polite">
+                  <span className={`mic-record-duration ${isMicPaused ? 'is-paused' : ''}`} aria-live="polite">
+                    {isMicPaused ? 'Пауза · ' : ''}
                     {formatDuration(micDuration)}
                   </span>
                 ) : null}

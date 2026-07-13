@@ -270,10 +270,16 @@ function App() {
   const [deletingId, setDeletingId] = useState(null);
   const [isJobsCollapsed, setIsJobsCollapsed] = useState(false);
 
-  const { isMicRecording, micLevel, micDuration, analyserRef: micAnalyserRef, handleMicRecordingToggle } = useMicRecorder(
-    uploadRecordingFile,
-    setStatus,
-  );
+  const {
+    isMicRecording,
+    isMicPaused,
+    canPauseMicRecording,
+    micLevel,
+    micDuration,
+    analyserRef: micAnalyserRef,
+    handleMicRecordingToggle,
+    handleMicPauseToggle,
+  } = useMicRecorder(uploadRecordingFile, setStatus);
   const isMobile = useIsMobile();
   const isVoicePanelOpen = useUiStore((state) => state.isVoicePanelOpen);
   const openVoicePanel = useUiStore((state) => state.openVoicePanel);
@@ -1446,9 +1452,12 @@ function App() {
         currentUser={currentUser}
         isUploading={isUploading}
         isMicRecording={isMicRecording}
+        isMicPaused={isMicPaused}
+        canPauseMicRecording={canPauseMicRecording}
         micLevel={micLevel}
         micDuration={micDuration}
         handleFileChange={handleFileChange}
+        handleMicPauseToggle={handleMicPauseToggle}
         handleMicRecordingToggle={handleMicButtonClick}
         loadRecordings={loadRecordings}
         isLoading={isLoading}
@@ -1461,9 +1470,12 @@ function App() {
         isOpen={isVoicePanelOpen}
         onClose={closeVoicePanel}
         isMicRecording={isMicRecording}
+        isMicPaused={isMicPaused}
+        canPauseMicRecording={canPauseMicRecording}
         micDuration={micDuration}
         analyserRef={micAnalyserRef}
         onToggleRecording={handleMicRecordingToggle}
+        onTogglePause={handleMicPauseToggle}
         status={status}
       />
 

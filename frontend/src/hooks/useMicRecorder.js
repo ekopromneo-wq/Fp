@@ -13,20 +13,58 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
   const wakeLockRef = useRef(null);
 
   const [isMicRecording, setIsMicRecording] = useState(false);
+  const [isMicPaused, setIsMicPaused] = useState(false);
+  const [canPauseMicRecording, setCanPauseMicRecording] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
   const [micDuration, setMicDuration] = useState(0);
 
-  function stopMicLevelMeter() {
+  function runLevelMeterLoop(analyser) {
+    const levelData = new Uint8Array(analyser.fftSize);
+
+    const updateLevel = () => {
+      analyser.getByteTimeDomainData(levelData);
+
+      let sumSquares = 0;
+      for (let i = 0; i < levelData.length; i += 1) {
+        const normalized = (levelData[i] - 128) / 128;
+        sumSquares += normalized * normalized;
+      }
+
+      const rms = Math.sqrt(sumSquares / levelData.length);
+      const percent = Math.round(Math.min(1, rms * 4) * 100);
+
+      if (Math.abs(percent - micLevelPercentRef.current) >= 2) {
+        micLevelPercentRef.current = percent;
+        setMicLevel(percent / 100);
+      }
+
+      micLevelFrameRef.current = requestAnimationFrame(updateLevel);
+    };
+
+    micLevelFrameRef.current = requestAnimationFrame(updateLevel);
+  }
+
+  function pauseMicLevelMeter() {
     if (micLevelFrameRef.current !== null) {
       cancelAnimationFrame(micLevelFrameRef.current);
       micLevelFrameRef.current = null;
     }
 
+    micLevelPercentRef.current = 0;
+    setMicLevel(0);
+  }
+
+  function resumeMicLevelMeter() {
+    if (micAnalyserRef.current && micLevelFrameRef.current === null) {
+      runLevelMeterLoop(micAnalyserRef.current);
+    }
+  }
+
+  function stopMicLevelMeter() {
+    pauseMicLevelMeter();
     micAnalyserRef.current = null;
     micAudioContextRef.current?.close().catch(() => {});
     micAudioContextRef.current = null;
-    micLevelPercentRef.current = 0;
-    setMicLevel(0);
   }
 
   function startMicLevelMeter(stream) {
@@ -47,29 +85,7 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
       micAudioContextRef.current = audioContext;
       micAnalyserRef.current = analyser;
 
-      const levelData = new Uint8Array(analyser.fftSize);
-
-      const updateLevel = () => {
-        analyser.getByteTimeDomainData(levelData);
-
-        let sumSquares = 0;
-        for (let i = 0; i < levelData.length; i += 1) {
-          const normalized = (levelData[i] - 128) / 128;
-          sumSquares += normalized * normalized;
-        }
-
-        const rms = Math.sqrt(sumSquares / levelData.length);
-        const percent = Math.round(Math.min(1, rms * 4) * 100);
-
-        if (Math.abs(percent - micLevelPercentRef.current) >= 2) {
-          micLevelPercentRef.current = percent;
-          setMicLevel(percent / 100);
-        }
-
-        micLevelFrameRef.current = requestAnimationFrame(updateLevel);
-      };
-
-      micLevelFrameRef.current = requestAnimationFrame(updateLevel);
+      runLevelMeterLoop(analyser);
     } catch {
       // Level meter is a visual enhancement only - recording keeps working without it.
     }
@@ -82,12 +98,16 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
     }
   }
 
-  function startDurationTimer() {
+  function runDurationTimer() {
     stopDurationTimer();
-    setMicDuration(0);
     micDurationIntervalRef.current = setInterval(() => {
       setMicDuration((value) => value + 1);
     }, 1000);
+  }
+
+  function startDurationTimer() {
+    setMicDuration(0);
+    runDurationTimer();
   }
 
   async function releaseWakeLock() {
@@ -152,6 +172,7 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
         stopDurationTimer();
         releaseWakeLock();
         setIsMicRecording(false);
+        setIsMicPaused(false);
 
         if (!chunks.length) {
           setStatus('Микрофонная запись пустая');
@@ -168,6 +189,8 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
       startDurationTimer();
       acquireWakeLock();
       setIsMicRecording(true);
+      setIsMicPaused(false);
+      setCanPauseMicRecording(typeof recorder.pause === 'function');
       setStatus('Идёт запись с микрофона...');
     } catch (error) {
       micStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -177,8 +200,46 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
       stopDurationTimer();
       releaseWakeLock();
       setIsMicRecording(false);
+      setIsMicPaused(false);
       setStatus(error.name === 'NotAllowedError' ? 'Доступ к микрофону запрещён' : error.message || 'Не удалось начать запись');
     }
+  }
+
+  function pauseMicRecording() {
+    const recorder = mediaRecorderRef.current;
+
+    if (!recorder || recorder.state !== 'recording' || typeof recorder.pause !== 'function') {
+      return;
+    }
+
+    recorder.pause();
+    stopDurationTimer();
+    pauseMicLevelMeter();
+    setIsMicPaused(true);
+    setStatus('Запись на паузе');
+  }
+
+  function resumeMicRecording() {
+    const recorder = mediaRecorderRef.current;
+
+    if (!recorder || recorder.state !== 'paused') {
+      return;
+    }
+
+    recorder.resume();
+    runDurationTimer();
+    resumeMicLevelMeter();
+    setIsMicPaused(false);
+    setStatus('Идёт запись с микрофона...');
+  }
+
+  function handleMicPauseToggle() {
+    if (isMicPaused) {
+      resumeMicRecording();
+      return;
+    }
+
+    pauseMicRecording();
   }
 
   function stopMicRecording() {
@@ -197,6 +258,7 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
     stopDurationTimer();
     releaseWakeLock();
     setIsMicRecording(false);
+    setIsMicPaused(false);
   }
 
   function handleMicRecordingToggle() {
@@ -226,11 +288,16 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
 
   return {
     isMicRecording,
+    isMicPaused,
+    canPauseMicRecording,
     micLevel,
     micDuration,
     analyserRef: micAnalyserRef,
     startMicRecording,
     stopMicRecording,
+    pauseMicRecording,
+    resumeMicRecording,
     handleMicRecordingToggle,
+    handleMicPauseToggle,
   };
 }

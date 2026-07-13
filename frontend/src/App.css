@@ -370,6 +370,10 @@ h3 {
   white-space: nowrap;
 }
 
+.mic-record-duration.is-paused {
+  color: var(--accent-warning);
+}
+
 .icon-button-ghost {
   border-color: var(--border-control);
   background: var(--bg-surface);
@@ -1154,6 +1158,10 @@ audio {
   margin: 0;
 }
 
+.voice-panel-duration.is-paused {
+  color: var(--accent-warning);
+}
+
 .voice-panel-waveform {
   width: 100%;
   max-width: 320px;
@@ -1176,6 +1184,30 @@ audio {
   100% {
     box-shadow: 0 0 0 20px rgba(251, 146, 60, 0);
   }
+}
+
+.voice-panel-pulse.is-paused {
+  animation: none;
+  box-shadow: none;
+  opacity: 0.5;
+}
+
+.voice-panel-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.voice-panel-pause-button {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 1px solid var(--border-control);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 1.1rem;
+  cursor: pointer;
 }
 
 .voice-panel-record-button {

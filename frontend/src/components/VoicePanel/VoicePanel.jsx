@@ -1,7 +1,18 @@
 import Waveform from './Waveform.jsx';
 import { formatDuration } from '../../lib/format.js';
 
-export default function VoicePanel({ isOpen, onClose, isMicRecording, micDuration, analyserRef, onToggleRecording, status }) {
+export default function VoicePanel({
+  isOpen,
+  onClose,
+  isMicRecording,
+  isMicPaused,
+  canPauseMicRecording,
+  micDuration,
+  analyserRef,
+  onToggleRecording,
+  onTogglePause,
+  status,
+}) {
   if (!isOpen) {
     return null;
   }
@@ -21,10 +32,12 @@ export default function VoicePanel({ isOpen, onClose, isMicRecording, micDuratio
 
         {isMicRecording ? (
           <div className="voice-panel-recording">
-            <div className="voice-panel-pulse" />
-            <Waveform analyserRef={analyserRef} isActive={isMicRecording} />
-            <p className="voice-panel-duration" aria-live="polite">{formatDuration(micDuration)}</p>
-            <p className="voice-panel-status">{status || 'Идёт запись...'}</p>
+            <div className={`voice-panel-pulse ${isMicPaused ? 'is-paused' : ''}`} />
+            <Waveform analyserRef={analyserRef} isActive={isMicRecording && !isMicPaused} />
+            <p className={`voice-panel-duration ${isMicPaused ? 'is-paused' : ''}`} aria-live="polite">
+              {formatDuration(micDuration)}
+            </p>
+            <p className="voice-panel-status">{status || (isMicPaused ? 'На паузе' : 'Идёт запись...')}</p>
           </div>
         ) : (
           <div className="voice-panel-idle">
@@ -32,14 +45,27 @@ export default function VoicePanel({ isOpen, onClose, isMicRecording, micDuratio
           </div>
         )}
 
-        <button
-          className={`voice-panel-record-button ${isMicRecording ? 'is-recording' : ''}`}
-          type="button"
-          onClick={onToggleRecording}
-          aria-label={isMicRecording ? 'Остановить запись' : 'Начать запись'}
-        >
-          {isMicRecording ? '■' : '●'}
-        </button>
+        <div className="voice-panel-controls">
+          {isMicRecording && canPauseMicRecording ? (
+            <button
+              className="voice-panel-pause-button"
+              type="button"
+              onClick={onTogglePause}
+              aria-label={isMicPaused ? 'Продолжить запись' : 'Поставить на паузу'}
+            >
+              {isMicPaused ? '▶' : '❚❚'}
+            </button>
+          ) : null}
+
+          <button
+            className={`voice-panel-record-button ${isMicRecording ? 'is-recording' : ''}`}
+            type="button"
+            onClick={onToggleRecording}
+            aria-label={isMicRecording ? 'Остановить запись' : 'Начать запись'}
+          >
+            {isMicRecording ? '■' : '●'}
+          </button>
+        </div>
       </section>
     </div>
   );
