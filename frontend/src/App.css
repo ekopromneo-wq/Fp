@@ -189,6 +189,20 @@ h1 {
   line-height: 1.1;
 }
 
+.offline-badge {
+  display: inline-block;
+  margin-left: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--accent-warning);
+  color: var(--bg-base);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
 h3 {
   margin-bottom: 10px;
   color: var(--text-primary);

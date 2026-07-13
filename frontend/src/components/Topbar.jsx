@@ -34,6 +34,7 @@ export default function Topbar({
   activePage,
   setActivePage,
   currentUser,
+  isOnline,
   isUploading,
   isMicRecording,
   isMicPaused,
@@ -54,7 +55,14 @@ export default function Topbar({
     <section className="topbar" aria-labelledby="page-title">
       <div>
         <p className="eyebrow">VoxMate</p>
-        <h1 id="page-title">{activePage === 'settings' ? 'Настройки' : 'Записи'}</h1>
+        <h1 id="page-title">
+          {activePage === 'settings' ? 'Настройки' : 'Записи'}
+          {isOnline ? null : (
+            <span className="offline-badge" role="status" title="Нет подключения к сети — показаны сохранённые данные">
+              Офлайн
+            </span>
+          )}
+        </h1>
       </div>
 
       <div className="topbar-right">

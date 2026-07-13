@@ -16,6 +16,16 @@ import useIsMobile from './hooks/useIsMobile.js';
 import useUiStore from './store/uiStore.js';
 import VoicePanel from './components/VoicePanel/VoicePanel.jsx';
 import { formatDate, formatFileSize } from './lib/format.js';
+import {
+  isNetworkFailure,
+  cacheRecordingsList,
+  cacheRecordingDetail,
+  offlineRecordingsList,
+  offlineRecordingDetail,
+  cacheProjects,
+  offlineProjects,
+} from './lib/recordingsRepo.js';
+import { clearOfflineCache, putCachedCurrentUser, getCachedCurrentUser } from './lib/offlineDb.js';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 const demoEmail = import.meta.env.VITE_DEMO_EMAIL || 'demo@voxmate.local';
@@ -218,6 +228,7 @@ function App() {
   const [selectedRecordingId, setSelectedRecordingId] = useState(null);
   const [selectedRecording, setSelectedRecording] = useState(null);
   const [status, setStatus] = useState('Загружаем записи...');
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [searchQuery, setSearchQuery] = useState('');
   const [projectFilter, setProjectFilter] = useState('');
   const [recordingDraft, setRecordingDraft] = useState({ title: '', projectId: '' });
@@ -318,7 +329,22 @@ function App() {
       const response = await apiFetch('/api/auth/me');
       const data = await response.json();
       setCurrentUser(data.user || null);
-    } catch {
+
+      if (data.user) {
+        putCachedCurrentUser(data.user);
+      }
+    } catch (error) {
+      if (isNetworkFailure(error)) {
+        const cached = await getCachedCurrentUser();
+        setCurrentUser(cached);
+
+        if (cached) {
+          setStatus('Офлайн — вход подтверждён по сохранённым данным');
+        }
+
+        return;
+      }
+
       setCurrentUser(null);
     } finally {
       setIsAuthLoading(false);
@@ -341,6 +367,7 @@ function App() {
       }
 
       setCurrentUser(data.user);
+      putCachedCurrentUser(data.user);
       setAuthMessage('');
     } catch (error) {
       setAuthMessage(error.message || 'Ошибка авторизации');
@@ -353,6 +380,8 @@ function App() {
     await apiFetch('/api/auth/logout', {
       method: 'POST',
     }).catch(() => null);
+
+    await clearOfflineCache();
 
     setCurrentUser(null);
     setRecordings([]);
@@ -372,8 +401,15 @@ function App() {
       }
 
       const data = await response.json();
-      setProjects(data.projects || []);
+      const nextProjects = data.projects || [];
+      setProjects(nextProjects);
+      cacheProjects(nextProjects);
     } catch (error) {
+      if (isNetworkFailure(error)) {
+        setProjects(await offlineProjects());
+        return;
+      }
+
       setStatus(error.message || 'Ошибка загрузки проектов');
     }
   }
@@ -406,6 +442,7 @@ function App() {
       const data = await response.json();
       const nextRecordings = data.recordings || [];
       setRecordings(nextRecordings);
+      cacheRecordingsList(nextRecordings);
 
       const fallbackId = nextRecordings[0]?.id || null;
       const existingId = nextRecordings.some((recording) => recording.id === nextSelectedId) ? nextSelectedId : fallbackId;
@@ -414,6 +451,18 @@ function App() {
 
       return nextRecordings;
     } catch (error) {
+      if (isNetworkFailure(error)) {
+        const cached = await offlineRecordingsList();
+        setRecordings(cached);
+
+        const fallbackId = cached[0]?.id || null;
+        const existingId = cached.some((recording) => recording.id === nextSelectedId) ? nextSelectedId : fallbackId;
+        setSelectedRecordingId(existingId);
+        setStatus(cached.length ? 'Офлайн — показаны сохранённые записи' : 'Офлайн, сохранённых записей ещё нет');
+
+        return cached;
+      }
+
       setStatus(error.message || 'Backend недоступен');
       return [];
     } finally {
@@ -448,7 +497,26 @@ function App() {
       setRecordings((current) =>
         current.map((recording) => (recording.id === data.recording.id ? { ...recording, ...data.recording } : recording)),
       );
+      cacheRecordingDetail(data.recording);
     } catch (error) {
+      if (isNetworkFailure(error)) {
+        const cached = await offlineRecordingDetail(recordingId);
+
+        if (cached) {
+          setSelectedRecording(cached);
+          if (!options.quiet) {
+            setStatus('Офлайн — показана сохранённая версия записи');
+          }
+        } else {
+          setSelectedRecording(null);
+          if (!options.quiet) {
+            setStatus('Офлайн, эта запись ещё не сохранена на устройстве');
+          }
+        }
+
+        return;
+      }
+
       setStatus(error.message || 'Не удалось открыть запись');
       setSelectedRecording(null);
     } finally {
@@ -667,6 +735,24 @@ function App() {
 
   useEffect(() => {
     loadCurrentUser();
+  }, []);
+
+  useEffect(() => {
+    function handleOnline() {
+      setIsOnline(true);
+    }
+
+    function handleOffline() {
+      setIsOnline(false);
+    }
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   useEffect(() => {
@@ -1457,6 +1543,7 @@ function App() {
         activePage={activePage}
         setActivePage={setActivePage}
         currentUser={currentUser}
+        isOnline={isOnline}
         isUploading={isUploading}
         isMicRecording={isMicRecording}
         isMicPaused={isMicPaused}
