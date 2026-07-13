@@ -135,6 +135,60 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
     }
   }
 
+  function setMediaSessionState(playbackState) {
+    if (!('mediaSession' in navigator)) {
+      return;
+    }
+
+    try {
+      if (playbackState === 'none') {
+        navigator.mediaSession.metadata = null;
+      } else if (typeof MediaMetadata !== 'undefined' && !navigator.mediaSession.metadata) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: 'Идёт запись встречи',
+          artist: 'VoxMate',
+        });
+      }
+
+      navigator.mediaSession.playbackState = playbackState;
+    } catch {
+      // Media Session is a best-effort background-survival aid, not required for recording.
+    }
+  }
+
+  function setMediaSessionHandlers() {
+    if (!('mediaSession' in navigator)) {
+      return;
+    }
+
+    // 'stop' throws in some browsers that don't support it - set handlers independently.
+    [
+      ['pause', () => pauseMicRecording()],
+      ['play', () => resumeMicRecording()],
+      ['stop', () => stopMicRecording()],
+    ].forEach(([action, handler]) => {
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+      } catch {
+        // Unsupported action on this browser - ignore.
+      }
+    });
+  }
+
+  function clearMediaSessionHandlers() {
+    if (!('mediaSession' in navigator)) {
+      return;
+    }
+
+    ['pause', 'play', 'stop'].forEach((action) => {
+      try {
+        navigator.mediaSession.setActionHandler(action, null);
+      } catch {
+        // Unsupported action on this browser - ignore.
+      }
+    });
+  }
+
   async function startMicRecording() {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       setStatus('Запись с микрофона не поддерживается в этом браузере');
@@ -171,6 +225,8 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
         stopMicLevelMeter();
         stopDurationTimer();
         releaseWakeLock();
+        clearMediaSessionHandlers();
+        setMediaSessionState('none');
         setIsMicRecording(false);
         setIsMicPaused(false);
 
@@ -188,6 +244,8 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
       startMicLevelMeter(stream);
       startDurationTimer();
       acquireWakeLock();
+      setMediaSessionHandlers();
+      setMediaSessionState('playing');
       setIsMicRecording(true);
       setIsMicPaused(false);
       setCanPauseMicRecording(typeof recorder.pause === 'function');
@@ -215,6 +273,7 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
     recorder.pause();
     stopDurationTimer();
     pauseMicLevelMeter();
+    setMediaSessionState('paused');
     setIsMicPaused(true);
     setStatus('Запись на паузе');
   }
@@ -229,6 +288,7 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
     recorder.resume();
     runDurationTimer();
     resumeMicLevelMeter();
+    setMediaSessionState('playing');
     setIsMicPaused(false);
     setStatus('Идёт запись с микрофона...');
   }
@@ -257,6 +317,8 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
     stopMicLevelMeter();
     stopDurationTimer();
     releaseWakeLock();
+    clearMediaSessionHandlers();
+    setMediaSessionState('none');
     setIsMicRecording(false);
     setIsMicPaused(false);
   }
@@ -283,8 +345,46 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
       stopMicLevelMeter();
       stopDurationTimer();
       releaseWakeLock();
+      clearMediaSessionHandlers();
     };
   }, []);
+
+  // The Wake Lock is released automatically by the browser whenever the page
+  // is hidden (spec behaviour, not something we can prevent) - re-request it
+  // once the user comes back to the tab/app so the screen keeps staying on
+  // for the rest of the recording.
+  useEffect(() => {
+    if (!isMicRecording) {
+      return undefined;
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        acquireWakeLock();
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isMicRecording]);
+
+  // Guard against the most common real way a recording actually gets lost in
+  // a browser tab: an accidental close/refresh/navigation. We cannot stop the
+  // OS from discarding a backgrounded tab under memory pressure, but we can
+  // stop the user from doing it to themselves by mistake.
+  useEffect(() => {
+    if (!isMicRecording) {
+      return undefined;
+    }
+
+    function handleBeforeUnload(event) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isMicRecording]);
 
   return {
     isMicRecording,
