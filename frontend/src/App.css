@@ -691,6 +691,30 @@ h3 {
   background: rgba(251, 146, 60, 0.14);
 }
 
+.sync-pill {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.sync-local-pending {
+  color: var(--text-secondary);
+  background: var(--bg-base);
+}
+
+.sync-syncing {
+  color: var(--accent-warning);
+  background: rgba(251, 146, 60, 0.14);
+}
+
+.sync-failed {
+  color: var(--accent-danger);
+  background: rgba(248, 113, 113, 0.14);
+}
+
 .recording-meta {
   display: flex;
   flex-wrap: wrap;

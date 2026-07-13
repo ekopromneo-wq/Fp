@@ -1,6 +1,44 @@
 import { formatDate, formatFileSize } from '../lib/format.js';
 import useSwipeAction from '../hooks/useSwipeAction.js';
 
+// syncState is a client-only concept (never sent to/read from the backend)
+// tracking a recording that started life in the offline write queue - kept
+// as a separate pill from the real backend `status` so the two namespaces
+// never collide. Absent/'synced' renders nothing, matching how an already-
+// synced recording looks today (zero visual diff for the common case).
+function SyncPill({ syncState, syncProgress, syncError }) {
+  if (!syncState || syncState === 'synced') {
+    return null;
+  }
+
+  if (syncState === 'local-pending') {
+    return (
+      <span className="sync-pill sync-local-pending" title="Сохранено на устройстве, ожидает отправки">
+        ✓ на устройстве
+      </span>
+    );
+  }
+
+  if (syncState === 'syncing') {
+    const percent = Math.round((syncProgress || 0) * 100);
+    return (
+      <span className="sync-pill sync-syncing" title="Идёт синхронизация">
+        ⟳ синхронизация {percent}%
+      </span>
+    );
+  }
+
+  if (syncState === 'sync-failed') {
+    return (
+      <span className="sync-pill sync-failed" title={syncError || 'Не удалось синхронизировать'}>
+        ⚠ ошибка синхронизации
+      </span>
+    );
+  }
+
+  return null;
+}
+
 export default function RecordingCard({ recording, isSelected, onSelect, onDelete, onProcess, isDeleting, enableSwipe }) {
   const { cardRef, trackRef, handlers } = useSwipeAction({
     enabled: Boolean(enableSwipe),
@@ -34,7 +72,8 @@ export default function RecordingCard({ recording, isSelected, onSelect, onDelet
             <div className="recording-meta">
               <span>{formatFileSize(recording.fileSizeBytes)}</span>
               <span>{formatDate(recording.createdAt)}</span>
-              <span className={`status-pill status-${recording.status}`}>{recording.status}</span>
+              {recording.status ? <span className={`status-pill status-${recording.status}`}>{recording.status}</span> : null}
+              <SyncPill syncState={recording.syncState} syncProgress={recording.syncProgress} syncError={recording.syncError} />
               {recording.project ? (
                 <span className="project-chip" style={{ '--project-color': recording.project.color }}>
                   {recording.project.name}

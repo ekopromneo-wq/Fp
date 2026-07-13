@@ -204,6 +204,27 @@ const migrations = [
         add column if not exists recorder_engine text;
     `,
   },
+  {
+    id: '013_upload_sessions',
+    sql: `
+      create table if not exists upload_sessions (
+        id uuid primary key default gen_random_uuid(),
+        recording_id uuid not null references recordings(id) on delete cascade,
+        owner_id uuid references app_users(id) on delete set null,
+        original_filename text not null,
+        mime_type text not null,
+        total_size_bytes bigint not null,
+        chunk_size_bytes integer not null,
+        bytes_received bigint not null default 0,
+        staging_path text not null,
+        status text not null default 'uploading'
+          check (status in ('uploading', 'completed', 'failed')),
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (recording_id)
+      );
+    `,
+  },
 ];
 
 export async function runMigrations() {

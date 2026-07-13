@@ -4,6 +4,8 @@ import { Hono } from 'hono';
 import { registerAuthRoutes } from './auth.js';
 import { checkDependencies } from './health.js';
 import { registerRecordingRoutes } from './recordings.js';
+import { registerUploadSessionRoutes } from './uploadSessionRoutes.js';
+import { cleanupStaleUploadSessions } from './uploadSessions.js';
 import { runMigrations } from './migrations.js';
 import { ensureAudioBucket } from './storage.js';
 
@@ -30,7 +32,7 @@ app.use('/api/*', async (c, next) => {
     c.header('Vary', 'Origin');
   }
 
-  c.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+  c.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
   c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (c.req.method === 'OPTIONS') {
@@ -79,10 +81,12 @@ app.get('/api/hello', (c) => {
 
 registerAuthRoutes(app);
 registerRecordingRoutes(app);
+registerUploadSessionRoutes(app);
 
 async function main() {
   await runMigrations();
   await ensureAudioBucket();
+  await cleanupStaleUploadSessions();
 
   serve(
     {

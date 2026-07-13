@@ -25,7 +25,8 @@ import {
   cacheProjects,
   offlineProjects,
 } from './lib/recordingsRepo.js';
-import { clearOfflineCache, putCachedCurrentUser, getCachedCurrentUser } from './lib/offlineDb.js';
+import { clearOfflineCache, putCachedCurrentUser, getCachedCurrentUser, getQueueItem } from './lib/offlineDb.js';
+import { enqueueRecording, processQueue, getQueueSnapshot, toSyntheticRecording } from './lib/syncEngine.js';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 const demoEmail = import.meta.env.VITE_DEMO_EMAIL || 'demo@voxmate.local';
@@ -377,6 +378,19 @@ function App() {
   }
 
   async function handleLogout() {
+    const pending = await getQueueSnapshot();
+
+    if (pending.length > 0) {
+      // The write queue can hold audio that only exists on this device -
+      // wiping it on logout (clearOfflineCache does, since a different user
+      // could log in next) would silently destroy unsynced recordings.
+      // Refuse instead, so the user gets a chance to reconnect and sync.
+      setStatus(
+        `Есть ${pending.length} несинхронизированных записей — дождитесь синхронизации, прежде чем выходить, иначе они будут потеряны.`,
+      );
+      return;
+    }
+
     await apiFetch('/api/auth/logout', {
       method: 'POST',
     }).catch(() => null);
@@ -414,6 +428,21 @@ function App() {
     }
   }
 
+  async function withQueuedRecordings(baseRecordings) {
+    const queueItems = await getQueueSnapshot();
+    // A queue item's server-side row is created before its audio finishes
+    // uploading (see syncOneItem), so its id can already appear in
+    // baseRecordings while sync is still in progress or has failed. The
+    // synthetic (syncState-carrying) card always wins over that bare row -
+    // otherwise a reload mid-sync silently hides the pending/failed pill
+    // even though the recording isn't actually done syncing yet.
+    const queuedServerIds = new Set(queueItems.map((item) => item.serverRecordingId).filter(Boolean));
+    const filteredBase = baseRecordings.filter((recording) => !queuedServerIds.has(recording.id));
+    const pending = queueItems.map(toSyntheticRecording);
+
+    return [...pending, ...filteredBase];
+  }
+
   async function loadRecordings(nextSelectedId = selectedRecordingId) {
     setIsLoading(true);
 
@@ -440,27 +469,30 @@ function App() {
       }
 
       const data = await response.json();
-      const nextRecordings = data.recordings || [];
-      setRecordings(nextRecordings);
-      cacheRecordingsList(nextRecordings);
+      const serverRecordings = data.recordings || [];
+      cacheRecordingsList(serverRecordings);
 
-      const fallbackId = nextRecordings[0]?.id || null;
-      const existingId = nextRecordings.some((recording) => recording.id === nextSelectedId) ? nextSelectedId : fallbackId;
+      const merged = await withQueuedRecordings(serverRecordings);
+      setRecordings(merged);
+
+      const fallbackId = merged[0]?.id || null;
+      const existingId = merged.some((recording) => recording.id === nextSelectedId) ? nextSelectedId : fallbackId;
       setSelectedRecordingId(existingId);
       setStatus('');
 
-      return nextRecordings;
+      return merged;
     } catch (error) {
       if (isNetworkFailure(error)) {
         const cached = await offlineRecordingsList();
-        setRecordings(cached);
+        const merged = await withQueuedRecordings(cached);
+        setRecordings(merged);
 
-        const fallbackId = cached[0]?.id || null;
-        const existingId = cached.some((recording) => recording.id === nextSelectedId) ? nextSelectedId : fallbackId;
+        const fallbackId = merged[0]?.id || null;
+        const existingId = merged.some((recording) => recording.id === nextSelectedId) ? nextSelectedId : fallbackId;
         setSelectedRecordingId(existingId);
-        setStatus(cached.length ? 'Офлайн — показаны сохранённые записи' : 'Офлайн, сохранённых записей ещё нет');
+        setStatus(merged.length ? 'Офлайн — показаны сохранённые записи' : 'Офлайн, сохранённых записей ещё нет');
 
-        return cached;
+        return merged;
       }
 
       setStatus(error.message || 'Backend недоступен');
@@ -473,6 +505,14 @@ function App() {
   async function loadRecordingDetail(recordingId, options = {}) {
     if (!recordingId) {
       setSelectedRecording(null);
+      return;
+    }
+
+    if (recordingId.startsWith('local-')) {
+      // Still only in the write queue - the backend has never heard of this
+      // id, so render it straight from the queue instead of hitting the API.
+      const queueItem = await getQueueItem(recordingId);
+      setSelectedRecording(queueItem ? toSyntheticRecording(queueItem) : null);
       return;
     }
 
@@ -740,6 +780,9 @@ function App() {
   useEffect(() => {
     function handleOnline() {
       setIsOnline(true);
+      processQueue(apiFetch, syncCallbacks).catch((error) => {
+        console.error('processQueue failed', error);
+      });
     }
 
     function handleOffline() {
@@ -754,6 +797,18 @@ function App() {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+
+    // Resume anything left in the write queue from a previous session (a
+    // recording synced up to some offset, then the tab closed/crashed).
+    processQueue(apiFetch, syncCallbacks).catch((error) => {
+      console.error('processQueue failed', error);
+    });
+  }, [currentUser?.id]);
 
   useEffect(() => {
     if (currentUser) {
@@ -955,40 +1010,70 @@ function App() {
     return () => window.clearInterval(intervalId);
   }, [currentUser?.id, selectedRecordingId, selectedRecording?.status]);
 
+  function handleSyncItemChange(localId, patch) {
+    setRecordings((current) =>
+      current.map((recording) => {
+        if (recording.id !== localId) {
+          return recording;
+        }
+
+        const merged = { ...recording, ...patch };
+
+        if (patch.bytesAcked !== undefined && recording.fileSizeBytes) {
+          merged.syncProgress = patch.bytesAcked / recording.fileSizeBytes;
+        }
+
+        return merged;
+      }),
+    );
+  }
+
+  function handleSyncSuccess(localId, serverRecording) {
+    setRecordings((current) => current.map((recording) => (recording.id === localId ? serverRecording : recording)));
+    setSelectedRecordingId((current) => (current === localId ? serverRecording.id : current));
+    setSelectedRecording((current) => (current?.id === localId ? serverRecording : current));
+    cacheRecordingDetail(serverRecording);
+  }
+
+  function handleSyncFailure(localId, updatedQueueItem) {
+    setRecordings((current) =>
+      current.map((recording) =>
+        recording.id === localId
+          ? { ...recording, syncState: 'sync-failed', syncError: updatedQueueItem?.lastError }
+          : recording,
+      ),
+    );
+  }
+
+  const syncCallbacks = {
+    onItemChange: handleSyncItemChange,
+    onSynced: handleSyncSuccess,
+    onFailed: handleSyncFailure,
+  };
+
   async function uploadRecordingFile(file, source = 'frontend-upload') {
     setIsUploading(true);
-    setStatus(`Загружаем ${file.name}...`);
 
     try {
-      const createResponse = await apiFetch('/api/recordings', {
-        method: 'POST',
-        body: JSON.stringify({
-          title: file.name.replace(/\.[^.]+$/, '') || file.name,
-          source,
-        }),
+      const title = file.name.replace(/\.[^.]+$/, '') || file.name;
+      const queueItem = await enqueueRecording(file, title, source);
+
+      setRecordings((current) => [toSyntheticRecording(queueItem), ...current]);
+      setSelectedRecordingId(queueItem.localId);
+      setStatus(
+        navigator.onLine
+          ? `Сохранено, синхронизируем «${title}»...`
+          : `Сохранено на устройстве — синхронизируем, когда появится сеть`,
+      );
+
+      // The recording is already safe in IndexedDB regardless of how long
+      // sync takes, so this deliberately isn't awaited - the UI shouldn't
+      // block on the network round-trip.
+      processQueue(apiFetch, syncCallbacks).catch((error) => {
+        console.error('processQueue failed', error);
       });
-
-      if (!createResponse.ok) {
-        throw new Error('Не удалось создать запись');
-      }
-
-      const createData = await createResponse.json();
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const uploadResponse = await apiFetch(`/api/recordings/${createData.recording.id}/audio`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!uploadResponse.ok) {
-        throw new Error('Не удалось загрузить файл');
-      }
-
-      await loadRecordings(createData.recording.id);
-      setStatus(`Запись "${file.name}" загружена`);
     } catch (error) {
-      setStatus(error.message || 'Ошибка загрузки');
+      setStatus(error.message || 'Не удалось сохранить запись');
     } finally {
       setIsUploading(false);
     }

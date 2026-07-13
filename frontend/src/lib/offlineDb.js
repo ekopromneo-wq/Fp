@@ -88,6 +88,39 @@ export async function getCachedCurrentUser() {
   return row?.value || null;
 }
 
+export async function putQueueItem(item) {
+  const db = await getDb();
+  await db.put('writeQueue', item);
+}
+
+export async function updateQueueItem(localId, patch) {
+  const db = await getDb();
+  const existing = await db.get('writeQueue', localId);
+
+  if (!existing) {
+    return null;
+  }
+
+  const updated = { ...existing, ...patch };
+  await db.put('writeQueue', updated);
+  return updated;
+}
+
+export async function getQueueItem(localId) {
+  const db = await getDb();
+  return (await db.get('writeQueue', localId)) || null;
+}
+
+export async function getAllQueueItems() {
+  const db = await getDb();
+  return db.getAll('writeQueue');
+}
+
+export async function deleteQueueItem(localId) {
+  const db = await getDb();
+  await db.delete('writeQueue', localId);
+}
+
 export async function clearOfflineCache() {
   const db = await getDb();
   await Promise.all(
