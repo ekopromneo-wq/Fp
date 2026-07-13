@@ -40,6 +40,7 @@ export default function Topbar({
   canPauseMicRecording,
   micLevel,
   micDuration,
+  isMicLevelLow,
   handleFileChange,
   handleMicRecordingToggle,
   handleMicPauseToggle,
@@ -116,6 +117,12 @@ export default function Topbar({
                   <span className={`mic-record-duration ${isMicPaused ? 'is-paused' : ''}`} aria-live="polite">
                     {isMicPaused ? 'Пауза · ' : ''}
                     {formatDuration(micDuration)}
+                  </span>
+                ) : null}
+
+                {isMicRecording && isMicLevelLow && !isMicPaused ? (
+                  <span className="mic-record-warning" role="alert" title="Тихо или микрофон не слышно — проверьте звук">
+                    ⚠ звук тихий
                   </span>
                 ) : null}
               </span>

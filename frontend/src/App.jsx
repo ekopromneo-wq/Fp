@@ -5,6 +5,7 @@ import DiarizationSettingsPanel from './components/settings/DiarizationSettingsP
 import SmtpSettingsPanel from './components/settings/SmtpSettingsPanel.jsx';
 import TelegramSettingsPanel from './components/settings/TelegramSettingsPanel.jsx';
 import BitrixSettingsPanel from './components/settings/BitrixSettingsPanel.jsx';
+import MicrophoneSettingsPanel from './components/settings/MicrophoneSettingsPanel.jsx';
 import JobsList from './components/JobsList.jsx';
 import SpeakerRow from './components/SpeakerRow.jsx';
 import TaskForm from './components/TaskForm.jsx';
@@ -270,16 +271,20 @@ function App() {
   const [deletingId, setDeletingId] = useState(null);
   const [isJobsCollapsed, setIsJobsCollapsed] = useState(false);
 
+  const micDeviceId = useUiStore((state) => state.micDeviceId);
+  const setMicDeviceId = useUiStore((state) => state.setMicDeviceId);
+
   const {
     isMicRecording,
     isMicPaused,
     canPauseMicRecording,
     micLevel,
     micDuration,
+    isMicLevelLow,
     analyserRef: micAnalyserRef,
     handleMicRecordingToggle,
     handleMicPauseToggle,
-  } = useMicRecorder(uploadRecordingFile, setStatus);
+  } = useMicRecorder(uploadRecordingFile, setStatus, micDeviceId);
   const isMobile = useIsMobile();
   const isVoicePanelOpen = useUiStore((state) => state.isVoicePanelOpen);
   const openVoicePanel = useUiStore((state) => state.openVoicePanel);
@@ -1456,6 +1461,7 @@ function App() {
         canPauseMicRecording={canPauseMicRecording}
         micLevel={micLevel}
         micDuration={micDuration}
+        isMicLevelLow={isMicLevelLow}
         handleFileChange={handleFileChange}
         handleMicPauseToggle={handleMicPauseToggle}
         handleMicRecordingToggle={handleMicButtonClick}
@@ -1473,6 +1479,7 @@ function App() {
         isMicPaused={isMicPaused}
         canPauseMicRecording={canPauseMicRecording}
         micDuration={micDuration}
+        isMicLevelLow={isMicLevelLow}
         analyserRef={micAnalyserRef}
         onToggleRecording={handleMicRecordingToggle}
         onTogglePause={handleMicPauseToggle}
@@ -1481,6 +1488,8 @@ function App() {
 
       {activePage === 'settings' ? (
         <section className="settings-page" aria-label="Настройки SMTP">
+          <MicrophoneSettingsPanel micDeviceId={micDeviceId} setMicDeviceId={setMicDeviceId} />
+
           <DiarizationSettingsPanel
             draft={diarizationSettingsDraft}
             setDraft={setDiarizationSettingsDraft}

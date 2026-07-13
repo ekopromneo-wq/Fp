@@ -374,6 +374,13 @@ h3 {
   color: var(--accent-warning);
 }
 
+.mic-record-warning {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent-warning);
+  white-space: nowrap;
+}
+
 .icon-button-ghost {
   border-color: var(--border-control);
   background: var(--bg-surface);
@@ -519,6 +526,34 @@ h3 {
   margin-top: 14px;
   color: var(--text-secondary);
   line-height: 1.45;
+}
+
+.mic-test-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.mic-test-meter {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.mic-test-meter-fill {
+  height: 100%;
+  background: var(--accent-primary);
+  transition: width 80ms linear;
+}
+
+.mic-test-error {
+  grid-column: 1 / -1;
+  color: var(--accent-danger);
+  margin-top: 0;
 }
 
 .workspace {
@@ -1160,6 +1195,14 @@ audio {
 
 .voice-panel-duration.is-paused {
   color: var(--accent-warning);
+}
+
+.voice-panel-warning {
+  margin: 0;
+  color: var(--accent-warning);
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+  text-align: center;
 }
 
 .voice-panel-waveform {

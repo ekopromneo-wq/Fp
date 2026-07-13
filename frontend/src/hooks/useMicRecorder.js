@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 
-export default function useMicRecorder(uploadRecordingFile, setStatus) {
+const LOW_LEVEL_THRESHOLD = 0.03;
+const LOW_LEVEL_WARNING_MS = 4000;
+
+export default function useMicRecorder(uploadRecordingFile, setStatus, micDeviceId) {
   const mediaRecorderRef = useRef(null);
   const micStreamRef = useRef(null);
   const micChunksRef = useRef([]);
@@ -11,12 +14,15 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
   const micLevelPercentRef = useRef(0);
   const micDurationIntervalRef = useRef(null);
   const wakeLockRef = useRef(null);
+  const micLowLevelSinceRef = useRef(null);
+  const micLevelLowRef = useRef(false);
 
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [isMicPaused, setIsMicPaused] = useState(false);
   const [canPauseMicRecording, setCanPauseMicRecording] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
   const [micDuration, setMicDuration] = useState(0);
+  const [isMicLevelLow, setIsMicLevelLow] = useState(false);
 
   function runLevelMeterLoop(analyser) {
     const levelData = new Uint8Array(analyser.fftSize);
@@ -38,10 +44,31 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
         setMicLevel(percent / 100);
       }
 
+      if (percent / 100 < LOW_LEVEL_THRESHOLD) {
+        if (micLowLevelSinceRef.current === null) {
+          micLowLevelSinceRef.current = performance.now();
+        } else if (!micLevelLowRef.current && performance.now() - micLowLevelSinceRef.current >= LOW_LEVEL_WARNING_MS) {
+          micLevelLowRef.current = true;
+          setIsMicLevelLow(true);
+        }
+      } else {
+        micLowLevelSinceRef.current = null;
+        if (micLevelLowRef.current) {
+          micLevelLowRef.current = false;
+          setIsMicLevelLow(false);
+        }
+      }
+
       micLevelFrameRef.current = requestAnimationFrame(updateLevel);
     };
 
     micLevelFrameRef.current = requestAnimationFrame(updateLevel);
+  }
+
+  function resetLowLevelWarning() {
+    micLowLevelSinceRef.current = null;
+    micLevelLowRef.current = false;
+    setIsMicLevelLow(false);
   }
 
   function pauseMicLevelMeter() {
@@ -52,6 +79,7 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
 
     micLevelPercentRef.current = 0;
     setMicLevel(0);
+    resetLowLevelWarning();
   }
 
   function resumeMicLevelMeter() {
@@ -196,7 +224,21 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
+        });
+      } catch (deviceError) {
+        if (micDeviceId && deviceError.name === 'OverconstrainedError') {
+          // The saved device is no longer available (unplugged, etc.) - fall back
+          // to the system default rather than failing to record altogether.
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } else {
+          throw deviceError;
+        }
+      }
+
       const options = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? { mimeType: 'audio/webm;codecs=opus' } : {};
       const recorder = new MediaRecorder(stream, options);
 
@@ -241,6 +283,7 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
       };
 
       recorder.start();
+      resetLowLevelWarning();
       startMicLevelMeter(stream);
       startDurationTimer();
       acquireWakeLock();
@@ -392,6 +435,7 @@ export default function useMicRecorder(uploadRecordingFile, setStatus) {
     canPauseMicRecording,
     micLevel,
     micDuration,
+    isMicLevelLow,
     analyserRef: micAnalyserRef,
     startMicRecording,
     stopMicRecording,

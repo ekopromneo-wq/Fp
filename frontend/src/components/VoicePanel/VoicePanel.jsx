@@ -8,6 +8,7 @@ export default function VoicePanel({
   isMicPaused,
   canPauseMicRecording,
   micDuration,
+  isMicLevelLow,
   analyserRef,
   onToggleRecording,
   onTogglePause,
@@ -38,6 +39,11 @@ export default function VoicePanel({
               {formatDuration(micDuration)}
             </p>
             <p className="voice-panel-status">{status || (isMicPaused ? 'На паузе' : 'Идёт запись...')}</p>
+            {isMicLevelLow && !isMicPaused ? (
+              <p className="voice-panel-warning" role="alert">
+                Тихо или микрофон не слышно — проверьте звук
+              </p>
+            ) : null}
           </div>
         ) : (
           <div className="voice-panel-idle">
