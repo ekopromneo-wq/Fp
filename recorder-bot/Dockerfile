@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.49.1-jammy
+FROM node:20-jammy-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pulseaudio ffmpeg wget \
@@ -7,7 +7,8 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY package.json .
-RUN npm install --omit=dev
+RUN npm install --omit=dev \
+    && npx playwright install --with-deps chromium
 
 COPY src ./src
 

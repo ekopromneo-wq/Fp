@@ -1,0 +1,18 @@
+name: voxmate-client
+
+services:
+  web:
+    build: ./frontend
+    ports:
+      - '${WEB_PORT:-4173}:4173'
+    environment:
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-https://vm4474975.firstbyte.club}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4173/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
