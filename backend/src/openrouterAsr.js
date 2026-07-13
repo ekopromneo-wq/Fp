@@ -138,7 +138,7 @@ async function withAsrRetries(attemptFn, describePayload) {
  * diarization methods (like Kimi) that need a transcript to split by speaker,
  * since OpenRouter ASR models never return speaker labels themselves.
  */
-export async function transcribeWithOpenRouter(file, audioBuffer) {
+export async function transcribeWithOpenRouter(file, audioBuffer, { language } = {}) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey || !audioBuffer) {
@@ -153,12 +153,14 @@ export async function transcribeWithOpenRouter(file, audioBuffer) {
         apiKey,
         audioBuffer: preparedAudio.buffer,
         format: preparedAudio.format,
+        language,
       });
 
       return {
         text: responseBody?.text || '',
         usage: responseBody?.usage || null,
         compressed: preparedAudio.compressed,
+        language: language || responseBody?.language || null,
       };
     },
     () => `Audio payload: ${Math.round(preparedAudio.buffer.length / 1024 / 1024)} MB ${preparedAudio.compressed ? '(compressed)' : '(original)'}`,
@@ -175,7 +177,7 @@ export async function transcribeWithOpenRouter(file, audioBuffer) {
  * (pipelineDiarizer.js) on pre-chunked, pre-normalized audio - no size-based
  * compression here, callers are expected to hand it small-enough chunks.
  */
-export async function transcribeChunkWithTimestamps(buffer, format, { model, granularities } = {}) {
+export async function transcribeChunkWithTimestamps(buffer, format, { model, granularities, language } = {}) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey || !buffer) {
@@ -189,6 +191,7 @@ export async function transcribeChunkWithTimestamps(buffer, format, { model, gra
         audioBuffer: buffer,
         format,
         model,
+        language,
         responseFormat: 'verbose_json',
         timestampGranularities: granularities || ['segment'],
       });

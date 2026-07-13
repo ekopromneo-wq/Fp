@@ -43,12 +43,12 @@ async function putAudioObject(recordingId, buffer, originalFilename, mimeType) {
   };
 }
 
-export async function saveRecordingAudio(recordingId, file) {
+export async function saveRecordingAudio(recordingId, file, buffer) {
   const originalFilename = file.name || 'audio';
-  const buffer = Buffer.from(await file.arrayBuffer());
+  const resolvedBuffer = buffer || Buffer.from(await file.arrayBuffer());
   const mimeType = file.type || 'application/octet-stream';
 
-  return putAudioObject(recordingId, buffer, originalFilename, mimeType);
+  return putAudioObject(recordingId, resolvedBuffer, originalFilename, mimeType);
 }
 
 /**

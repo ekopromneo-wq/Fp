@@ -17,7 +17,7 @@ export async function transcribeWithKimi(file, audioBuffer, config = {}) {
   const model = config.kimiModel || DEFAULT_KIMI_MODEL;
 
   try {
-    const transcription = await transcribeWithOpenRouter(file, audioBuffer);
+    const transcription = await transcribeWithOpenRouter(file, audioBuffer, { language: config.language });
     const transcriptText = transcription?.text;
 
     if (!transcriptText) {
@@ -30,7 +30,7 @@ export async function transcribeWithKimi(file, audioBuffer, config = {}) {
       return null;
     }
 
-    return speakerSplit;
+    return { ...speakerSplit, language: transcription.language || null };
   } catch (error) {
     console.warn('Kimi diarization failed, falling back:', error.message);
     return null;

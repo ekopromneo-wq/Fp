@@ -136,6 +136,8 @@ function publicBitrixConfig(config = {}) {
 }
 
 const DIARIZATION_METHODS = new Set(['shopot', 'gemini', 'speech2text', 'kimi', 'pipeline', 'off']);
+// '' means auto-detect - matches the NFR spec ("русский, английский; автоопределение").
+const ASR_LANGUAGES = new Set(['', 'ru', 'en']);
 
 function normalizeDiarizationConfig(input = {}, previous = {}) {
   const method = DIARIZATION_METHODS.has(input.method) ? input.method : previous.method || 'shopot';
@@ -149,8 +151,9 @@ function normalizeDiarizationConfig(input = {}, previous = {}) {
   const kimiModel = typeof input.kimiModel === 'string' && input.kimiModel.trim()
     ? input.kimiModel.trim()
     : previous.kimiModel || 'moonshotai/kimi-k2.6';
+  const language = ASR_LANGUAGES.has(input.language) ? input.language : previous.language ?? '';
 
-  return { method, shopotApiKey, geminiModel, speech2textApiKey, kimiModel };
+  return { method, shopotApiKey, geminiModel, speech2textApiKey, kimiModel, language };
 }
 
 function publicDiarizationConfig(config = {}) {
@@ -160,6 +163,7 @@ function publicDiarizationConfig(config = {}) {
     geminiModel: config.geminiModel || 'google/gemini-2.5-pro',
     hasSpeech2textKey: Boolean(config.speech2textApiKey),
     kimiModel: config.kimiModel || 'moonshotai/kimi-k2.6',
+    language: config.language || '',
   };
 }
 

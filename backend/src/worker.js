@@ -103,13 +103,19 @@ async function processRecording(data) {
 
   let finalText;
   let finalSegments;
+  // A manual override always wins; otherwise fall back to whatever the ASR
+  // step actually detected (only some diarization methods surface this -
+  // see openrouterAsr.js/pipelineDiarizer.js/kimiDiarizer.js), then 'ru'.
+  let resolvedLanguage = diarizationConfig.language || null;
 
   if (diarized) {
     console.log(`Diarized recording ${recordingId} into ${diarized.speakerCount} speakers via ${diarizationMethod}`);
     finalText = diarized.text;
     finalSegments = diarized.segments;
+    resolvedLanguage = resolvedLanguage || diarized.language || 'ru';
   } else {
-    const transcription = await transcribeWithOpenRouter(file, audioBuffer);
+    const transcription = await transcribeWithOpenRouter(file, audioBuffer, { language: diarizationConfig.language || undefined });
+    resolvedLanguage = resolvedLanguage || transcription?.language || 'ru';
     const transcriptText =
       transcription?.text ||
       (file?.storage_key
@@ -138,9 +144,9 @@ async function processRecording(data) {
     await client.query(
       `
         insert into transcripts (recording_id, job_id, language, text, segments)
-        values ($1, $2, 'ru', $3, $4::jsonb)
+        values ($1, $2, $3, $4, $5::jsonb)
       `,
-      [recordingId, jobId, finalText, JSON.stringify(finalSegments)],
+      [recordingId, jobId, resolvedLanguage, finalText, JSON.stringify(finalSegments)],
     );
 
     await client.query(
@@ -167,6 +173,8 @@ const MEETING_BOT_POLL_INTERVAL_MS = Number(process.env.MEETING_BOT_POLL_INTERVA
 
 async function ingestCompletedMeeting(recording, statusBody) {
   const statusCode = statusBody?.status?.code;
+  const diarizationConfig = recording.owner_id ? (await getUserDiarizationConfig(recording.owner_id)) || {} : {};
+  const language = diarizationConfig.language || 'ru';
 
   await transaction(async (client) => {
     let finalText = 'В записи встречи не обнаружено речи.';
@@ -184,8 +192,8 @@ async function ingestCompletedMeeting(recording, statusBody) {
 
     await client.query(
       `insert into transcripts (recording_id, job_id, language, text, segments)
-       select $1, id, 'ru', $2, $3::jsonb from processing_jobs where recording_id = $1 order by created_at desc limit 1`,
-      [recording.id, finalText, JSON.stringify(finalSegments)],
+       select $1, id, $2, $3, $4::jsonb from processing_jobs where recording_id = $1 order by created_at desc limit 1`,
+      [recording.id, language, finalText, JSON.stringify(finalSegments)],
     );
 
     await client.query(

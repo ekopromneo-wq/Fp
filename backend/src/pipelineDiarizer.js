@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { getAudioFormat, runFfmpeg } from './ffmpeg.js';
+import { getAudioFormat, getFfprobeDurationSeconds, runFfmpeg } from './ffmpeg.js';
 import { parseJsonObject } from './llmJson.js';
 import { transcribeChunkWithTimestamps } from './openrouterAsr.js';
 
@@ -39,37 +38,6 @@ const IDENTITY_SYSTEM_PROMPT =
   'high/medium. Если уверенности нет, верни name: null. ' +
   'Верни строго JSON без markdown в формате ' +
   '{"speakers":{"S1":{"name":"string|null","confidence":"high|medium|low","evidence":"string"}}}.';
-
-function getFfprobeDurationSeconds(filePath) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      'ffprobe',
-      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', filePath],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
-    );
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on('error', reject);
-    child.on('close', (code) => {
-      const seconds = parseFloat(stdout.trim());
-
-      if (code === 0 && Number.isFinite(seconds)) {
-        resolve(seconds);
-        return;
-      }
-
-      reject(new Error(`ffprobe failed with code ${code}: ${stderr.slice(-500)}`));
-    });
-  });
-}
 
 async function normalizeAudio(workdir, file, audioBuffer) {
   const inputFormat = getAudioFormat(file);
@@ -137,13 +105,13 @@ function batchArray(items, size) {
  * without a `segments` array (see transcribeChunkWithTimestamps' doc comment
  * on provider routing) is logged and skipped rather than trusted untimed.
  */
-async function runWhisperOnChunks(chunks) {
+async function runWhisperOnChunks(chunks, language) {
   const allSegments = [];
 
   for (const batch of batchArray(chunks, WHISPER_CONCURRENCY)) {
     const results = await Promise.all(
       batch.map((chunk) =>
-        transcribeChunkWithTimestamps(chunk.buffer, 'mp3', { model: WHISPER_MODEL, granularities: ['segment'] }).catch(
+        transcribeChunkWithTimestamps(chunk.buffer, 'mp3', { model: WHISPER_MODEL, granularities: ['segment'], language }).catch(
           (error) => {
             console.warn(`Pipeline: Whisper chunk at offset ${chunk.offsetMs}ms failed:`, error.message);
             return null;
@@ -429,7 +397,7 @@ export async function transcribeWithAccuratePipeline(file, audioBuffer, config =
     console.log(`Pipeline: split recording into ${chunks.length} chunk(s) of up to ${CHUNK_SECONDS}s for Whisper`);
 
     const [whisperSegments, voiceIntervals] = await Promise.all([
-      runWhisperOnChunks(chunks),
+      runWhisperOnChunks(chunks, config.language),
       runVoiceDiarization(normalizedBuffer, apiKey, VOICE_MODEL),
     ]);
 
@@ -458,7 +426,7 @@ export async function transcribeWithAccuratePipeline(file, audioBuffer, config =
       `Pipeline: resolved ${finalSegments.length} final turn(s) across ${new Set(finalSegments.map((s) => s.speaker)).size} speaker(s)`,
     );
 
-    return formatFinalOutput(finalSegments);
+    return { ...formatFinalOutput(finalSegments), language: config.language || null };
   } catch (error) {
     console.warn('Accuracy pipeline diarization failed, falling back:', error.message);
     return null;

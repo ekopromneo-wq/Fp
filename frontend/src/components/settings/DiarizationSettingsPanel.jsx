@@ -22,6 +22,15 @@ export default function DiarizationSettingsPanel({ draft, setDraft, onSubmit, is
           </select>
         </label>
 
+        <label>
+          Язык записи
+          <select value={draft.language} onChange={(event) => setDraft((current) => ({ ...current, language: event.target.value }))}>
+            <option value="">Определять автоматически</option>
+            <option value="ru">Русский</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+
         {draft.method === 'shopot' ? (
           <label>
             Shopot API-ключ
@@ -83,6 +92,11 @@ export default function DiarizationSettingsPanel({ draft, setDraft, onSubmit, is
         отдельно определяет по голосу, кто когда говорит, а Claude сопоставляет голоса с именами по контексту с оценкой
         уверенности — итоговый протокол получает вид «[время] Имя: реплика». Модели этого пайплайна настраиваются
         только через переменные окружения на сервере. «Выключено» — только LLM-разметка по тексту стенограммы.
+      </p>
+
+      <p className="settings-note">
+        Язык влияет на распознавание речи в способах «Kimi», «Whisper + Gemini + Claude» и на резервный путь без
+        диаризации; для Shopot/Gemini/Speech2Text язык определяется самим сервисом и этой настройкой не управляется.
       </p>
     </section>
   );

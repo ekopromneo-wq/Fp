@@ -257,6 +257,7 @@ function App() {
     geminiModel: 'google/gemini-2.5-pro',
     speech2textApiKey: '',
     kimiModel: 'moonshotai/kimi-k2.6',
+    language: '',
   });
   const [diarizationHasShopotKey, setDiarizationHasShopotKey] = useState(false);
   const [diarizationHasSpeech2textKey, setDiarizationHasSpeech2textKey] = useState(false);
@@ -626,6 +627,7 @@ function App() {
         geminiModel: data.diarization?.geminiModel || 'google/gemini-2.5-pro',
         speech2textApiKey: '',
         kimiModel: data.diarization?.kimiModel || 'moonshotai/kimi-k2.6',
+        language: data.diarization?.language || '',
       });
       setDiarizationHasShopotKey(Boolean(data.diarization?.hasShopotKey));
       setDiarizationHasSpeech2textKey(Boolean(data.diarization?.hasSpeech2textKey));

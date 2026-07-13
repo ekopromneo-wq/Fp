@@ -16,12 +16,12 @@ import { joinMeeting, stopMeeting, isSupportedMeetingUrl } from './meetingBot.js
 import { detectPlatform, isSupportedMeetingUrl as isSelfHostedMeetingUrl, startRecorderJob, stopRecorderJob } from './recorderBot.js';
 import { Readable } from 'node:stream';
 import { deleteRecordingAudio, getRecordingAudioStream, saveRecordingAudio } from './storage.js';
+import { UploadValidationError, probeUploadedAudio } from './uploadValidation.js';
 
 const queue = createRecordingQueue();
-// Generous but bounded - real recordings in this project include multi-hour
-// meeting video uploads well into the tens of MB; this exists to stop
-// absurd/malicious payloads, not to constrain normal usage.
-const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 2 * 1024 * 1024 * 1024);
+// Matches the product spec's stated max upload size (1 GB); override via env
+// if a deployment genuinely needs more.
+const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 1024 * 1024 * 1024);
 
 function mapRecording(row) {
   return {
@@ -654,7 +654,28 @@ export async function completeSelfHostedMeetingRecording(recordingId, file, erro
     return getRecording(recordingId, ownerId);
   }
 
-  await attachRecordingAudio(recordingId, file, ownerId);
+  try {
+    await attachRecordingAudio(recordingId, file, ownerId);
+  } catch (error) {
+    if (!(error instanceof UploadValidationError)) {
+      throw error;
+    }
+
+    await transaction(async (client) => {
+      await client.query('update recordings set status = $1, updated_at = now() where id = $2', ['failed', recordingId]);
+      await client.query(
+        `
+          update processing_jobs
+          set status = 'failed', error = $1, updated_at = now()
+          where recording_id = $2 and status = 'processing'
+        `,
+        [error.message, recordingId],
+      );
+    });
+
+    return getRecording(recordingId, ownerId);
+  }
+
   await enqueueRecording(recordingId, ownerId);
 
   return getRecording(recordingId, ownerId);
@@ -1104,7 +1125,10 @@ export async function attachRecordingAudio(recordingId, file, ownerId) {
     return null;
   }
 
-  const metadata = await saveRecordingAudio(recordingId, file);
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const probe = await probeUploadedAudio(buffer, file.name);
+
+  const metadata = await saveRecordingAudio(recordingId, file, buffer);
   const result = await query(
     `
       update recordings
@@ -1113,13 +1137,21 @@ export async function attachRecordingAudio(recordingId, file, ownerId) {
         original_filename = $2,
         mime_type = $3,
         file_size_bytes = $4,
+        duration_seconds = $5,
         status = 'uploaded',
         updated_at = now()
-      where id = $5
+      where id = $6
       returning id, owner_id, title, status, source, duration_seconds, storage_key,
         original_filename, mime_type, file_size_bytes, created_at, updated_at
     `,
-    [metadata.storageKey, metadata.originalFilename, metadata.mimeType, metadata.fileSizeBytes, recordingId],
+    [
+      metadata.storageKey,
+      metadata.originalFilename,
+      metadata.mimeType,
+      metadata.fileSizeBytes,
+      Math.round(probe.durationSeconds),
+      recordingId,
+    ],
   );
 
   return mapRecording(result.rows[0]);
@@ -1333,13 +1365,21 @@ export function registerRecordingRoutes(app) {
         return c.json({ error: 'Expected multipart form-data with file field named "file"' }, 400);
       }
 
-      const recording = await attachRecordingAudio(c.req.param('id'), file, user.id);
+      try {
+        const recording = await attachRecordingAudio(c.req.param('id'), file, user.id);
 
-      if (!recording) {
-        return c.json({ error: 'Recording not found' }, 404);
+        if (!recording) {
+          return c.json({ error: 'Recording not found' }, 404);
+        }
+
+        return c.json({ recording });
+      } catch (error) {
+        if (error instanceof UploadValidationError) {
+          return c.json({ error: error.message, code: error.code }, 400);
+        }
+
+        throw error;
       }
-
-      return c.json({ recording });
     },
   );
 
