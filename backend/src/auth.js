@@ -24,7 +24,17 @@ function parseCookies(cookieHeader = '') {
 }
 
 function serializeCookie(name, value, options = {}) {
-  const parts = [`${name}=${encodeURIComponent(value)}`, 'Path=/', 'HttpOnly', 'SameSite=Lax'];
+  const isProduction = process.env.NODE_ENV === 'production';
+  // The deployed architecture is frontend (laptop) + backend (VPS) on two
+  // genuinely different origins, so the session cookie needs SameSite=None
+  // to be sent on cross-origin fetch/XHR at all - SameSite=Lax (the old
+  // value) is silently dropped by the browser on those requests, which
+  // breaks auth for every request after login/register. SameSite=None
+  // itself requires Secure, so it's only safe in production (real HTTPS);
+  // local dev over plain HTTP keeps Lax; SameSite=None without Secure would
+  // just be rejected outright by the browser there.
+  const sameSite = isProduction ? 'None' : 'Lax';
+  const parts = [`${name}=${encodeURIComponent(value)}`, 'Path=/', 'HttpOnly', `SameSite=${sameSite}`];
 
   if (options.maxAge !== undefined) {
     parts.push(`Max-Age=${options.maxAge}`);
@@ -34,7 +44,7 @@ function serializeCookie(name, value, options = {}) {
     parts.push(`Expires=${options.expires.toUTCString()}`);
   }
 
-  if (process.env.NODE_ENV === 'production') {
+  if (isProduction) {
     parts.push('Secure');
   }
 
