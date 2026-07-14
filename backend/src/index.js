@@ -6,6 +6,7 @@ import { checkDependencies } from './health.js';
 import { registerRecordingRoutes } from './recordings.js';
 import { registerUploadSessionRoutes } from './uploadSessionRoutes.js';
 import { cleanupStaleUploadSessions } from './uploadSessions.js';
+import { registerNotificationRoutes, cleanupOldNotifications } from './notifications.js';
 import { runMigrations } from './migrations.js';
 import { ensureAudioBucket } from './storage.js';
 
@@ -82,11 +83,13 @@ app.get('/api/hello', (c) => {
 registerAuthRoutes(app);
 registerRecordingRoutes(app);
 registerUploadSessionRoutes(app);
+registerNotificationRoutes(app);
 
 async function main() {
   await runMigrations();
   await ensureAudioBucket();
   await cleanupStaleUploadSessions();
+  await cleanupOldNotifications();
 
   serve(
     {

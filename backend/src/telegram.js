@@ -54,6 +54,13 @@ async function sendTelegramMessage(botToken, chatId, text) {
   return body.result;
 }
 
+// Short "your recording is ready/failed" notification, distinct from
+// sendRecordingTelegram's full protocol/summary dump.
+export async function sendNotificationTelegram(telegramConfig, text) {
+  const config = getTelegramConfig(telegramConfig);
+  return sendTelegramMessage(config.botToken, config.chatId, text);
+}
+
 export async function sendRecordingTelegram(recording, input = {}, telegramConfig = {}) {
   const config = getTelegramConfig({ ...telegramConfig, chatId: input.chatId || telegramConfig.chatId });
   const { text } = buildEmailContent(recording, input.message);

@@ -91,6 +91,14 @@ services:
       - DIARIZER_URL=${DIARIZER_URL:-http://diarizer:8000}
       - SHOPOT_API_KEY=${SHOPOT_API_KEY:-}
       - SPEECH2TEXT_API_KEY=${SPEECH2TEXT_API_KEY:-}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_DEFAULT_CHAT_ID=${TELEGRAM_DEFAULT_CHAT_ID:-}
     depends_on:
       db:
         condition: service_healthy

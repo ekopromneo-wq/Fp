@@ -154,6 +154,27 @@ function buildEmailContent(recording, message = '') {
 
 export { buildEmailContent };
 
+// Short "your recording is ready/failed" notification, distinct from
+// sendRecordingEmail's full protocol/summary dump (US-5.2 wants a one-line
+// status message, not the whole meeting content).
+export async function sendNotificationEmail(smtpConfig, to, subject, text) {
+  const config = getSmtpConfig(smtpConfig || {});
+  const transporter = nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    auth: config.auth,
+  });
+
+  const result = await transporter.sendMail({ from: config.from, to, subject, text });
+
+  return {
+    messageId: result.messageId,
+    accepted: result.accepted || [],
+    rejected: result.rejected || [],
+  };
+}
+
 export async function sendRecordingEmail(recording, input = {}, smtpConfig = {}) {
   const config = getSmtpConfig(smtpConfig || {});
   const to = normalizeRecipients(input.recipients);

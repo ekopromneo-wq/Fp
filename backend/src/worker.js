@@ -15,6 +15,7 @@ import { transcribeWithAccuratePipeline } from './pipelineDiarizer.js';
 import { transcribeWithSpeech2Text, checkSpeech2TextStatus, fetchSpeech2TextResult, parseSpeech2TextResult } from './speech2textDiarizer.js';
 import { getUserDiarizationConfig } from './auth.js';
 import { summarizeRecording } from './recordings.js';
+import { notifyRecordingEvent } from './notifications.js';
 
 dotenv.config();
 
@@ -89,6 +90,7 @@ async function processRecording(data) {
       await client.query(`update processing_jobs set status = 'done', error = null, updated_at = now() where id = $1`, [jobId]);
       await client.query(`update recordings set status = 'done', updated_at = now() where id = $1`, [recordingId]);
     });
+    await notifyRecordingEvent(recordingId, file?.owner_id, 'done');
     return;
   }
 
@@ -215,6 +217,8 @@ async function processRecording(data) {
       [recordingId],
     );
   });
+
+  await notifyRecordingEvent(recordingId, file?.owner_id, 'done');
 }
 
 const MEETING_BOT_POLL_INTERVAL_MS = Number(process.env.MEETING_BOT_POLL_INTERVAL_MS || 30000);
@@ -253,6 +257,7 @@ async function ingestCompletedMeeting(recording, statusBody) {
     await client.query(`update recordings set status = 'done', updated_at = now() where id = $1`, [recording.id]);
   });
 
+  await notifyRecordingEvent(recording.id, recording.owner_id, 'done');
   console.log(`Meeting bot recording ${recording.id} finished (${finalSegmentsCountLabel(statusCode)})`);
 }
 
@@ -270,6 +275,7 @@ async function failMeeting(recording, message) {
     await client.query(`update recordings set status = 'failed', updated_at = now() where id = $1`, [recording.id]);
   });
 
+  await notifyRecordingEvent(recording.id, recording.owner_id, 'failed');
   console.warn(`Meeting bot recording ${recording.id} failed: ${message}`);
 }
 
@@ -369,6 +375,14 @@ async function main() {
           [job.data.recordingId],
         );
       });
+
+      // A cancellation was the user's own action - notifying them "your
+      // recording failed" about something they just cancelled themselves
+      // would be confusing, so only genuine failures notify.
+      if (!isCancelled) {
+        const owner = await query('select owner_id from recordings where id = $1', [job.data.recordingId]);
+        await notifyRecordingEvent(job.data.recordingId, owner.rows[0]?.owner_id, 'failed');
+      }
     }
   });
 

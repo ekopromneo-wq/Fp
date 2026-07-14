@@ -5,6 +5,7 @@ import DiarizationSettingsPanel from './components/settings/DiarizationSettingsP
 import SmtpSettingsPanel from './components/settings/SmtpSettingsPanel.jsx';
 import TelegramSettingsPanel from './components/settings/TelegramSettingsPanel.jsx';
 import BitrixSettingsPanel from './components/settings/BitrixSettingsPanel.jsx';
+import NotificationSettingsPanel from './components/settings/NotificationSettingsPanel.jsx';
 import MicrophoneSettingsPanel from './components/settings/MicrophoneSettingsPanel.jsx';
 import JobsList from './components/JobsList.jsx';
 import SpeakerRow from './components/SpeakerRow.jsx';
@@ -314,6 +315,11 @@ function App() {
   const [diarizationHasShopotKey, setDiarizationHasShopotKey] = useState(false);
   const [diarizationHasSpeech2textKey, setDiarizationHasSpeech2textKey] = useState(false);
   const [isSavingDiarizationSettings, setIsSavingDiarizationSettings] = useState(false);
+  const [notificationSettingsDraft, setNotificationSettingsDraft] = useState({ channels: ['in_app', 'email'], dnd: false });
+  const [isSavingNotificationSettings, setIsSavingNotificationSettings] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [telegramDraft, setTelegramDraft] = useState({ chatId: '', message: '' });
   const [isSendingTelegram, setIsSendingTelegram] = useState(false);
   const [isSendingBitrixTaskId, setIsSendingBitrixTaskId] = useState(null);
@@ -811,6 +817,88 @@ function App() {
     }
   }
 
+  async function loadNotificationSettings() {
+    setIsSettingsLoading(true);
+
+    try {
+      const response = await apiFetch('/api/settings/notifications');
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось загрузить настройки уведомлений');
+      }
+
+      setNotificationSettingsDraft({
+        channels: data.notifications?.channels || ['in_app', 'email'],
+        dnd: Boolean(data.notifications?.dnd),
+      });
+    } catch (error) {
+      setStatus(error.message || 'Ошибка загрузки настроек уведомлений');
+    } finally {
+      setIsSettingsLoading(false);
+    }
+  }
+
+  async function handleSaveNotificationSettings(event) {
+    event.preventDefault();
+    setIsSavingNotificationSettings(true);
+    setStatus('Сохраняем настройки уведомлений...');
+
+    try {
+      const response = await apiFetch('/api/settings/notifications', {
+        method: 'PATCH',
+        body: JSON.stringify(notificationSettingsDraft),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось сохранить настройки уведомлений');
+      }
+
+      setNotificationSettingsDraft({
+        channels: data.notifications?.channels || ['in_app', 'email'],
+        dnd: Boolean(data.notifications?.dnd),
+      });
+      setStatus('Настройки уведомлений сохранены');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка сохранения настроек уведомлений');
+    } finally {
+      setIsSavingNotificationSettings(false);
+    }
+  }
+
+  async function loadNotifications() {
+    try {
+      const response = await apiFetch('/api/notifications');
+      const data = await response.json();
+
+      if (!response.ok) {
+        return;
+      }
+
+      setNotifications(data.notifications || []);
+      setUnreadNotificationCount(data.unreadCount || 0);
+    } catch {
+      // Best-effort background poll - a transient failure just tries again
+      // on the next interval tick, no need to surface it to the user.
+    }
+  }
+
+  async function handleOpenNotification(notification) {
+    setIsNotificationsOpen(false);
+
+    if (!notification.readAt) {
+      await apiFetch(`/api/notifications/${notification.id}/read`, { method: 'POST' }).catch(() => null);
+      setNotifications((current) => current.map((item) => (item.id === notification.id ? { ...item, readAt: new Date().toISOString() } : item)));
+      setUnreadNotificationCount((current) => Math.max(0, current - 1));
+    }
+
+    if (notification.recordingId) {
+      setActivePage('library');
+      setSelectedRecordingId(notification.recordingId);
+    }
+  }
+
   useEffect(() => {
     loadCurrentUser();
   }, []);
@@ -867,8 +955,22 @@ function App() {
       loadTelegramSettings();
       loadBitrixSettings();
       loadDiarizationSettings();
+      loadNotificationSettings();
     }
   }, [currentUser?.id, activePage]);
+
+  // Global, low-frequency poll (distinct from the 2s per-recording status
+  // poll elsewhere) - notifications can arrive for any recording, not just
+  // the one currently open, so this has to run independently of selection.
+  useEffect(() => {
+    if (!currentUser) {
+      return undefined;
+    }
+
+    loadNotifications();
+    const intervalId = window.setInterval(loadNotifications, 20000);
+    return () => window.clearInterval(intervalId);
+  }, [currentUser?.id]);
 
   useEffect(() => {
     setRecordingDraft({
@@ -1713,6 +1815,11 @@ function App() {
         handleLogout={handleLogout}
         theme={theme}
         onToggleTheme={toggleTheme}
+        notifications={notifications}
+        unreadNotificationCount={unreadNotificationCount}
+        isNotificationsOpen={isNotificationsOpen}
+        setIsNotificationsOpen={setIsNotificationsOpen}
+        onOpenNotification={handleOpenNotification}
       />
 
       <VoicePanel
@@ -1768,6 +1875,14 @@ function App() {
             isSaving={isSavingBitrixSettings}
             isSettingsLoading={isSettingsLoading}
             hasWebhook={bitrixHasWebhook}
+          />
+
+          <NotificationSettingsPanel
+            draft={notificationSettingsDraft}
+            setDraft={setNotificationSettingsDraft}
+            onSubmit={handleSaveNotificationSettings}
+            isSaving={isSavingNotificationSettings}
+            isSettingsLoading={isSettingsLoading}
           />
 
           <section className="status-line" aria-live="polite">

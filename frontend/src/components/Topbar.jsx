@@ -2,7 +2,54 @@ import uploadIcon from '../assets/icons/upload.png';
 import microphoneIcon from '../assets/icons/microphone.png';
 import refreshIcon from '../assets/icons/refresh.png';
 import settingsIcon from '../assets/icons/settings.png';
-import { formatDuration } from '../lib/format.js';
+import { formatDate, formatDuration } from '../lib/format.js';
+
+function BellIcon() {
+  return (
+    <svg className="icon-button-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+      <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+    </svg>
+  );
+}
+
+function NotificationsMenu({ notifications, unreadNotificationCount, isNotificationsOpen, setIsNotificationsOpen, onOpenNotification }) {
+  return (
+    <div className="notifications-menu">
+      <button
+        className="button icon-button button-secondary"
+        type="button"
+        onClick={() => setIsNotificationsOpen((current) => !current)}
+        aria-label="Уведомления"
+        title="Уведомления"
+      >
+        <BellIcon />
+        {unreadNotificationCount > 0 ? <span className="notifications-badge">{unreadNotificationCount}</span> : null}
+      </button>
+
+      {isNotificationsOpen ? (
+        <div className="notifications-dropdown" role="menu">
+          {notifications.length === 0 ? (
+            <p className="muted-text notifications-empty">Уведомлений пока нет</p>
+          ) : (
+            notifications.map((notification) => (
+              <button
+                key={notification.id}
+                type="button"
+                className={`notifications-item ${notification.readAt ? '' : 'is-unread'}`}
+                onClick={() => onOpenNotification(notification)}
+              >
+                <strong>{notification.title}</strong>
+                <span>{notification.message}</span>
+                <span className="notifications-item-date">{formatDate(notification.createdAt)}</span>
+              </button>
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function PauseResumeIcon({ isPaused }) {
   return isPaused ? (
@@ -50,6 +97,11 @@ export default function Topbar({
   handleLogout,
   theme,
   onToggleTheme,
+  notifications,
+  unreadNotificationCount,
+  isNotificationsOpen,
+  setIsNotificationsOpen,
+  onOpenNotification,
 }) {
   return (
     <section className="topbar" aria-labelledby="page-title">
@@ -147,6 +199,14 @@ export default function Topbar({
               </button>
             </>
           )}
+
+          <NotificationsMenu
+            notifications={notifications}
+            unreadNotificationCount={unreadNotificationCount}
+            isNotificationsOpen={isNotificationsOpen}
+            setIsNotificationsOpen={setIsNotificationsOpen}
+            onOpenNotification={onOpenNotification}
+          />
 
           <button
             className="button icon-button button-secondary"

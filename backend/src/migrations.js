@@ -236,6 +236,24 @@ const migrations = [
       alter table processing_jobs add column if not exists cancel_requested boolean not null default false;
     `,
   },
+  {
+    id: '015_notifications',
+    sql: `
+      alter table app_users add column if not exists notification_config jsonb not null default '{}'::jsonb;
+
+      create table if not exists notifications (
+        id uuid primary key default gen_random_uuid(),
+        owner_id uuid not null references app_users(id) on delete cascade,
+        recording_id uuid references recordings(id) on delete cascade,
+        type text not null check (type in ('done', 'failed')),
+        title text not null,
+        message text not null,
+        read_at timestamptz,
+        created_at timestamptz not null default now()
+      );
+      create index if not exists notifications_owner_id_idx on notifications(owner_id, created_at desc);
+    `,
+  },
 ];
 
 export async function runMigrations() {

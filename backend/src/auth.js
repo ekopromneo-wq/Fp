@@ -167,6 +167,29 @@ function publicDiarizationConfig(config = {}) {
   };
 }
 
+// 'in_app' always gets a notifications row written regardless of this list
+// (it's the persistent history/read-status ledger - see notifications.js);
+// this config only controls which EXTERNAL channels also fire, capped at 2
+// channels total including in_app, per the product spec.
+const NOTIFICATION_CHANNELS = new Set(['in_app', 'email', 'telegram']);
+
+function normalizeNotificationConfig(input = {}, previous = {}) {
+  const rawChannels = Array.isArray(input.channels) ? input.channels : previous.channels;
+  const channels = Array.isArray(rawChannels)
+    ? [...new Set(rawChannels.filter((channel) => NOTIFICATION_CHANNELS.has(channel)))].slice(0, 2)
+    : ['in_app', 'email'];
+  const dnd = typeof input.dnd === 'boolean' ? input.dnd : Boolean(previous.dnd);
+
+  return { channels, dnd };
+}
+
+function publicNotificationConfig(config = {}) {
+  return {
+    channels: Array.isArray(config.channels) && config.channels.length ? config.channels : ['in_app', 'email'],
+    dnd: Boolean(config.dnd),
+  };
+}
+
 async function createSession(userId) {
   const token = randomBytes(32).toString('base64url');
   const tokenHash = hashToken(token);
@@ -250,6 +273,11 @@ export async function getUserBitrixConfig(userId) {
 export async function getUserDiarizationConfig(userId) {
   const result = await query('select diarization_config from app_users where id = $1', [userId]);
   return result.rows[0]?.diarization_config || null;
+}
+
+export async function getUserNotificationConfig(userId) {
+  const result = await query('select notification_config from app_users where id = $1', [userId]);
+  return result.rows[0]?.notification_config || null;
 }
 
 export function registerAuthRoutes(app) {
@@ -340,6 +368,27 @@ export function registerAuthRoutes(app) {
     ]);
 
     return c.json({ diarization: publicDiarizationConfig(config) });
+  });
+
+  app.get('/api/settings/notifications', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const config = await getUserNotificationConfig(user.id);
+
+    return c.json({ notifications: publicNotificationConfig(config || {}) });
+  });
+
+  app.patch('/api/settings/notifications', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const previous = (await getUserNotificationConfig(user.id)) || {};
+    const config = normalizeNotificationConfig(body, previous);
+
+    await query('update app_users set notification_config = $1::jsonb, updated_at = now() where id = $2', [
+      JSON.stringify(config),
+      user.id,
+    ]);
+
+    return c.json({ notifications: publicNotificationConfig(config) });
   });
 
   app.post('/api/auth/register', async (c) => {
