@@ -6,6 +6,12 @@ import { getFfprobeDurationSeconds } from './ffmpeg.js';
 
 export const MAX_UPLOAD_DURATION_SECONDS = Number(process.env.MAX_UPLOAD_DURATION_SECONDS || 4 * 60 * 60);
 
+// Matches the product spec's stated max upload size (1 GB); override via env
+// if a deployment genuinely needs more. Shared by both upload paths - the
+// direct multipart route (recordings.js) and the chunked session route
+// (uploadSessions.js) - so neither can accept what the other would reject.
+export const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 1024 * 1024 * 1024);
+
 export class UploadValidationError extends Error {
   constructor(code, message) {
     super(message);

@@ -32,17 +32,21 @@ export function registerUploadSessionRoutes(app) {
       return c.json({ error: 'originalFilename, mimeType and totalSizeBytes are required' }, 400);
     }
 
-    const session = await createOrResumeUploadSession(c.req.param('id'), user.id, {
-      originalFilename: body.originalFilename,
-      mimeType: body.mimeType,
-      totalSizeBytes: Number(body.totalSizeBytes),
-    });
+    try {
+      const session = await createOrResumeUploadSession(c.req.param('id'), user.id, {
+        originalFilename: body.originalFilename,
+        mimeType: body.mimeType,
+        totalSizeBytes: Number(body.totalSizeBytes),
+      });
 
-    if (!session) {
-      return c.json({ error: 'Recording not found' }, 404);
+      if (!session) {
+        return c.json({ error: 'Recording not found' }, 404);
+      }
+
+      return c.json({ session });
+    } catch (error) {
+      return respondSessionError(c, error);
     }
-
-    return c.json({ session });
   });
 
   app.get('/api/recordings/:id/upload-session', requireAuth, async (c) => {

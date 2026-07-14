@@ -89,6 +89,17 @@ function fridayOfWeek(parts) {
   return fridayIsPastOrSame ? addDays(friday, 7) : friday;
 }
 
+// "15 января", said in December, means NEXT January - a due date can't
+// precede the meeting it was set at. Only applies when the year was not
+// stated explicitly.
+function rollYearForwardIfPast(parts, year, month, day) {
+  const isPast =
+    year < parts.year ||
+    (year === parts.year && (month < parts.month || (month === parts.month && day < parts.day)));
+
+  return isPast ? year + 1 : year;
+}
+
 function lastBusinessDayOfMonth(parts) {
   const lastDay = new Date(Date.UTC(parts.year, parts.month + 1, 0)).getUTCDate();
   let day = lastDay;
@@ -116,8 +127,9 @@ export function resolveDueDate(dueText, anchorDate, timezoneOffsetMinutes = 0) {
   if (explicitMatch) {
     const day = Number(explicitMatch[1]);
     const month = Number(explicitMatch[2]) - 1;
-    const year = explicitMatch[3] ? Number(explicitMatch[3].length === 2 ? `20${explicitMatch[3]}` : explicitMatch[3]) : anchorParts.year;
+    const explicitYear = explicitMatch[3] ? Number(explicitMatch[3].length === 2 ? `20${explicitMatch[3]}` : explicitMatch[3]) : null;
     if (day >= 1 && day <= 31 && month >= 0 && month <= 11) {
+      const year = explicitYear ?? rollYearForwardIfPast(anchorParts, anchorParts.year, month, day);
       return localToUtc(year, month, day, DEFAULT_HOUR, 0, offset);
     }
   }
@@ -128,7 +140,8 @@ export function resolveDueDate(dueText, anchorDate, timezoneOffsetMinutes = 0) {
       const day = Number(tokens[i]);
       const month = MONTHS[tokens[i + 1]];
       if (day >= 1 && day <= 31) {
-        return localToUtc(anchorParts.year, month, day, DEFAULT_HOUR, 0, offset);
+        const year = rollYearForwardIfPast(anchorParts, anchorParts.year, month, day);
+        return localToUtc(year, month, day, DEFAULT_HOUR, 0, offset);
       }
     }
   }
@@ -144,15 +157,26 @@ export function resolveDueDate(dueText, anchorDate, timezoneOffsetMinutes = 0) {
   }
 
   const throughIndex = tokens.indexOf('через');
-  if (throughIndex !== -1 && tokens[throughIndex + 1] && tokens[throughIndex + 2]) {
-    const amount = Number(tokens[throughIndex + 1]);
-    const unit = tokens[throughIndex + 2];
+  if (throughIndex !== -1 && tokens[throughIndex + 1]) {
+    // "через 2 недели" (numeral present) or "через неделю" (bare unit = 1).
+    const hasAmount = /^\d+$/.test(tokens[throughIndex + 1]);
+    const amount = hasAmount ? Number(tokens[throughIndex + 1]) : 1;
+    const unit = hasAmount ? tokens[throughIndex + 2] || '' : tokens[throughIndex + 1];
     const isWeeks = unit.startsWith('недел');
-    const isDays = unit.startsWith('д') && (unit.startsWith('ден') || unit.startsWith('дн'));
+    const isDays = unit.startsWith('ден') || unit.startsWith('дн');
+    const isMonths = unit.startsWith('месяц');
 
-    if (Number.isFinite(amount) && amount > 0 && (isWeeks || isDays)) {
+    if (amount > 0 && (isWeeks || isDays)) {
       const target = addDays(anchorParts, isWeeks ? amount * 7 : amount);
       return localToUtc(target.year, target.month, target.day, DEFAULT_HOUR, 0, offset);
+    }
+
+    if (amount > 0 && isMonths) {
+      // Date.UTC normalizes both month overflow and a day that doesn't
+      // exist in the target month (Jan 31 + 1 month -> Mar 2/3) - imperfect
+      // but deterministic, and "через месяц" is inherently approximate.
+      const base = new Date(Date.UTC(anchorParts.year, anchorParts.month + amount, anchorParts.day));
+      return localToUtc(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), DEFAULT_HOUR, 0, offset);
     }
   }
 

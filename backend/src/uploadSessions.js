@@ -1,7 +1,8 @@
-import { mkdir, readFile, rm, writeFile, appendFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile, appendFile } from 'node:fs/promises';
 import path from 'node:path';
 import { query } from './db.js';
 import { attachRecordingAudio, enqueueRecording } from './recordings.js';
+import { MAX_UPLOAD_BYTES } from './uploadValidation.js';
 
 const STAGING_DIR = process.env.UPLOAD_STAGING_DIR || path.join(process.cwd(), 'data', 'upload-staging');
 const DEFAULT_CHUNK_SIZE_BYTES = Number(process.env.UPLOAD_CHUNK_SIZE_BYTES || 5 * 1024 * 1024);
@@ -63,13 +64,30 @@ export async function createOrResumeUploadSession(recordingId, ownerId, { origin
     return null;
   }
 
+  // The direct multipart route enforces this via hono/body-limit; a chunked
+  // session arrives 5 MB at a time, so the declared total is the only place
+  // the whole-file cap can be applied - without it a client could stage an
+  // arbitrarily large file onto the server disk.
+  if (!(totalSizeBytes > 0) || totalSizeBytes > MAX_UPLOAD_BYTES) {
+    throw new UploadSessionError('too_large', 'Файл слишком большой для загрузки.');
+  }
+
   const existing = await findSessionRow(recordingId);
 
   if (existing && existing.status === 'uploading') {
-    return mapSession(existing);
-  }
+    // The DB row survives an api-container rebuild, but a staging file that
+    // is missing or shorter than bytes_received can't be appended to at the
+    // recorded offset - resuming would silently produce a corrupt file that
+    // still passes the bytes_received == total_size_bytes check on complete.
+    // Start over instead.
+    const fileSize = await stat(existing.staging_path).then((s) => s.size).catch(() => null);
 
-  if (existing) {
+    if (fileSize === Number(existing.bytes_received)) {
+      return mapSession(existing);
+    }
+
+    await deleteSessionRow(existing);
+  } else if (existing) {
     // Leftover 'failed' row from a previous attempt - start clean.
     await deleteSessionRow(existing);
   }
@@ -127,8 +145,13 @@ export async function appendChunk(recordingId, ownerId, offset, chunkBuffer) {
     throw new UploadSessionError('offset_mismatch', 'Смещение не совпадает с состоянием на сервере.', { expectedOffset });
   }
 
-  await appendFile(session.staging_path, chunkBuffer);
   const bytesReceived = expectedOffset + chunkBuffer.length;
+
+  if (bytesReceived > Number(session.total_size_bytes)) {
+    throw new UploadSessionError('size_exceeded', 'Получено больше данных, чем заявленный размер файла.');
+  }
+
+  await appendFile(session.staging_path, chunkBuffer);
 
   await query('update upload_sessions set bytes_received = $1, updated_at = now() where id = $2', [
     bytesReceived,
@@ -160,6 +183,16 @@ export async function completeUploadSession(recordingId, ownerId) {
       bytesReceived: Number(session.bytes_received),
       totalSizeBytes: Number(session.total_size_bytes),
     });
+  }
+
+  // The DB counter and the file on disk can diverge (e.g. the staging file
+  // was lost to a container rebuild mid-upload) - the counter alone isn't
+  // proof the bytes are actually here.
+  const fileSize = await stat(session.staging_path).then((s) => s.size).catch(() => null);
+
+  if (fileSize !== Number(session.total_size_bytes)) {
+    await deleteSessionRow(session);
+    throw new UploadSessionError('no_session', 'Файл загрузки повреждён — начните заново.');
   }
 
   const buffer = await readFile(session.staging_path);

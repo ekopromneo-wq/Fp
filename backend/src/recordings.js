@@ -23,14 +23,11 @@ import { joinMeeting, stopMeeting, isSupportedMeetingUrl } from './meetingBot.js
 import { detectPlatform, isSupportedMeetingUrl as isSelfHostedMeetingUrl, startRecorderJob, stopRecorderJob } from './recorderBot.js';
 import { Readable } from 'node:stream';
 import { deleteRecordingAudio, getRecordingAudioRange, getRecordingAudioStream, saveRecordingAudio } from './storage.js';
-import { UploadValidationError, probeUploadedAudio } from './uploadValidation.js';
+import { MAX_UPLOAD_BYTES, UploadValidationError, probeUploadedAudio } from './uploadValidation.js';
 import { transcribeWithOpenRouter } from './openrouterAsr.js';
 import { resolveDueDate } from './dueDateResolver.js';
 
 const queue = createRecordingQueue();
-// Matches the product spec's stated max upload size (1 GB); override via env
-// if a deployment genuinely needs more.
-const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 1024 * 1024 * 1024);
 
 // Only single-range "bytes=start-end"/"bytes=start-" requests are
 // supported (exactly what browsers send for <audio> scrubbing) - multi-range
@@ -1210,7 +1207,13 @@ export async function mergeRecordingSpeakers(recordingId, ownerId, sourceLabel, 
   const relabeledSegments = segments.map((segment) =>
     segment.speaker === sourceLabel ? { ...segment, speaker: targetLabel } : segment,
   );
-  const relabeledText = relabeledSegments.map((segment) => segment.text).join('\n\n');
+  // Keep the speaker attribution in the flat text (same "speaker\ntext"
+  // shape most diarizers emit - see shopotDiarizer/geminiDiarizer/
+  // speech2textDiarizer) - joining bare segment texts would silently strip
+  // who-said-what from the plain-text view and TXT export.
+  const relabeledText = relabeledSegments
+    .map((segment) => (segment.speaker ? `${segment.speaker}\n${segment.text}` : segment.text))
+    .join('\n\n');
 
   await transaction(async (client) => {
     await client.query('update transcripts set segments = $1::jsonb, text = $2, updated_at = now() where id = $3', [

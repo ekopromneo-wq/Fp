@@ -252,20 +252,24 @@ async function ingestCompletedMeeting(recording, statusBody) {
   const diarizationConfig = recording.owner_id ? (await getUserDiarizationConfig(recording.owner_id)) || {} : {};
   const language = diarizationConfig.language || 'ru';
 
-  await transaction(async (client) => {
-    let finalText = 'В записи встречи не обнаружено речи.';
-    let finalSegments = [];
+  // Fetched outside the transaction - an external HTTP call has no business
+  // holding a DB connection/transaction open for its full duration.
+  let finalText = 'В записи встречи не обнаружено речи.';
+  let finalSegments = [];
+  let hasSpeech = false;
 
-    if (statusCode === 200) {
-      const result = await fetchSpeech2TextResult(recording.meeting_bot_task_id, recording.apiKey);
-      const parsed = parseSpeech2TextResult(result);
+  if (statusCode === 200) {
+    const result = await fetchSpeech2TextResult(recording.meeting_bot_task_id, recording.apiKey);
+    const parsed = parseSpeech2TextResult(result);
 
-      if (parsed) {
-        finalText = parsed.text;
-        finalSegments = parsed.segments;
-      }
+    if (parsed) {
+      finalText = parsed.text;
+      finalSegments = parsed.segments;
+      hasSpeech = true;
     }
+  }
 
+  await transaction(async (client) => {
     await client.query(
       `insert into transcripts (recording_id, job_id, language, text, segments, original_text, original_segments)
        select $1, id, $2, $3, $4::jsonb, $3, $4::jsonb from processing_jobs where recording_id = $1 order by created_at desc limit 1`,
@@ -278,8 +282,26 @@ async function ingestCompletedMeeting(recording, statusBody) {
       [recording.id],
     );
 
-    await client.query(`update recordings set status = 'done', updated_at = now() where id = $1`, [recording.id]);
+    await client.query(`update recordings set status = $2, updated_at = now() where id = $1`, [
+      recording.id,
+      hasSpeech ? 'summarizing' : 'done',
+    ]);
   });
+
+  // Same protocol/tasks generation the file-upload pipeline runs after
+  // transcription - a meeting-bot recording shouldn't land as "Готово" with
+  // a bare transcript and no protocol. A summarization failure keeps the
+  // transcript (the user can regenerate manually), it doesn't fail the
+  // whole ingest.
+  if (hasSpeech) {
+    try {
+      await summarizeRecording(recording.id, recording.owner_id);
+    } catch (error) {
+      console.warn(`Meeting bot summarization failed for recording ${recording.id}:`, error.message);
+    } finally {
+      await query(`update recordings set status = 'done', updated_at = now() where id = $1`, [recording.id]);
+    }
+  }
 
   await notifyRecordingEvent(recording.id, recording.owner_id, 'done');
   console.log(`Meeting bot recording ${recording.id} finished (${finalSegmentsCountLabel(statusCode)})`);

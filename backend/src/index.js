@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
-import { registerAuthRoutes } from './auth.js';
+import { cleanupExpiredAuthSessions, registerAuthRoutes } from './auth.js';
 import { checkDependencies } from './health.js';
 import { registerRecordingRoutes } from './recordings.js';
 import { registerUploadSessionRoutes } from './uploadSessionRoutes.js';
@@ -87,11 +87,24 @@ registerUploadSessionRoutes(app);
 registerNotificationRoutes(app);
 registerContactRoutes(app);
 
+const CLEANUP_INTERVAL_MS = Number(process.env.CLEANUP_INTERVAL_MS || 60 * 60 * 1000);
+
+async function runCleanup() {
+  await cleanupStaleUploadSessions();
+  await cleanupOldNotifications();
+  await cleanupExpiredAuthSessions();
+}
+
 async function main() {
   await runMigrations();
   await ensureAudioBucket();
-  await cleanupStaleUploadSessions();
-  await cleanupOldNotifications();
+  await runCleanup();
+
+  // The API process typically runs for weeks between deploys - a
+  // startup-only cleanup never fires again on a long-lived container.
+  setInterval(() => {
+    runCleanup().catch((error) => console.warn('Cleanup loop error:', error.message));
+  }, CLEANUP_INTERVAL_MS);
 
   serve(
     {

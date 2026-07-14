@@ -50,6 +50,11 @@ services:
       - SPEECH2TEXT_API_KEY=${SPEECH2TEXT_API_KEY:-}
       - RECORDER_BOT_URL=${RECORDER_BOT_URL:-http://recorder-bot:8100}
       - RECORDER_BOT_INTERNAL_SECRET=${RECORDER_BOT_INTERNAL_SECRET:-}
+    volumes:
+      # Chunked-upload staging must survive `up -d --build` (the standard
+      # deploy step) - without this, resumable uploads in progress during a
+      # deploy are lost and their sessions have to start over.
+      - api-upload-staging:/app/data/upload-staging
     depends_on:
       db:
         condition: service_healthy
@@ -165,6 +170,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  api-upload-staging:
   db-data:
   redis-data:
   minio-data:

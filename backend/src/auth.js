@@ -18,9 +18,52 @@ function parseCookies(cookieHeader = '') {
         const separatorIndex = part.indexOf('=');
         const key = separatorIndex === -1 ? part : part.slice(0, separatorIndex);
         const value = separatorIndex === -1 ? '' : part.slice(separatorIndex + 1);
-        return [key, decodeURIComponent(value)];
+
+        // A malformed %-sequence in any cookie (even one set by an unrelated
+        // app on the same host) must not turn every API request into a 500.
+        try {
+          return [key, decodeURIComponent(value)];
+        } catch {
+          return [key, value];
+        }
       }),
   );
+}
+
+// In-memory fixed-window limiter for the unauthenticated auth endpoints -
+// enough to stop online password brute-force and mass account creation
+// against a single-process API (which this deployment is; a multi-process
+// setup would need a shared store instead).
+const RATE_BUCKETS = new Map();
+
+function isRateLimited(key, limit, windowMs) {
+  const now = Date.now();
+
+  // Opportunistic purge so abandoned keys don't accumulate forever.
+  if (RATE_BUCKETS.size > 10000) {
+    for (const [existingKey, entry] of RATE_BUCKETS) {
+      if (now - entry.windowStart >= entry.windowMs) {
+        RATE_BUCKETS.delete(existingKey);
+      }
+    }
+  }
+
+  const entry = RATE_BUCKETS.get(key);
+
+  if (!entry || now - entry.windowStart >= windowMs) {
+    RATE_BUCKETS.set(key, { windowStart: now, windowMs, count: 1 });
+    return false;
+  }
+
+  entry.count += 1;
+  return entry.count > limit;
+}
+
+// Caddy fronts the API in production and appends the real client IP to
+// X-Forwarded-For; direct local requests have no header and share one bucket.
+function clientIp(c) {
+  const forwarded = c.req.header('X-Forwarded-For') || '';
+  return forwarded.split(',')[0].trim() || 'local';
 }
 
 function serializeCookie(name, value, options = {}) {
@@ -265,6 +308,16 @@ export function getAuthUser(c) {
   return c.get('currentUser');
 }
 
+// Expired sessions are already invisible to getCurrentUser (expires_at
+// filter), but the rows themselves would otherwise accumulate forever.
+export async function cleanupExpiredAuthSessions() {
+  const result = await query('delete from auth_sessions where expires_at < now()');
+
+  if (result.rowCount > 0) {
+    console.log(`Cleaned up ${result.rowCount} expired auth session(s)`);
+  }
+}
+
 export async function getUserSmtpConfig(userId) {
   const result = await query('select smtp_config from app_users where id = $1', [userId]);
   return result.rows[0]?.smtp_config || null;
@@ -402,6 +455,10 @@ export function registerAuthRoutes(app) {
   });
 
   app.post('/api/auth/register', async (c) => {
+    if (isRateLimited(`register:${clientIp(c)}`, 5, 60 * 60 * 1000)) {
+      return c.json({ error: 'Too many registration attempts - try again later' }, 429);
+    }
+
     const body = await c.req.json().catch(() => ({}));
     const email = normalizeEmail(body.email);
     const password = typeof body.password === 'string' ? body.password : '';
@@ -416,20 +473,23 @@ export function registerAuthRoutes(app) {
       return c.json({ error: 'Password must be at least 6 characters' }, 400);
     }
 
-    const existing = await query('select id from app_users where email = $1', [email]);
-
-    if (existing.rowCount > 0) {
-      return c.json({ error: 'User already exists' }, 409);
-    }
-
+    // `on conflict` instead of check-then-insert - two concurrent registers
+    // for the same email otherwise race past the check and the loser dies
+    // with a raw unique-violation 500 instead of this 409.
     const inserted = await query(
       `
         insert into app_users (display_name, email, password_hash)
         values ($1, $2, $3)
+        on conflict (email) do nothing
         returning id, display_name, email, created_at, updated_at
       `,
       [displayName, email, hashPassword(password)],
     );
+
+    if (inserted.rowCount === 0) {
+      return c.json({ error: 'User already exists' }, 409);
+    }
+
     const user = mapUser(inserted.rows[0]);
     const session = await createSession(user.id);
 
@@ -441,6 +501,12 @@ export function registerAuthRoutes(app) {
     const body = await c.req.json().catch(() => ({}));
     const email = normalizeEmail(body.email);
     const password = typeof body.password === 'string' ? body.password : '';
+
+    // Keyed on IP+email so one address being brute-forced doesn't lock the
+    // whole office NAT out of every other account.
+    if (isRateLimited(`login:${clientIp(c)}:${email}`, 10, 15 * 60 * 1000)) {
+      return c.json({ error: 'Too many login attempts - try again later' }, 429);
+    }
 
     const result = await query(
       `
