@@ -402,6 +402,13 @@ function App() {
   const [deletingTaskId, setDeletingTaskId] = useState(null);
   const [isAddingTask, setIsAddingTask] = useState(false);
   const [taskDrafts, setTaskDrafts] = useState({});
+  const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
+  const [taskAssigneeMatches, setTaskAssigneeMatches] = useState({});
+  const [isLoadingTaskAssigneeMatches, setIsLoadingTaskAssigneeMatches] = useState(false);
+  const [sendingTaskEmailId, setSendingTaskEmailId] = useState(null);
+  const [bulkAssigneeDraft, setBulkAssigneeDraft] = useState('');
+  const [bulkDueTextDraft, setBulkDueTextDraft] = useState('');
+  const [isBulkUpdatingTasks, setIsBulkUpdatingTasks] = useState(false);
   const [speakerDrafts, setSpeakerDrafts] = useState({});
   const [speakerMatches, setSpeakerMatches] = useState({});
   const [isLoadingSpeakerMatches, setIsLoadingSpeakerMatches] = useState(false);
@@ -1433,7 +1440,7 @@ function App() {
     try {
       const response = await apiFetch(`/api/recordings/${recording.id}/summary`, {
         method: 'POST',
-        body: JSON.stringify({ length: summaryLength, instruction }),
+        body: JSON.stringify({ length: summaryLength, instruction, timezoneOffsetMinutes: new Date().getTimezoneOffset() }),
       });
       const data = await response.json();
 
@@ -1830,6 +1837,151 @@ function App() {
       setStatus(error.message || 'Ошибка удаления задачи');
     } finally {
       setDeletingTaskId(null);
+    }
+  }
+
+  async function handleMatchTaskAssignees() {
+    if (!selectedRecording) {
+      return;
+    }
+
+    setIsLoadingTaskAssigneeMatches(true);
+    setStatus('Ищем совпадения исполнителей в контактах...');
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/task-assignee-matches`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось сопоставить исполнителей с контактами');
+      }
+
+      setTaskAssigneeMatches(Object.fromEntries((data.matches || []).map((match) => [match.taskId, match])));
+      setStatus('Исполнители сопоставлены с контактами');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка сопоставления исполнителей');
+    } finally {
+      setIsLoadingTaskAssigneeMatches(false);
+    }
+  }
+
+  function applyTaskAssigneeCandidate(task, candidate) {
+    setTaskDrafts((current) => ({
+      ...current,
+      [task.id]: { ...getTaskDraft(task), assignee: candidate.name },
+    }));
+  }
+
+  function toggleTaskSelection(task) {
+    setSelectedTaskIds((current) => {
+      const next = new Set(current);
+      if (next.has(task.id)) {
+        next.delete(task.id);
+      } else {
+        next.add(task.id);
+      }
+      return next;
+    });
+  }
+
+  async function handleSendTaskEmail(task, email) {
+    if (!selectedRecording || !email?.trim()) {
+      return;
+    }
+
+    setSendingTaskEmailId(task.id);
+    setStatus('Отправляем задачу на email...');
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/tasks/${task.id}/send-email`, {
+        method: 'POST',
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось отправить задачу на email');
+      }
+
+      applyTaskUpdate(data.task);
+      setStatus('Задача отправлена на email');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка отправки задачи на email');
+    } finally {
+      setSendingTaskEmailId(null);
+    }
+  }
+
+  // Bulk actions (US-9.2) loop the existing single-task PATCH endpoint over
+  // the selected ids - task counts per meeting are small, so a dedicated
+  // bulk backend route isn't worth the extra abstraction (same call as
+  // handleConfirmTask/handleSaveTask, just repeated).
+  async function handleBulkConfirm() {
+    if (!selectedRecording?.tasks?.length) {
+      return;
+    }
+
+    const targets = selectedTaskIds.size
+      ? selectedRecording.tasks.filter((task) => selectedTaskIds.has(task.id))
+      : selectedRecording.tasks.filter((task) => task.status !== 'confirmed' && task.status !== 'dismissed');
+
+    if (!targets.length) {
+      setStatus('Нечего подтверждать');
+      return;
+    }
+
+    setIsBulkUpdatingTasks(true);
+    setStatus(`Подтверждаем ${targets.length} задач...`);
+
+    try {
+      for (const task of targets) {
+        await updateTask(task, { status: 'confirmed' }, null);
+      }
+      setStatus(`Подтверждено задач: ${targets.length}`);
+    } finally {
+      setIsBulkUpdatingTasks(false);
+    }
+  }
+
+  async function handleBulkAssign() {
+    if (!selectedRecording?.tasks?.length || !bulkAssigneeDraft.trim() || !selectedTaskIds.size) {
+      setStatus('Выбери задачи и укажи исполнителя');
+      return;
+    }
+
+    const targets = selectedRecording.tasks.filter((task) => selectedTaskIds.has(task.id));
+    setIsBulkUpdatingTasks(true);
+    setStatus(`Назначаем исполнителя для ${targets.length} задач...`);
+
+    try {
+      for (const task of targets) {
+        await updateTask(task, { assignee: bulkAssigneeDraft.trim() }, null);
+      }
+      setBulkAssigneeDraft('');
+      setStatus(`Исполнитель назначен для ${targets.length} задач`);
+    } finally {
+      setIsBulkUpdatingTasks(false);
+    }
+  }
+
+  async function handleBulkDueText() {
+    if (!selectedRecording?.tasks?.length || !bulkDueTextDraft.trim() || !selectedTaskIds.size) {
+      setStatus('Выбери задачи и укажи срок');
+      return;
+    }
+
+    const targets = selectedRecording.tasks.filter((task) => selectedTaskIds.has(task.id));
+    setIsBulkUpdatingTasks(true);
+    setStatus(`Меняем срок для ${targets.length} задач...`);
+
+    try {
+      for (const task of targets) {
+        await updateTask(task, { dueText: bulkDueTextDraft.trim() }, null);
+      }
+      setBulkDueTextDraft('');
+      setStatus(`Срок изменён для ${targets.length} задач`);
+    } finally {
+      setIsBulkUpdatingTasks(false);
     }
   }
 
@@ -2888,24 +3040,63 @@ function App() {
                 </form>
 
                 {selectedRecording.tasks?.length ? (
-                  <div className="task-list">
-                    {selectedRecording.tasks.map((task) => (
-                      <TaskRow
-                        key={task.id}
-                        task={task}
-                        draft={getTaskDraft(task)}
-                        isSaving={savingTaskId === task.id}
-                        isDeleting={deletingTaskId === task.id}
-                        isSendingBitrix={isSendingBitrixTaskId === task.id}
-                        onFieldChange={updateTaskDraft}
-                        onSave={handleSaveTask}
-                        onConfirm={handleConfirmTask}
-                        onDismiss={handleDismissTask}
-                        onDelete={handleDeleteTask}
-                        onSendToBitrix={handleSendTaskToBitrix}
-                      />
-                    ))}
-                  </div>
+                  <>
+                    <div className="task-bulk-toolbar">
+                      <button className="button button-secondary" type="button" onClick={handleMatchTaskAssignees} disabled={isLoadingTaskAssigneeMatches}>
+                        {isLoadingTaskAssigneeMatches ? 'Ищем...' : 'Подобрать исполнителей по контактам'}
+                      </button>
+                      <button className="button button-secondary" type="button" onClick={handleBulkConfirm} disabled={isBulkUpdatingTasks}>
+                        {selectedTaskIds.size ? `Подтвердить выбранные (${selectedTaskIds.size})` : 'Подтвердить все'}
+                      </button>
+                      <div className="task-bulk-field">
+                        <input
+                          value={bulkAssigneeDraft}
+                          onChange={(event) => setBulkAssigneeDraft(event.target.value)}
+                          placeholder="Исполнитель для выбранных"
+                          disabled={isBulkUpdatingTasks}
+                        />
+                        <button className="button button-secondary" type="button" onClick={handleBulkAssign} disabled={isBulkUpdatingTasks || !selectedTaskIds.size}>
+                          Назначить
+                        </button>
+                      </div>
+                      <div className="task-bulk-field">
+                        <input
+                          value={bulkDueTextDraft}
+                          onChange={(event) => setBulkDueTextDraft(event.target.value)}
+                          placeholder="Срок для выбранных"
+                          disabled={isBulkUpdatingTasks}
+                        />
+                        <button className="button button-secondary" type="button" onClick={handleBulkDueText} disabled={isBulkUpdatingTasks || !selectedTaskIds.size}>
+                          Изменить срок
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="task-list">
+                      {selectedRecording.tasks.map((task) => (
+                        <TaskRow
+                          key={task.id}
+                          task={task}
+                          draft={getTaskDraft(task)}
+                          isSaving={savingTaskId === task.id}
+                          isDeleting={deletingTaskId === task.id}
+                          isSendingBitrix={isSendingBitrixTaskId === task.id}
+                          isSendingEmail={sendingTaskEmailId === task.id}
+                          isSelected={selectedTaskIds.has(task.id)}
+                          assigneeMatch={taskAssigneeMatches[task.id]}
+                          onFieldChange={updateTaskDraft}
+                          onSave={handleSaveTask}
+                          onConfirm={handleConfirmTask}
+                          onDismiss={handleDismissTask}
+                          onDelete={handleDeleteTask}
+                          onSendToBitrix={handleSendTaskToBitrix}
+                          onSendEmail={handleSendTaskEmail}
+                          onApplyAssigneeCandidate={applyTaskAssigneeCandidate}
+                          onToggleSelect={toggleTaskSelection}
+                        />
+                      ))}
+                    </div>
+                  </>
                 ) : (
                   <p className="muted-text">Задач пока нет. Они появятся после генерации протокола, если модель найдёт поручения.</p>
                 )}

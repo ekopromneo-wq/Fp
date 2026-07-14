@@ -1486,6 +1486,59 @@ audio {
   padding: 0 8px;
 }
 
+.task-row-select {
+  display: block;
+  text-transform: none;
+}
+
+.task-resolved-date {
+  margin-top: 2px;
+  color: var(--accent-primary);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: none;
+}
+
+.task-external-assignee {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(251, 146, 60, 0.1);
+  border: 1px solid rgba(251, 146, 60, 0.3);
+}
+
+.task-external-assignee p {
+  margin: 0;
+}
+
+.task-bulk-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.task-bulk-toolbar .button {
+  width: auto;
+}
+
+.task-bulk-field {
+  display: flex;
+  gap: 6px;
+}
+
+.task-bulk-field input {
+  min-height: 36px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  padding: 0 10px;
+  min-width: 160px;
+}
+
 .topic-list {
   display: flex;
   flex-wrap: wrap;

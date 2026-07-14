@@ -34,16 +34,10 @@ function mapNotification(row) {
  * existing regardless of channel settings), then best-effort fans out to
  * whichever external channels the owner has selected (max 2 total including
  * in_app, enforced in auth.js's normalizeNotificationConfig). A failed
- * external send is logged and swallowed - it must never break the
- * recording pipeline that triggered it.
+ * external send is logged and swallowed - it must never break whatever
+ * triggered it (recording pipeline, task-overdue scan, ...).
  */
-export async function notifyRecordingEvent(recordingId, ownerId, type) {
-  const template = NOTIFICATION_TEMPLATES[type];
-
-  if (!ownerId || !template) {
-    return;
-  }
-
+async function deliverNotification(ownerId, recordingId, type, title, message) {
   const userResult = await query(
     'select email, smtp_config, telegram_config, notification_config from app_users where id = $1',
     [ownerId],
@@ -54,9 +48,6 @@ export async function notifyRecordingEvent(recordingId, ownerId, type) {
     return;
   }
 
-  const recordingResult = await query('select title from recordings where id = $1', [recordingId]);
-  const recordingTitle = recordingResult.rows[0]?.title || 'запись';
-  const { title, message } = template(recordingTitle);
   const config = user.notification_config || {};
   const channels = Array.isArray(config.channels) && config.channels.length ? config.channels : ['in_app', 'email'];
 
@@ -101,6 +92,33 @@ export async function notifyRecordingEvent(recordingId, ownerId, type) {
   if (delivered) {
     await query('update notifications set read_at = now() where id = $1', [notificationId]);
   }
+}
+
+export async function notifyRecordingEvent(recordingId, ownerId, type) {
+  const template = NOTIFICATION_TEMPLATES[type];
+
+  if (!ownerId || !template) {
+    return;
+  }
+
+  const recordingResult = await query('select title from recordings where id = $1', [recordingId]);
+  const recordingTitle = recordingResult.rows[0]?.title || 'запись';
+  const { title, message } = template(recordingTitle);
+
+  await deliverNotification(ownerId, recordingId, type, title, message);
+}
+
+// US-9.3: "Просроченная дата → уведомление". Separate from
+// notifyRecordingEvent because the message needs the task's own text, not
+// just the recording title - reuses the same insert+fanout mechanics via
+// deliverNotification.
+export async function notifyTaskOverdue(ownerId, recordingId, task) {
+  const recordingResult = await query('select title from recordings where id = $1', [recordingId]);
+  const recordingTitle = recordingResult.rows[0]?.title || 'запись';
+  const title = 'Задача просрочена';
+  const message = `Задача "${task.description}" из встречи "${recordingTitle}" просрочена (срок: ${task.dueText || 'не указан'})`;
+
+  await deliverNotification(ownerId, recordingId, 'task_overdue', title, message);
 }
 
 export async function cleanupOldNotifications() {

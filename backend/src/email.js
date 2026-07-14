@@ -169,6 +169,44 @@ function buildEmailContent(recording, message = '') {
 
 export { buildEmailContent };
 
+// Sends a single task (US-9.4 "внешний исполнитель ... задача уходит по
+// Email"), not the whole recording protocol - deliberately separate from
+// buildEmailContent/sendRecordingEmail, which always dump the entire
+// summary/protocol/task table.
+export async function sendTaskEmail(smtpConfig, toInput, recording, task) {
+  const config = getSmtpConfig(smtpConfig || {});
+  const to = normalizeRecipients(toInput);
+  const subject = `Задача из встречи "${recording.title}": ${task.description.slice(0, 80)}`;
+  const text = [
+    `Встреча: ${recording.title}`,
+    `Срок: ${task.dueText || 'не указан'}`,
+    '',
+    task.description,
+  ].join('\n');
+  const html = `<!doctype html>
+    <html>
+      <body style="font-family: Arial, sans-serif; color: #18221d; line-height: 1.45;">
+        <p><strong>Встреча:</strong> ${escapeHtml(recording.title)}</p>
+        <p><strong>Срок:</strong> ${escapeHtml(task.dueText || 'не указан')}</p>
+        <p>${escapeHtml(task.description)}</p>
+      </body>
+    </html>`;
+  const transporter = nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    auth: config.auth,
+  });
+
+  const result = await transporter.sendMail({ from: config.from, to, subject, text, html });
+
+  return {
+    messageId: result.messageId,
+    accepted: result.accepted || [],
+    rejected: result.rejected || [],
+  };
+}
+
 // Short "your recording is ready/failed" notification, distinct from
 // sendRecordingEmail's full protocol/summary dump (US-5.2 wants a one-line
 // status message, not the whole meeting content).

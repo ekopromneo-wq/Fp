@@ -406,6 +406,34 @@ export async function matchRecordingSpeakersToContacts(recordingId, ownerId, spe
   });
 }
 
+// --- matching contacts to a recording's extracted tasks (epic 9) --------
+
+// A task assignee is a free-text name extracted from speech (not a
+// diarization label), but it's still just a name string to match against
+// the contact book - matchSpeakerToContacts's rule (>=2 shared words to
+// avoid false positives on one common first name) applies unchanged.
+export async function matchRecordingTasksToContacts(ownerId, tasks) {
+  const contacts = await listContacts(ownerId);
+
+  return tasks.map((task) => {
+    const candidates = matchSpeakerToContacts(task.assignee, contacts);
+
+    return {
+      taskId: task.id,
+      candidates,
+      autoMatch: candidates.length === 1 ? candidates[0] : null,
+    };
+  });
+}
+
+// A non-empty assignee with zero contact-book matches is "external" - not
+// necessarily a stranger, just not someone VoxMate can already identify.
+// An empty assignee is a different case (simply unknown yet), not external.
+export function isAssigneeExternal(assigneeText, contacts) {
+  const text = String(assigneeText || '').trim();
+  return text ? matchSpeakerToContacts(text, contacts).length === 0 : false;
+}
+
 export function registerContactRoutes(app) {
   app.get('/api/contacts', requireAuth, async (c) => {
     const user = getAuthUser(c);

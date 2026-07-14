@@ -9,10 +9,10 @@ import {
   requireAuth,
 } from './auth.js';
 import { query, transaction } from './db.js';
-import { sendRecordingEmail } from './email.js';
+import { sendRecordingEmail, sendTaskEmail } from './email.js';
 import { sendRecordingTelegram } from './telegram.js';
 import { sendTasksToBitrix, matchRecordingSpeakersToBitrix } from './bitrix.js';
-import { matchRecordingSpeakersToContacts } from './contacts.js';
+import { matchRecordingSpeakersToContacts, matchRecordingTasksToContacts, isAssigneeExternal, listContacts } from './contacts.js';
 import {
   MEETING_TYPES,
   PROTOCOL_ALL_SECTIONS,
@@ -25,6 +25,7 @@ import { Readable } from 'node:stream';
 import { deleteRecordingAudio, getRecordingAudioRange, getRecordingAudioStream, saveRecordingAudio } from './storage.js';
 import { UploadValidationError, probeUploadedAudio } from './uploadValidation.js';
 import { transcribeWithOpenRouter } from './openrouterAsr.js';
+import { resolveDueDate } from './dueDateResolver.js';
 
 const queue = createRecordingQueue();
 // Matches the product spec's stated max upload size (1 GB); override via env
@@ -183,6 +184,8 @@ function mapTask(row) {
     assignee: row.assignee,
     description: row.description,
     dueText: row.due_text,
+    dueDate: row.due_date,
+    assigneeExternal: Boolean(row.assignee_external),
     status: row.status,
     externalRefs: row.external_refs || {},
     createdAt: row.created_at,
@@ -349,7 +352,10 @@ function normalizeSummaryLength(length) {
   return SUMMARY_LENGTHS.has(length) ? length : 'medium';
 }
 
-async function generateSummaryWithOpenRouter(transcriptText, { length = 'medium', meetingType = 'meeting', instruction = '' } = {}) {
+async function generateSummaryWithOpenRouter(
+  transcriptText,
+  { length = 'medium', meetingType = 'meeting', instruction = '', speakers = [], dueDateAnchor = null, timezoneOffsetMinutes = 0 } = {},
+) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
@@ -369,6 +375,17 @@ async function generateSummaryWithOpenRouter(transcriptText, { length = 'medium'
   const instructionLine = instruction && String(instruction).trim()
     ? `\n\nДополнительное указание пользователя (обязательно учти при генерации): ${String(instruction).trim()}`
     : '';
+  // Real display names, where already resolved (epic 7's speaker
+  // accept/reject flow), let the LLM address "мы сделаем"/"я возьму на
+  // себя" self-references by real name instead of a positional label like
+  // "Спикер 1" - the identities already exist by generation time, nothing
+  // new is computed here.
+  const knownSpeakers = speakers
+    .filter((speaker) => speaker.displayName && speaker.displayName !== speaker.label)
+    .map((speaker) => `${speaker.label} = ${speaker.displayName}`);
+  const speakersLine = knownSpeakers.length
+    ? `\n\nИзвестные имена участников (используй их вместо позиционных меток в поле assignee, если задача поручена этому человеку): ${knownSpeakers.join(', ')}.`
+    : '';
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -387,7 +404,10 @@ async function generateSummaryWithOpenRouter(transcriptText, { length = 'medium'
           content:
             `Ты помощник VoxMate. Верни строго JSON без markdown. Поля: summary:string (полная версия), executiveSummary:string (краткая выжимка сути встречи, 3-5 строк), topics:string[], protocol:{${template.sections.join(',')}}, tasks:{assignee:string|null,description:string,dueText:string|null}[]. ` +
             `Разделы protocol (используй только перечисленные ниже, больше никаких других полей в protocol не добавляй):\n${sectionDescriptions}\n\n` +
-            'Пиши по-русски, конкретно. Если исполнитель или срок не названы явно, ставь null.\n\n' +
+            'Пиши по-русски, конкретно. Если исполнитель или срок не названы явно, ставь null - не выдумывай. ' +
+            'Одна реплика может дать несколько задач. Если два фрагмента речи описывают одно и то же поручение - верни одну задачу, не дублируй. ' +
+            'Приоритет — точность: лучше не создать задачу, чем создать ложную.' +
+            speakersLine + '\n\n' +
             SUMMARY_LENGTH_INSTRUCTIONS[summaryLength] +
             instructionLine,
         },
@@ -407,7 +427,13 @@ async function generateSummaryWithOpenRouter(transcriptText, { length = 'medium'
 
   const content = body?.choices?.[0]?.message?.content;
   const parsed = parseJsonObject(content);
-  const tasks = (Array.isArray(parsed.tasks) ? parsed.tasks : parsed.actionItems || []).map(normalizeTask).filter(Boolean);
+  const tasks = (Array.isArray(parsed.tasks) ? parsed.tasks : parsed.actionItems || [])
+    .map(normalizeTask)
+    .filter(Boolean)
+    .map((task) => ({
+      ...task,
+      dueDate: dueDateAnchor ? resolveDueDate(task.dueText, dueDateAnchor, timezoneOffsetMinutes) : null,
+    }));
 
   return {
     model,
@@ -850,7 +876,8 @@ export async function getRecording(id, ownerId) {
     ),
     query(
       `
-        select id, recording_id, summary_id, transcript_id, assignee, description, due_text, status, external_refs, created_at, updated_at
+        select id, recording_id, summary_id, transcript_id, assignee, description, due_text, due_date,
+          assignee_external, status, external_refs, created_at, updated_at
         from recording_tasks
         where recording_id = $1 and status <> 'dismissed'
         order by created_at asc
@@ -881,7 +908,7 @@ export async function getRecording(id, ownerId) {
   };
 }
 
-export async function summarizeRecording(recordingId, ownerId, { length = 'medium', instruction = '' } = {}) {
+export async function summarizeRecording(recordingId, ownerId, { length = 'medium', instruction = '', timezoneOffsetMinutes = 0 } = {}) {
   const recording = await getRecording(recordingId, ownerId);
 
   if (!recording) {
@@ -900,6 +927,9 @@ export async function summarizeRecording(recordingId, ownerId, { length = 'mediu
     length,
     meetingType: recording.meetingType,
     instruction,
+    speakers: recording.speakers || [],
+    dueDateAnchor: recording.createdAt ? new Date(recording.createdAt) : new Date(),
+    timezoneOffsetMinutes,
   });
   const originalSnapshot = JSON.stringify({
     summary: generated.summary,
@@ -938,15 +968,26 @@ export async function summarizeRecording(recordingId, ownerId, { length = 'mediu
 
     await client.query('delete from recording_tasks where recording_id = $1', [recordingId]);
 
+    const contacts = await listContacts(ownerId);
     const tasks = [];
     for (const task of generated.tasks) {
       const inserted = await client.query(
         `
-          insert into recording_tasks (recording_id, summary_id, transcript_id, assignee, description, due_text)
-          values ($1, $2, $3, $4, $5, $6)
-          returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, status, external_refs, created_at, updated_at
+          insert into recording_tasks (recording_id, summary_id, transcript_id, assignee, description, due_text, due_date, assignee_external)
+          values ($1, $2, $3, $4, $5, $6, $7, $8)
+          returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, due_date,
+            assignee_external, status, external_refs, created_at, updated_at
         `,
-        [recordingId, summary.id, recording.transcript.id, task.assignee || null, task.description, task.dueText || null],
+        [
+          recordingId,
+          summary.id,
+          recording.transcript.id,
+          task.assignee || null,
+          task.description,
+          task.dueText || null,
+          task.dueDate || null,
+          isAssigneeExternal(task.assignee, contacts),
+        ],
       );
 
       tasks.push(mapTask(inserted.rows[0]));
@@ -1221,9 +1262,12 @@ export async function createRecordingTask(recordingId, ownerId, input) {
     throw new Error('Task description is required');
   }
 
+  const contacts = await listContacts(ownerId);
+  const assigneeExternal = isAssigneeExternal(assignee, contacts);
+
   const result = await query(
     `
-      insert into recording_tasks (recording_id, summary_id, transcript_id, assignee, description, due_text, status)
+      insert into recording_tasks (recording_id, summary_id, transcript_id, assignee, description, due_text, assignee_external, status)
       select
         recording.id,
         (
@@ -1243,13 +1287,15 @@ export async function createRecordingTask(recordingId, ownerId, input) {
         $3,
         $4,
         $5,
+        $6,
         'confirmed'
       from recordings recording
       where recording.id = $1
         and (recording.owner_id = $2 or recording.owner_id is null)
-      returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, status, external_refs, created_at, updated_at
+      returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, due_date,
+        assignee_external, status, external_refs, created_at, updated_at
     `,
-    [recordingId, ownerId, assignee, description, dueText],
+    [recordingId, ownerId, assignee, description, dueText, assigneeExternal],
   );
 
   return result.rowCount ? mapTask(result.rows[0]) : null;
@@ -1261,8 +1307,7 @@ export async function updateRecordingTask(recordingId, taskId, ownerId, input) {
   const hasDescription = Object.prototype.hasOwnProperty.call(data, 'description');
   const hasDueText = Object.prototype.hasOwnProperty.call(data, 'dueText');
   const hasStatus = Object.prototype.hasOwnProperty.call(data, 'status');
-  const assignee =
-    hasAssignee && typeof data.assignee === 'string' && data.assignee.trim() ? data.assignee.trim() : null;
+  let assignee = hasAssignee && typeof data.assignee === 'string' && data.assignee.trim() ? data.assignee.trim() : null;
   const dueText = hasDueText && typeof data.dueText === 'string' && data.dueText.trim() ? data.dueText.trim() : null;
   const description = hasDescription && typeof data.description === 'string' ? data.description.trim() : null;
   const status = hasStatus && typeof data.status === 'string' ? data.status.trim() : null;
@@ -1276,6 +1321,39 @@ export async function updateRecordingTask(recordingId, taskId, ownerId, input) {
     throw new Error('Unsupported task status');
   }
 
+  const existing = await query(
+    `
+      select task.assignee
+      from recording_tasks task
+      join recordings recording on recording.id = task.recording_id
+      where task.id = $1 and task.recording_id = $2 and (recording.owner_id = $3 or recording.owner_id is null)
+    `,
+    [taskId, recordingId, ownerId],
+  );
+
+  if (existing.rowCount === 0) {
+    return null;
+  }
+
+  const currentAssignee = hasAssignee ? assignee : existing.rows[0].assignee;
+  let hasAssigneeUpdate = hasAssignee;
+  let assigneeExternal = null;
+  let hasAssigneeExternalUpdate = false;
+
+  // Every confirmed task must end up with an assignee (US-9.2) - fall back
+  // to the recording owner rather than leaving it blank or inventing a name.
+  if (hasStatus && status === 'confirmed' && !currentAssignee) {
+    const owner = await query('select display_name from app_users where id = $1', [ownerId]);
+    assignee = owner.rows[0]?.display_name || null;
+    hasAssigneeUpdate = true;
+    assigneeExternal = false;
+    hasAssigneeExternalUpdate = true;
+  } else if (hasAssignee) {
+    const contacts = await listContacts(ownerId);
+    assigneeExternal = isAssigneeExternal(assignee, contacts);
+    hasAssigneeExternalUpdate = true;
+  }
+
   const result = await query(
     `
       update recording_tasks task
@@ -1284,6 +1362,7 @@ export async function updateRecordingTask(recordingId, taskId, ownerId, input) {
         description = case when $6 then $7 else task.description end,
         due_text = case when $8 then $9 else task.due_text end,
         status = case when $10 then $11 else task.status end,
+        assignee_external = case when $12 then $13 else task.assignee_external end,
         updated_at = now()
       from recordings recording
       where task.id = $1
@@ -1291,9 +1370,24 @@ export async function updateRecordingTask(recordingId, taskId, ownerId, input) {
         and recording.id = task.recording_id
         and (recording.owner_id = $3 or recording.owner_id is null)
       returning task.id, task.recording_id, task.summary_id, task.transcript_id,
-        task.assignee, task.description, task.due_text, task.status, task.external_refs, task.created_at, task.updated_at
+        task.assignee, task.description, task.due_text, task.due_date, task.assignee_external,
+        task.status, task.external_refs, task.created_at, task.updated_at
     `,
-    [taskId, recordingId, ownerId, hasAssignee, assignee, hasDescription, description, hasDueText, dueText, hasStatus, status],
+    [
+      taskId,
+      recordingId,
+      ownerId,
+      hasAssigneeUpdate,
+      assignee,
+      hasDescription,
+      description,
+      hasDueText,
+      dueText,
+      hasStatus,
+      status,
+      hasAssigneeExternalUpdate,
+      assigneeExternal,
+    ],
   );
 
   return result.rowCount ? mapTask(result.rows[0]) : null;
@@ -1881,7 +1975,11 @@ export function registerRecordingRoutes(app) {
     const body = await c.req.json().catch(() => ({}));
 
     try {
-      const result = await summarizeRecording(c.req.param('id'), user.id, { length: body.length, instruction: body.instruction });
+      const result = await summarizeRecording(c.req.param('id'), user.id, {
+        length: body.length,
+        instruction: body.instruction,
+        timezoneOffsetMinutes: body.timezoneOffsetMinutes,
+      });
 
       if (!result) {
         return c.json({ error: 'Recording not found' }, 404);
@@ -2066,6 +2164,22 @@ export function registerRecordingRoutes(app) {
     }
   });
 
+  app.get('/api/recordings/:recordingId/task-assignee-matches', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const recording = await getRecording(c.req.param('recordingId'), user.id);
+
+    if (!recording) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    try {
+      const matches = await matchRecordingTasksToContacts(user.id, recording.tasks || []);
+      return c.json({ matches });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to match task assignees against contacts' }, 400);
+    }
+  });
+
   app.post('/api/recordings/:recordingId/tasks', requireAuth, async (c) => {
     const user = getAuthUser(c);
     const body = await c.req.json().catch(() => ({}));
@@ -2109,6 +2223,42 @@ export function registerRecordingRoutes(app) {
     }
 
     return c.json({ task: deleted });
+  });
+
+  app.post('/api/recordings/:recordingId/tasks/:taskId/send-email', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const recordingId = c.req.param('recordingId');
+    const taskId = c.req.param('taskId');
+    const recording = await getRecording(recordingId, user.id);
+    const task = recording?.tasks?.find((item) => item.id === taskId);
+
+    if (!recording || !task) {
+      return c.json({ error: 'Task not found' }, 404);
+    }
+
+    try {
+      const smtpConfig = await getUserSmtpConfig(user.id);
+      const delivery = await sendTaskEmail(smtpConfig, body.email, recording, task);
+
+      const updated = await query(
+        `
+          update recording_tasks
+          set
+            status = case when status in ('extracted', 'confirmed') then 'sent' else status end,
+            external_refs = external_refs || jsonb_build_object('email', jsonb_build_object('to', $2::text, 'sentAt', now())),
+            updated_at = now()
+          where id = $1
+          returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, due_date,
+            assignee_external, status, external_refs, created_at, updated_at
+        `,
+        [taskId, body.email],
+      );
+
+      return c.json({ delivery, task: mapTask(updated.rows[0]) });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to send task email' }, 400);
+    }
   });
 
   app.patch('/api/recordings/:recordingId/speakers/:label', requireAuth, async (c) => {

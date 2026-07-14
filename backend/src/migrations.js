@@ -310,6 +310,18 @@ const migrations = [
       where original_summary is null;
     `,
   },
+  {
+    id: '019_task_resolution',
+    sql: `
+      alter table recording_tasks add column if not exists due_date timestamptz;
+      alter table recording_tasks add column if not exists assignee_external boolean not null default false;
+      alter table recording_tasks add column if not exists overdue_notified_at timestamptz;
+
+      alter table notifications drop constraint notifications_type_check;
+      alter table notifications add constraint notifications_type_check
+        check (type in ('done', 'failed', 'task_overdue'));
+    `,
+  },
 ];
 
 export async function runMigrations() {

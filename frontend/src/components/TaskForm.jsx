@@ -1,4 +1,6 @@
-export default function TaskForm({ draft, onFieldChange }) {
+import { formatDate } from '../lib/format.js';
+
+export default function TaskForm({ draft, onFieldChange, dueDate }) {
   return (
     <>
       <label>
@@ -6,7 +8,7 @@ export default function TaskForm({ draft, onFieldChange }) {
         <input
           value={draft.assignee}
           onChange={(event) => onFieldChange('assignee', event.target.value)}
-          placeholder="Не указан"
+          placeholder="?"
         />
       </label>
 
@@ -15,8 +17,9 @@ export default function TaskForm({ draft, onFieldChange }) {
         <input
           value={draft.dueText}
           onChange={(event) => onFieldChange('dueText', event.target.value)}
-          placeholder="Не указан"
+          placeholder="?"
         />
+        {dueDate ? <span className="task-resolved-date">→ {formatDate(dueDate)}</span> : null}
       </label>
 
       <label>

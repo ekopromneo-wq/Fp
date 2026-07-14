@@ -15,7 +15,7 @@ import { transcribeWithAccuratePipeline } from './pipelineDiarizer.js';
 import { transcribeWithSpeech2Text, checkSpeech2TextStatus, fetchSpeech2TextResult, parseSpeech2TextResult } from './speech2textDiarizer.js';
 import { getUserDiarizationConfig } from './auth.js';
 import { summarizeRecording } from './recordings.js';
-import { notifyRecordingEvent } from './notifications.js';
+import { notifyRecordingEvent, notifyTaskOverdue } from './notifications.js';
 
 dotenv.config();
 
@@ -341,6 +341,39 @@ async function pollMeetingBotRecordings() {
   }
 }
 
+const OVERDUE_TASK_POLL_INTERVAL_MS = Number(process.env.OVERDUE_TASK_POLL_INTERVAL_MS || 30 * 60 * 1000);
+
+/**
+ * US-9.3: "Просроченная дата → уведомление". Runs independently of the
+ * recording pipeline (a task can become overdue at any moment, not just
+ * around a processing event), same setInterval-poll shape as
+ * pollMeetingBotRecordings above. overdue_notified_at guards against
+ * re-notifying on every poll tick once a task has already been flagged.
+ */
+async function pollOverdueTasks() {
+  const overdue = await query(
+    `
+      select task.id, task.description, task.due_text, recording.id as recording_id, recording.owner_id
+      from recording_tasks task
+      join recordings recording on recording.id = task.recording_id
+      where task.due_date is not null
+        and task.due_date < now()
+        and task.status not in ('done', 'dismissed')
+        and task.overdue_notified_at is null
+        and recording.owner_id is not null
+    `,
+  );
+
+  for (const row of overdue.rows) {
+    try {
+      await notifyTaskOverdue(row.owner_id, row.recording_id, { description: row.description, dueText: row.due_text });
+      await query('update recording_tasks set overdue_notified_at = now() where id = $1', [row.id]);
+    } catch (error) {
+      console.warn(`Overdue-task notification failed for task ${row.id}:`, error.message);
+    }
+  }
+}
+
 async function main() {
   await runMigrations();
   await ensureAudioBucket();
@@ -348,6 +381,10 @@ async function main() {
   setInterval(() => {
     pollMeetingBotRecordings().catch((error) => console.warn('Meeting bot poll loop error:', error.message));
   }, MEETING_BOT_POLL_INTERVAL_MS);
+
+  setInterval(() => {
+    pollOverdueTasks().catch((error) => console.warn('Overdue task poll loop error:', error.message));
+  }, OVERDUE_TASK_POLL_INTERVAL_MS);
 
   const worker = new Worker(
     RECORDING_QUEUE_NAME,
