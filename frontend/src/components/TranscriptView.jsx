@@ -140,6 +140,14 @@ export default function TranscriptView({ recording, audioUrl, onUpdateTranscript
   const baseSegments = useMemo(() => getSegments(transcript), [transcript]);
   const segments = isEditing && draftSegments ? draftSegments : baseSegments;
   const hasTimestamps = baseSegments.some((segment) => typeof segment.startMs === 'number');
+  // Every label reassignment (draftSegments) needs to appear in the dropdown
+  // immediately, not just the labels present in the original transcript -
+  // otherwise picking "+ новый спикер" once wouldn't let you pick that same
+  // new label for a second segment.
+  const availableLabels = useMemo(
+    () => [...new Set((isEditing && draftSegments ? draftSegments : baseSegments).map((segment) => segment.speaker).filter(Boolean))],
+    [isEditing, draftSegments, baseSegments],
+  );
 
   useEffect(() => {
     setMode('verbatim');
@@ -407,7 +415,31 @@ export default function TranscriptView({ recording, audioUrl, onUpdateTranscript
               }}
               className={`transcript-segment ${isCurrent ? 'is-current-segment' : ''}`}
             >
-              {speaker ? <strong className="transcript-segment-speaker">{speaker}</strong> : null}
+              {isEditing ? (
+                <select
+                  className="transcript-segment-speaker-select"
+                  value={segment.speaker || ''}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    const nextLabel = value === '__new__' ? window.prompt('Имя нового спикера')?.trim() : value;
+
+                    if (!nextLabel) {
+                      return;
+                    }
+
+                    setDraftSegments((current) => current.map((s, i) => (i === index ? { ...s, speaker: nextLabel } : s)));
+                  }}
+                >
+                  {availableLabels.map((label) => (
+                    <option key={label} value={label}>
+                      {speakerDisplayName(label, recording.speakers) || label}
+                    </option>
+                  ))}
+                  <option value="__new__">+ новый спикер...</option>
+                </select>
+              ) : speaker ? (
+                <strong className="transcript-segment-speaker">{speaker}</strong>
+              ) : null}
               {isEditing ? (
                 <textarea
                   className="transcript-segment-editor"

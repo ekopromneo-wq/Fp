@@ -189,6 +189,30 @@ async function processRecording(data) {
     );
   });
 
+  // Persist any speaker-identity guesses as pending suggestions (US-7.1) -
+  // only the accuracy pipeline resolves identities at all today. Segments
+  // themselves already stayed on stable "Спикер N" labels (see
+  // pipelineDiarizer.js's resolveSpeakerLabels), so this never silently
+  // renames anyone - it's purely a suggestion row for the user to accept or
+  // reject later.
+  if (diarized?.identities && Object.keys(diarized.identities).length > 0) {
+    for (const [label, identity] of Object.entries(diarized.identities)) {
+      await query(
+        `
+          insert into recording_speakers (recording_id, label, display_name, suggested_name, suggestion_confidence, suggestion_evidence, suggestion_status)
+          values ($1, $2, $2, $3, $4, $5, 'pending')
+          on conflict (recording_id, label) do update
+          set suggested_name = excluded.suggested_name,
+              suggestion_confidence = excluded.suggestion_confidence,
+              suggestion_evidence = excluded.suggestion_evidence,
+              suggestion_status = 'pending',
+              updated_at = now()
+        `,
+        [recordingId, label, identity.suggestedName, identity.confidence, identity.evidence],
+      );
+    }
+  }
+
   // Stage boundary: if cancellation was requested while transcription was
   // in flight, stop here instead of starting the protocol/tasks LLM call -
   // the transcript we just wrote stays, so a future "restart" would resume

@@ -328,11 +328,16 @@ async function requestSpeakerIdentities(segments, apiKey, model) {
 }
 
 /**
- * Relabels each voice cluster to its resolved name when Claude is
- * high/medium confident; unresolved clusters keep a stable generic
- * "Спикер N" label, same fallback convention the other diarizers use.
+ * Segments always stay on a stable positional "Спикер N" label, regardless
+ * of identity confidence - a guessed name is a *suggestion* for the user to
+ * accept/reject (US-7.1), not something to silently bake into the
+ * transcript before anyone has seen it. Any cluster the LLM offered a name
+ * for (any confidence level, including low - the user decides the bar, not
+ * this function) is returned separately in `identities`, keyed by the same
+ * stable label the segments carry, for the caller to persist as a pending
+ * suggestion.
  */
-function applyIdentities(segments, identities) {
+function resolveSpeakerLabels(segments, identities) {
   const clusterOrder = [];
 
   for (const segment of segments) {
@@ -342,21 +347,26 @@ function applyIdentities(segments, identities) {
   }
 
   const labelByCluster = new Map();
-  let genericIndex = 0;
+  const identitiesByLabel = {};
 
-  for (const cluster of clusterOrder) {
+  clusterOrder.forEach((cluster, index) => {
+    const label = `Спикер ${index + 1}`;
+    labelByCluster.set(cluster, label);
+
     const identity = identities[cluster];
-    const isConfident = identity?.name && (identity.confidence === 'high' || identity.confidence === 'medium');
 
-    if (isConfident) {
-      labelByCluster.set(cluster, String(identity.name).trim());
-    } else {
-      genericIndex += 1;
-      labelByCluster.set(cluster, `Спикер ${genericIndex}`);
+    if (identity?.name) {
+      identitiesByLabel[label] = {
+        suggestedName: String(identity.name).trim(),
+        confidence: identity.confidence || null,
+        evidence: identity.evidence || null,
+      };
     }
-  }
+  });
 
-  return segments.map((segment) => ({ ...segment, speaker: labelByCluster.get(segment.speaker) || segment.speaker }));
+  const relabeledSegments = segments.map((segment) => ({ ...segment, speaker: labelByCluster.get(segment.speaker) || segment.speaker }));
+
+  return { segments: relabeledSegments, identities: identitiesByLabel };
 }
 
 function formatFinalOutput(segments) {
@@ -420,13 +430,14 @@ export async function transcribeWithAccuratePipeline(file, audioBuffer, config =
       console.warn('Pipeline: speaker identity resolution failed, keeping generic labels:', error.message);
     }
 
-    const finalSegments = mergeAdjacentSameSpeaker(applyIdentities(merged, identities));
+    const { segments: labeledSegments, identities: resolvedIdentities } = resolveSpeakerLabels(merged, identities);
+    const finalSegments = mergeAdjacentSameSpeaker(labeledSegments);
 
     console.log(
       `Pipeline: resolved ${finalSegments.length} final turn(s) across ${new Set(finalSegments.map((s) => s.speaker)).size} speaker(s)`,
     );
 
-    return { ...formatFinalOutput(finalSegments), language: config.language || null };
+    return { ...formatFinalOutput(finalSegments), language: config.language || null, identities: resolvedIdentities };
   } catch (error) {
     console.warn('Accuracy pipeline diarization failed, falling back:', error.message);
     return null;

@@ -12,6 +12,7 @@ import SpeakerRow from './components/SpeakerRow.jsx';
 import TaskForm from './components/TaskForm.jsx';
 import TaskRow from './components/TaskRow.jsx';
 import RecordingCard from './components/RecordingCard.jsx';
+import ContactsPage from './components/ContactsPage.jsx';
 import TranscriptView from './components/TranscriptView.jsx';
 import useMicRecorder from './hooks/useMicRecorder.js';
 import useIsMobile from './hooks/useIsMobile.js';
@@ -294,7 +295,20 @@ function App() {
   const [speakerDrafts, setSpeakerDrafts] = useState({});
   const [speakerMatches, setSpeakerMatches] = useState({});
   const [isLoadingSpeakerMatches, setIsLoadingSpeakerMatches] = useState(false);
+  const [contactSpeakerMatches, setContactSpeakerMatches] = useState({});
+  const [isLoadingContactMatches, setIsLoadingContactMatches] = useState(false);
   const [savingSpeakerLabel, setSavingSpeakerLabel] = useState(null);
+  const [mergingSpeakerLabel, setMergingSpeakerLabel] = useState(null);
+  const [contacts, setContacts] = useState([]);
+  const [isLoadingContacts, setIsLoadingContacts] = useState(false);
+  const [contactDraft, setContactDraft] = useState({ name: '', organization: '', position: '', email: '', phone: '' });
+  const [isCreatingContact, setIsCreatingContact] = useState(false);
+  const [contactDuplicate, setContactDuplicate] = useState(null);
+  const [contactEditDrafts, setContactEditDrafts] = useState({});
+  const [savingContactId, setSavingContactId] = useState(null);
+  const [deletingContactId, setDeletingContactId] = useState(null);
+  const [isImportingContacts, setIsImportingContacts] = useState(false);
+  const [contactImportSummary, setContactImportSummary] = useState(null);
   const [newTaskDraft, setNewTaskDraft] = useState({ assignee: '', dueText: '', description: '' });
   const [emailDraft, setEmailDraft] = useState({ recipients: '', message: '' });
   const [smtpDraft, setSmtpDraft] = useState({ host: '', port: '587', secure: false, user: '', pass: '', from: '' });
@@ -957,6 +971,12 @@ function App() {
       loadBitrixSettings();
       loadDiarizationSettings();
       loadNotificationSettings();
+    }
+  }, [currentUser?.id, activePage]);
+
+  useEffect(() => {
+    if (currentUser && activePage === 'contacts') {
+      loadContacts();
     }
   }, [currentUser?.id, activePage]);
 
@@ -1763,6 +1783,328 @@ function App() {
     }
   }
 
+  async function handleMatchSpeakersToContacts() {
+    if (!selectedRecording) {
+      return;
+    }
+
+    setIsLoadingContactMatches(true);
+    setStatus('Ищем совпадения спикеров в контактах...');
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/contact-speaker-matches`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось сопоставить спикеров с контактами');
+      }
+
+      const matchesByLabel = Object.fromEntries((data.matches || []).map((match) => [match.label, match]));
+      setContactSpeakerMatches(matchesByLabel);
+
+      for (const speaker of selectedRecording.speakers || []) {
+        const match = matchesByLabel[speaker.label];
+        const draft = getSpeakerDraft(speaker);
+
+        if (match?.autoMatch && !draft.contactEmail) {
+          applySpeakerCandidate(speaker, match.autoMatch);
+        }
+      }
+
+      setStatus('Спикеры сопоставлены с контактами');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка сопоставления спикеров с контактами');
+    } finally {
+      setIsLoadingContactMatches(false);
+    }
+  }
+
+  async function handleSpeakerSuggestion(speaker, suggestionStatus) {
+    if (!selectedRecording) {
+      return;
+    }
+
+    setSavingSpeakerLabel(speaker.label);
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/speakers/${encodeURIComponent(speaker.label)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ suggestionStatus }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось обновить спикера');
+      }
+
+      applySpeakerUpdate(data.speaker);
+      setStatus(suggestionStatus === 'accepted' ? 'Имя принято' : 'Предложение отклонено');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка обновления спикера');
+    } finally {
+      setSavingSpeakerLabel(null);
+    }
+  }
+
+  async function handleMergeSpeaker(sourceLabel, targetLabel) {
+    if (!selectedRecording || !sourceLabel || !targetLabel) {
+      return;
+    }
+
+    setMergingSpeakerLabel(sourceLabel);
+    setStatus('Объединяем спикеров...');
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/speakers/merge`, {
+        method: 'POST',
+        body: JSON.stringify({ sourceLabel, targetLabel }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось объединить спикеров');
+      }
+
+      setSelectedRecording(data.recording);
+      setRecordings((current) => current.map((item) => (item.id === data.recording.id ? data.recording : item)));
+      setStatus('Спикеры объединены');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка объединения спикеров');
+    } finally {
+      setMergingSpeakerLabel(null);
+    }
+  }
+
+  async function loadContacts() {
+    setIsLoadingContacts(true);
+
+    try {
+      const response = await apiFetch('/api/contacts');
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось загрузить контакты');
+      }
+
+      setContacts(data.contacts || []);
+    } catch (error) {
+      setStatus(error.message || 'Ошибка загрузки контактов');
+    } finally {
+      setIsLoadingContacts(false);
+    }
+  }
+
+  async function submitContact(input) {
+    const response = await apiFetch('/api/contacts', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Не удалось сохранить контакт');
+    }
+
+    return data;
+  }
+
+  async function handleCreateContact(event) {
+    event.preventDefault();
+
+    if (!contactDraft.name.trim()) {
+      setStatus('Заполни имя контакта');
+      return;
+    }
+
+    setIsCreatingContact(true);
+    setStatus('Сохраняем контакт...');
+
+    try {
+      const data = await submitContact(contactDraft);
+
+      if (data.duplicate) {
+        setContactDuplicate(data.duplicate);
+        setStatus(`Похоже, уже есть ${data.duplicate.name} — объединить?`);
+        return;
+      }
+
+      setContacts((current) => [...current, data.contact].sort((a, b) => a.name.localeCompare(b.name)));
+      setContactDraft({ name: '', organization: '', position: '', email: '', phone: '' });
+      setContactDuplicate(null);
+      setStatus('Контакт добавлен');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка сохранения контакта');
+    } finally {
+      setIsCreatingContact(false);
+    }
+  }
+
+  function handleCancelContactDuplicate() {
+    setContactDuplicate(null);
+    setStatus('');
+  }
+
+  async function handleResolveContactDuplicate(mergeIntoId) {
+    setIsCreatingContact(true);
+    setStatus(mergeIntoId ? 'Объединяем контакт...' : 'Создаём отдельный контакт...');
+
+    try {
+      const data = await submitContact({
+        ...contactDraft,
+        mergeIntoId: mergeIntoId || undefined,
+        confirmDuplicate: mergeIntoId ? undefined : true,
+      });
+
+      if (mergeIntoId) {
+        setContacts((current) => current.map((item) => (item.id === data.contact.id ? data.contact : item)));
+      } else {
+        setContacts((current) => [...current, data.contact].sort((a, b) => a.name.localeCompare(b.name)));
+      }
+
+      setContactDraft({ name: '', organization: '', position: '', email: '', phone: '' });
+      setContactDuplicate(null);
+      setStatus(mergeIntoId ? 'Контакт объединён' : 'Контакт добавлен');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка сохранения контакта');
+    } finally {
+      setIsCreatingContact(false);
+    }
+  }
+
+  function getContactDraft(contact) {
+    return (
+      contactEditDrafts[contact.id] || {
+        name: contact.name || '',
+        organization: contact.organization || '',
+        position: contact.position || '',
+        email: contact.email || '',
+        phone: contact.phone || '',
+      }
+    );
+  }
+
+  function handleContactDraftChange(contact, field, value) {
+    setContactEditDrafts((current) => ({
+      ...current,
+      [contact.id]: { ...getContactDraft(contact), [field]: value },
+    }));
+  }
+
+  async function handleSaveContact(contact) {
+    const draft = getContactDraft(contact);
+
+    if (!draft.name.trim()) {
+      setStatus('Заполни имя контакта');
+      return;
+    }
+
+    setSavingContactId(contact.id);
+
+    try {
+      const response = await apiFetch(`/api/contacts/${contact.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(draft),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось сохранить контакт');
+      }
+
+      setContacts((current) => current.map((item) => (item.id === contact.id ? data.contact : item)).sort((a, b) => a.name.localeCompare(b.name)));
+      setContactEditDrafts((current) => {
+        const next = { ...current };
+        delete next[contact.id];
+        return next;
+      });
+      setStatus('Контакт сохранён');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка сохранения контакта');
+    } finally {
+      setSavingContactId(null);
+    }
+  }
+
+  async function handleDeleteContact(contact) {
+    const confirmed = window.confirm(`Удалить контакт "${contact.name}"?`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingContactId(contact.id);
+
+    try {
+      const response = await apiFetch(`/api/contacts/${contact.id}`, { method: 'DELETE' });
+
+      if (!response.ok) {
+        throw new Error('Не удалось удалить контакт');
+      }
+
+      setContacts((current) => current.filter((item) => item.id !== contact.id));
+      setStatus(`Контакт "${contact.name}" удалён`);
+    } catch (error) {
+      setStatus(error.message || 'Ошибка удаления контакта');
+    } finally {
+      setDeletingContactId(null);
+    }
+  }
+
+  async function handleImportContactsFile(file, kind) {
+    if (!file) {
+      return;
+    }
+
+    setIsImportingContacts(true);
+    setContactImportSummary(null);
+    setStatus(kind === 'csv' ? 'Импортируем CSV...' : 'Импортируем vCard...');
+
+    try {
+      const text = await file.text();
+      const response = await apiFetch(`/api/contacts/import/${kind}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: text,
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось выполнить импорт');
+      }
+
+      setContactImportSummary({ source: kind, ...data });
+      setStatus(`Импорт завершён: добавлено ${data.imported}, пропущено ${data.skipped}, требует внимания ${data.ambiguous?.length || 0}`);
+      await loadContacts();
+    } catch (error) {
+      setStatus(error.message || 'Ошибка импорта контактов');
+    } finally {
+      setIsImportingContacts(false);
+    }
+  }
+
+  async function handleImportContactsFromBitrix() {
+    setIsImportingContacts(true);
+    setContactImportSummary(null);
+    setStatus('Импортируем из Битрикс24...');
+
+    try {
+      const response = await apiFetch('/api/contacts/import/bitrix', { method: 'POST' });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось выполнить импорт из Битрикс24');
+      }
+
+      setContactImportSummary({ source: 'bitrix', ...data });
+      setStatus(`Импорт из Битрикс24 завершён: добавлено ${data.imported}, обновлено ${data.updated}`);
+      await loadContacts();
+    } catch (error) {
+      setStatus(error.message || 'Ошибка импорта из Битрикс24');
+    } finally {
+      setIsImportingContacts(false);
+    }
+  }
+
   async function handleDelete(recording) {
     const confirmed = window.confirm(`Удалить запись "${recording.title}"?`);
 
@@ -1913,6 +2255,28 @@ function App() {
             {status || 'Настройки будут применены к следующим отправкам протоколов.'}
           </section>
         </section>
+      ) : activePage === 'contacts' ? (
+        <ContactsPage
+          contacts={contacts}
+          isLoadingContacts={isLoadingContacts}
+          contactDraft={contactDraft}
+          setContactDraft={setContactDraft}
+          isCreatingContact={isCreatingContact}
+          contactDuplicate={contactDuplicate}
+          onCreateContact={handleCreateContact}
+          onResolveContactDuplicate={handleResolveContactDuplicate}
+          onCancelContactDuplicate={handleCancelContactDuplicate}
+          getContactDraft={getContactDraft}
+          onContactDraftChange={handleContactDraftChange}
+          savingContactId={savingContactId}
+          deletingContactId={deletingContactId}
+          onSaveContact={handleSaveContact}
+          onDeleteContact={handleDeleteContact}
+          isImportingContacts={isImportingContacts}
+          contactImportSummary={contactImportSummary}
+          onImportFile={handleImportContactsFile}
+          onImportBitrix={handleImportContactsFromBitrix}
+        />
       ) : (
         <>
       <section className="library-controls" aria-label="Фильтры библиотеки">
@@ -2261,14 +2625,24 @@ function App() {
                 <div className="speaker-section-header">
                   <h3>Спикеры</h3>
                   {selectedRecording.speakers?.length ? (
-                    <button
-                      className="button button-secondary"
-                      type="button"
-                      onClick={handleMatchSpeakersToBitrix}
-                      disabled={isLoadingSpeakerMatches}
-                    >
-                      {isLoadingSpeakerMatches ? 'Ищем...' : 'Подобрать по Битрикс24'}
-                    </button>
+                    <div className="speaker-section-actions">
+                      <button
+                        className="button button-secondary"
+                        type="button"
+                        onClick={handleMatchSpeakersToBitrix}
+                        disabled={isLoadingSpeakerMatches}
+                      >
+                        {isLoadingSpeakerMatches ? 'Ищем...' : 'Подобрать по Битрикс24'}
+                      </button>
+                      <button
+                        className="button button-secondary"
+                        type="button"
+                        onClick={handleMatchSpeakersToContacts}
+                        disabled={isLoadingContactMatches}
+                      >
+                        {isLoadingContactMatches ? 'Ищем...' : 'Подобрать по контактам'}
+                      </button>
+                    </div>
                   ) : null}
                 </div>
                 {selectedRecording.speakers?.length ? (
@@ -2279,11 +2653,17 @@ function App() {
                         speaker={speaker}
                         draft={getSpeakerDraft(speaker)}
                         isSaving={savingSpeakerLabel === speaker.label}
+                        isMerging={mergingSpeakerLabel === speaker.label}
                         match={speakerMatches[speaker.label]}
+                        contactMatch={contactSpeakerMatches[speaker.label]}
+                        otherSpeakers={selectedRecording.speakers.filter((item) => item.label !== speaker.label)}
                         isSpeakerSaved={Boolean(speaker.id) && !speakerDrafts[speaker.label]}
                         onDraftChange={updateSpeakerDraft}
                         onApplyCandidate={applySpeakerCandidate}
                         onSave={handleSaveSpeaker}
+                        onAcceptSuggestion={() => handleSpeakerSuggestion(speaker, 'accepted')}
+                        onRejectSuggestion={() => handleSpeakerSuggestion(speaker, 'rejected')}
+                        onMerge={(targetLabel) => handleMergeSpeaker(speaker.label, targetLabel)}
                       />
                     ))}
                   </div>

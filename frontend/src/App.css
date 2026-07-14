@@ -1155,6 +1155,18 @@ audio {
   border-radius: 3px;
 }
 
+.transcript-segment-speaker-select {
+  width: auto;
+  min-height: 30px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-base);
+  color: var(--accent-primary);
+  font-size: 0.82rem;
+  padding: 2px 6px;
+  margin-bottom: 4px;
+}
+
 .transcript-segment-editor {
   width: 100%;
   min-height: 4em;
@@ -1355,6 +1367,218 @@ audio {
 
 .speaker-section-header h3 {
   margin: 0;
+}
+
+.speaker-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.speaker-suggestion {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(251, 146, 60, 0.1);
+  border: 1px solid rgba(251, 146, 60, 0.3);
+}
+
+.speaker-suggestion p {
+  margin: 0;
+}
+
+.confidence-badge {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.confidence-high {
+  color: var(--accent-success);
+  background: rgba(74, 222, 128, 0.14);
+}
+
+.confidence-medium {
+  color: var(--accent-warning);
+  background: rgba(251, 146, 60, 0.14);
+}
+
+.confidence-low {
+  color: var(--accent-danger);
+  background: rgba(248, 113, 113, 0.14);
+}
+
+.speaker-suggestion-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.speaker-suggestion-actions .button {
+  width: auto;
+  flex: 1;
+}
+
+.speaker-merge select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  padding: 0 8px;
+}
+
+.contacts-page {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.contacts-panel {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-card);
+  padding: 16px;
+}
+
+.contacts-panel h2 {
+  margin: 0 0 12px;
+  color: var(--text-primary);
+  font-size: 1.2rem;
+}
+
+.contact-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.contact-form label,
+.contact-row label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.contact-form input,
+.contact-row input {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  padding: 9px 10px;
+  text-transform: none;
+}
+
+.contact-form button {
+  grid-column: 1 / -1;
+}
+
+.contact-duplicate-hint {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(251, 146, 60, 0.1);
+  border: 1px solid rgba(251, 146, 60, 0.3);
+}
+
+.contact-duplicate-hint p {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.contact-duplicate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.contact-duplicate-actions .button {
+  width: auto;
+}
+
+.contact-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.contact-import-actions .button {
+  width: auto;
+  cursor: pointer;
+}
+
+.contact-import-summary {
+  margin-top: 12px;
+  color: var(--text-primary);
+}
+
+.contact-import-summary p {
+  margin: 0 0 6px;
+}
+
+.contact-import-ambiguous ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.contacts-list {
+  display: grid;
+  gap: 10px;
+}
+
+.contact-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+  padding: 10px;
+}
+
+.contact-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+
+.contact-row-actions .button {
+  width: auto;
+}
+
+.contact-source-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  margin-right: auto;
+}
+
+@media (max-width: 900px) {
+  .contact-form,
+  .contact-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .jobs-header .button {

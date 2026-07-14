@@ -13,6 +13,15 @@ function BellIcon() {
   );
 }
 
+function ContactsIcon() {
+  return (
+    <svg className="icon-button-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M4.5 20c1.2-3.6 4-5.5 7.5-5.5s6.3 1.9 7.5 5.5" />
+    </svg>
+  );
+}
+
 function NotificationsMenu({ notifications, unreadNotificationCount, isNotificationsOpen, setIsNotificationsOpen, onOpenNotification }) {
   return (
     <div className="notifications-menu">
@@ -108,7 +117,7 @@ export default function Topbar({
       <div>
         <p className="eyebrow">VoxMate</p>
         <h1 id="page-title">
-          {activePage === 'settings' ? 'Настройки' : 'Записи'}
+          {activePage === 'settings' ? 'Настройки' : activePage === 'contacts' ? 'Контакты' : 'Записи'}
           {isOnline ? null : (
             <span className="offline-badge" role="status" title="Нет подключения к сети — показаны сохранённые данные">
               Офлайн
@@ -124,7 +133,7 @@ export default function Topbar({
         </div>
 
         <div className="actions">
-          {activePage === 'settings' ? (
+          {activePage !== 'library' ? (
             <button className="button button-secondary" type="button" onClick={() => setActivePage('library')}>
               Записи
             </button>
@@ -216,6 +225,16 @@ export default function Topbar({
             title={theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему'}
           >
             <ThemeIcon theme={theme} />
+          </button>
+
+          <button
+            className={`button icon-button ${activePage === 'contacts' ? 'button-primary' : 'button-secondary'}`}
+            type="button"
+            onClick={() => setActivePage('contacts')}
+            aria-label="Контакты"
+            title="Контакты"
+          >
+            <ContactsIcon />
           </button>
 
           <button

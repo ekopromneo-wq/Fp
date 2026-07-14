@@ -7,6 +7,7 @@ import { registerRecordingRoutes } from './recordings.js';
 import { registerUploadSessionRoutes } from './uploadSessionRoutes.js';
 import { cleanupStaleUploadSessions } from './uploadSessions.js';
 import { registerNotificationRoutes, cleanupOldNotifications } from './notifications.js';
+import { registerContactRoutes } from './contacts.js';
 import { runMigrations } from './migrations.js';
 import { ensureAudioBucket } from './storage.js';
 
@@ -84,6 +85,7 @@ registerAuthRoutes(app);
 registerRecordingRoutes(app);
 registerUploadSessionRoutes(app);
 registerNotificationRoutes(app);
+registerContactRoutes(app);
 
 async function main() {
   await runMigrations();

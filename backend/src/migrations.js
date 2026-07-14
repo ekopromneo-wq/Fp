@@ -264,6 +264,32 @@ const migrations = [
       update transcripts set original_text = text, original_segments = segments where original_text is null;
     `,
   },
+  {
+    id: '017_speakers_and_contacts',
+    sql: `
+      alter table recording_speakers add column if not exists suggested_name text;
+      alter table recording_speakers add column if not exists suggestion_confidence text
+        check (suggestion_confidence in ('high', 'medium', 'low') or suggestion_confidence is null);
+      alter table recording_speakers add column if not exists suggestion_evidence text;
+      alter table recording_speakers add column if not exists suggestion_status text not null default 'none'
+        check (suggestion_status in ('none', 'pending', 'accepted', 'rejected'));
+
+      create table if not exists contacts (
+        id uuid primary key default gen_random_uuid(),
+        owner_id uuid not null references app_users(id) on delete cascade,
+        name text not null,
+        organization text,
+        position text,
+        email text,
+        phone text,
+        source text not null default 'manual' check (source in ('manual', 'csv', 'vcard', 'bitrix')),
+        external_id text,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      );
+      create index if not exists contacts_owner_id_idx on contacts(owner_id);
+    `,
+  },
 ];
 
 export async function runMigrations() {

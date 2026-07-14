@@ -12,6 +12,7 @@ import { query, transaction } from './db.js';
 import { sendRecordingEmail } from './email.js';
 import { sendRecordingTelegram } from './telegram.js';
 import { sendTasksToBitrix, matchRecordingSpeakersToBitrix } from './bitrix.js';
+import { matchRecordingSpeakersToContacts } from './contacts.js';
 import { joinMeeting, stopMeeting, isSupportedMeetingUrl } from './meetingBot.js';
 import { detectPlatform, isSupportedMeetingUrl as isSelfHostedMeetingUrl, startRecorderJob, stopRecorderJob } from './recorderBot.js';
 import { Readable } from 'node:stream';
@@ -162,6 +163,10 @@ function mapSpeaker(row) {
     displayName: row.display_name,
     contactName: row.contact_name,
     contactEmail: row.contact_email,
+    suggestedName: row.suggested_name || null,
+    suggestionConfidence: row.suggestion_confidence || null,
+    suggestionEvidence: row.suggestion_evidence || null,
+    suggestionStatus: row.suggestion_status || 'none',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -207,6 +212,10 @@ function mergeSpeakers(transcriptRow, speakerRows) {
         displayName: formatSpeakerLabel(label),
         contactName: null,
         contactEmail: null,
+        suggestedName: null,
+        suggestionConfidence: null,
+        suggestionEvidence: null,
+        suggestionStatus: 'none',
         createdAt: null,
         updatedAt: null,
       });
@@ -771,7 +780,8 @@ export async function getRecording(id, ownerId) {
     ),
     query(
       `
-        select id, recording_id, label, display_name, contact_name, contact_email, created_at, updated_at
+        select id, recording_id, label, display_name, contact_name, contact_email,
+          suggested_name, suggestion_confidence, suggestion_evidence, suggestion_status, created_at, updated_at
         from recording_speakers
         where recording_id = $1
         order by label asc
@@ -941,6 +951,56 @@ export async function updateTranscript(recordingId, ownerId, input = {}) {
   return mapTranscript(result.rows[0]);
 }
 
+// Relabels every segment spoken by sourceLabel to targetLabel (both are
+// diarization labels within the same recording) and drops the now-empty
+// recording_speakers row for sourceLabel - this is what "merging two
+// wrongly-split speakers into one" (US-7.1) actually means structurally,
+// since a segment's speaker is just a string label.
+export async function mergeRecordingSpeakers(recordingId, ownerId, sourceLabel, targetLabel) {
+  if (!sourceLabel || !targetLabel || sourceLabel === targetLabel) {
+    throw new Error('Two different speaker labels are required');
+  }
+
+  const recording = await query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
+    recordingId,
+    ownerId,
+  ]);
+
+  if (recording.rowCount === 0) {
+    return null;
+  }
+
+  const transcriptResult = await query('select id, segments, is_locked from transcripts where recording_id = $1 order by created_at desc limit 1', [
+    recordingId,
+  ]);
+  const transcriptRow = transcriptResult.rows[0];
+
+  if (!transcriptRow) {
+    throw new Error('Transcript not found');
+  }
+
+  if (transcriptRow.is_locked) {
+    throw new Error('Transcript is locked - unlock it before editing');
+  }
+
+  const segments = Array.isArray(transcriptRow.segments) ? transcriptRow.segments : [];
+  const relabeledSegments = segments.map((segment) =>
+    segment.speaker === sourceLabel ? { ...segment, speaker: targetLabel } : segment,
+  );
+  const relabeledText = relabeledSegments.map((segment) => segment.text).join('\n\n');
+
+  await transaction(async (client) => {
+    await client.query('update transcripts set segments = $1::jsonb, text = $2, updated_at = now() where id = $3', [
+      JSON.stringify(relabeledSegments),
+      relabeledText,
+      transcriptRow.id,
+    ]);
+    await client.query('delete from recording_speakers where recording_id = $1 and label = $2', [recordingId, sourceLabel]);
+  });
+
+  return getRecording(recordingId, ownerId);
+}
+
 export async function generateRecordingTitle(recordingId, ownerId) {
   const recording = await getRecording(recordingId, ownerId);
 
@@ -1074,20 +1134,54 @@ export async function deleteRecordingTask(recordingId, taskId, ownerId) {
   return result.rowCount ? { id: result.rows[0].id } : null;
 }
 
+// Reads the existing row first (if any) so a partial PATCH - e.g. an
+// accept/reject click that only sends `{suggestionStatus}` - doesn't wipe
+// out already-set display/contact fields the way a naive
+// always-overwrite-from-input upsert would.
 export async function updateRecordingSpeaker(recordingId, label, ownerId, input) {
   const data = input && typeof input === 'object' ? input : {};
-  const displayName = typeof data.displayName === 'string' && data.displayName.trim() ? data.displayName.trim() : formatSpeakerLabel(label);
-  const contactName = typeof data.contactName === 'string' && data.contactName.trim() ? data.contactName.trim() : null;
-  const contactEmail = typeof data.contactEmail === 'string' && data.contactEmail.trim() ? data.contactEmail.trim() : null;
 
   if (!String(label || '').trim()) {
     throw new Error('Speaker label is required');
   }
 
+  const existing = await query(
+    'select display_name, contact_name, contact_email, suggested_name, suggestion_status from recording_speakers where recording_id = $1 and label = $2',
+    [recordingId, label],
+  );
+  const existingRow = existing.rows[0];
+
+  const hasDisplayName = Object.prototype.hasOwnProperty.call(data, 'displayName');
+  const hasContactName = Object.prototype.hasOwnProperty.call(data, 'contactName');
+  const hasContactEmail = Object.prototype.hasOwnProperty.call(data, 'contactEmail');
+  const hasSuggestionStatus = data.suggestionStatus === 'accepted' || data.suggestionStatus === 'rejected';
+
+  let displayName;
+
+  if (hasDisplayName && typeof data.displayName === 'string' && data.displayName.trim()) {
+    displayName = data.displayName.trim();
+  } else if (hasSuggestionStatus && data.suggestionStatus === 'accepted' && existingRow?.suggested_name) {
+    displayName = existingRow.suggested_name;
+  } else {
+    displayName = existingRow?.display_name || formatSpeakerLabel(label);
+  }
+
+  const contactName = hasContactName
+    ? typeof data.contactName === 'string' && data.contactName.trim()
+      ? data.contactName.trim()
+      : null
+    : existingRow?.contact_name || null;
+  const contactEmail = hasContactEmail
+    ? typeof data.contactEmail === 'string' && data.contactEmail.trim()
+      ? data.contactEmail.trim()
+      : null
+    : existingRow?.contact_email || null;
+  const suggestionStatus = hasSuggestionStatus ? data.suggestionStatus : existingRow?.suggestion_status || 'none';
+
   const result = await query(
     `
-      insert into recording_speakers (recording_id, label, display_name, contact_name, contact_email)
-      select recording.id, $2, $4, $5, $6
+      insert into recording_speakers (recording_id, label, display_name, contact_name, contact_email, suggestion_status)
+      select recording.id, $2, $4, $5, $6, $7
       from recordings recording
       where recording.id = $1
         and (recording.owner_id = $3 or recording.owner_id is null)
@@ -1096,10 +1190,12 @@ export async function updateRecordingSpeaker(recordingId, label, ownerId, input)
         display_name = excluded.display_name,
         contact_name = excluded.contact_name,
         contact_email = excluded.contact_email,
+        suggestion_status = excluded.suggestion_status,
         updated_at = now()
-      returning id, recording_id, label, display_name, contact_name, contact_email, created_at, updated_at
+      returning id, recording_id, label, display_name, contact_name, contact_email,
+        suggested_name, suggestion_confidence, suggestion_evidence, suggestion_status, created_at, updated_at
     `,
-    [recordingId, label, ownerId, displayName, contactName, contactEmail],
+    [recordingId, label, ownerId, displayName, contactName, contactEmail, suggestionStatus],
   );
 
   return result.rowCount ? mapSpeaker(result.rows[0]) : null;
@@ -1724,6 +1820,22 @@ export function registerRecordingRoutes(app) {
     }
   });
 
+  app.get('/api/recordings/:recordingId/contact-speaker-matches', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const recording = await getRecording(c.req.param('recordingId'), user.id);
+
+    if (!recording) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    try {
+      const matches = await matchRecordingSpeakersToContacts(c.req.param('recordingId'), user.id, recording.speakers || []);
+      return c.json({ matches });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to match speakers against contacts' }, 400);
+    }
+  });
+
   app.post('/api/recordings/:recordingId/tasks', requireAuth, async (c) => {
     const user = getAuthUser(c);
     const body = await c.req.json().catch(() => ({}));
@@ -1783,6 +1895,23 @@ export function registerRecordingRoutes(app) {
       return c.json({ speaker });
     } catch (error) {
       return c.json({ error: error.message || 'Failed to update speaker' }, 400);
+    }
+  });
+
+  app.post('/api/recordings/:id/speakers/merge', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+
+    try {
+      const recording = await mergeRecordingSpeakers(c.req.param('id'), user.id, body.sourceLabel, body.targetLabel);
+
+      if (!recording) {
+        return c.json({ error: 'Recording not found' }, 404);
+      }
+
+      return c.json({ recording });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to merge speakers' }, 400);
     }
   });
 
