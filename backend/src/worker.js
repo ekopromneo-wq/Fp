@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import { Worker } from 'bullmq';
+import { Worker, UnrecoverableError } from 'bullmq';
 import { Agent, setGlobalDispatcher } from 'undici';
 import { query, transaction } from './db.js';
 import { runMigrations } from './migrations.js';
@@ -14,6 +14,7 @@ import { transcribeWithKimi } from './kimiDiarizer.js';
 import { transcribeWithAccuratePipeline } from './pipelineDiarizer.js';
 import { transcribeWithSpeech2Text, checkSpeech2TextStatus, fetchSpeech2TextResult, parseSpeech2TextResult } from './speech2textDiarizer.js';
 import { getUserDiarizationConfig } from './auth.js';
+import { summarizeRecording } from './recordings.js';
 
 dotenv.config();
 
@@ -22,8 +23,33 @@ dotenv.config();
 // internal worker process, not user-facing, so disabling the timeout is safe.
 setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0 }));
 
+const CANCELLED_MESSAGE = 'Отменено пользователем';
+
+async function checkCancelled(jobId) {
+  const result = await query('select cancel_requested from processing_jobs where id = $1', [jobId]);
+
+  if (result.rows[0]?.cancel_requested) {
+    // UnrecoverableError tells BullMQ to skip its remaining retry attempts -
+    // a user-requested cancellation should stop immediately, not get
+    // auto-retried like a transient failure.
+    throw new UnrecoverableError(CANCELLED_MESSAGE);
+  }
+}
+
 async function processRecording(data) {
   const { jobId, recordingId } = data;
+
+  await checkCancelled(jobId);
+
+  // Checkpoint: BullMQ retries re-run this same job from the top. If a
+  // transcript already exists from an earlier (partially successful)
+  // attempt, skip straight to summarization instead of re-transcribing -
+  // this is what makes a summarization-only failure retry as a
+  // summarization-only retry (US-4.3), without a second job/queue.
+  const existingTranscript = await query('select id from transcripts where recording_id = $1 order by created_at desc limit 1', [
+    recordingId,
+  ]);
+  const alreadyTranscribed = existingTranscript.rowCount > 0;
 
   await transaction(async (client) => {
     await client.query(
@@ -38,10 +64,10 @@ async function processRecording(data) {
     await client.query(
       `
         update recordings
-        set status = 'processing', updated_at = now()
+        set status = $2, updated_at = now()
         where id = $1
       `,
-      [recordingId],
+      [recordingId, alreadyTranscribed ? 'summarizing' : 'transcribing'],
     );
   });
 
@@ -55,6 +81,17 @@ async function processRecording(data) {
   );
   const title = recording.rows[0]?.title || 'recording';
   const file = recording.rows[0];
+
+  if (alreadyTranscribed) {
+    await summarizeRecording(recordingId, file?.owner_id);
+
+    await transaction(async (client) => {
+      await client.query(`update processing_jobs set status = 'done', error = null, updated_at = now() where id = $1`, [jobId]);
+      await client.query(`update recordings set status = 'done', updated_at = now() where id = $1`, [recordingId]);
+    });
+    return;
+  }
+
   let audioBuffer = file?.storage_key ? await getRecordingAudioBuffer(file.storage_key) : null;
 
   if (audioBuffer && isVideoContainer(file)) {
@@ -148,7 +185,18 @@ async function processRecording(data) {
       `,
       [recordingId, jobId, resolvedLanguage, finalText, JSON.stringify(finalSegments)],
     );
+  });
 
+  // Stage boundary: if cancellation was requested while transcription was
+  // in flight, stop here instead of starting the protocol/tasks LLM call -
+  // the transcript we just wrote stays, so a future "restart" would resume
+  // straight into summarization rather than re-transcribing.
+  await checkCancelled(jobId);
+
+  await query(`update recordings set status = 'summarizing', updated_at = now() where id = $1`, [recordingId]);
+  await summarizeRecording(recordingId, file?.owner_id);
+
+  await transaction(async (client) => {
     await client.query(
       `
         update processing_jobs
@@ -278,6 +326,7 @@ async function main() {
     },
     {
       connection: createRedisConnection(),
+      concurrency: Number(process.env.RECORDING_WORKER_CONCURRENCY || 3),
     },
   );
 
@@ -288,7 +337,14 @@ async function main() {
   worker.on('failed', async (job, error) => {
     console.error(`Failed recording job ${job?.id}:`, error);
 
-    if (job && job.attemptsMade < (job.opts.attempts || 1)) {
+    // UnrecoverableError (thrown by checkCancelled) skips BullMQ's own
+    // retry count, so it must also skip this attemptsMade gate - otherwise
+    // a cancellation on an early attempt would be silently swallowed here
+    // and never persisted as 'failed'.
+    const isCancelled = error instanceof UnrecoverableError && error.message === CANCELLED_MESSAGE;
+    const isFinalAttempt = !job || isCancelled || job.attemptsMade >= (job.opts.attempts || 1);
+
+    if (!isFinalAttempt) {
       return;
     }
 
@@ -303,12 +359,13 @@ async function main() {
           [error.message, job.data.jobId],
         );
 
+        // A user cancellation isn't a "the system is broken" failure, so it
+        // shouldn't count toward the repeated-failure/critical threshold
+        // (US-4.3) that offers the user a support contact.
         await client.query(
-          `
-            update recordings
-            set status = 'failed', updated_at = now()
-            where id = $1
-          `,
+          isCancelled
+            ? `update recordings set status = 'failed', updated_at = now() where id = $1`
+            : `update recordings set status = 'failed', failure_count = failure_count + 1, updated_at = now() where id = $1`,
           [job.data.recordingId],
         );
       });

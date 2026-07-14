@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import Topbar from './components/Topbar.jsx';
 import DiarizationSettingsPanel from './components/settings/DiarizationSettingsPanel.jsx';
@@ -16,6 +16,7 @@ import useIsMobile from './hooks/useIsMobile.js';
 import useUiStore from './store/uiStore.js';
 import VoicePanel from './components/VoicePanel/VoicePanel.jsx';
 import { formatDate, formatFileSize } from './lib/format.js';
+import { getStatusLabel } from './lib/statusLabels.js';
 import {
   isNetworkFailure,
   cacheRecordingsList,
@@ -152,7 +153,46 @@ function downloadTextFile(filename, text) {
 }
 
 function isProcessingStatus(status) {
-  return status === 'queued' || status === 'processing';
+  return status === 'queued' || status === 'processing' || status === 'transcribing' || status === 'summarizing';
+}
+
+// No ASR/diarization provider used here exposes real transcription
+// progress (see backend/src/worker.js) - this is a time-based estimate,
+// not a true percentage, so it's deliberately capped below 100% until the
+// status actually flips away from 'transcribing'.
+const TRANSCRIBE_REAL_TIME_FACTOR = 0.3;
+
+function TranscribingProgress({ recordingId, status, durationSeconds }) {
+  const startRef = useRef(null);
+  const [, forceTick] = useState(0);
+
+  useEffect(() => {
+    if (status !== 'transcribing') {
+      startRef.current = null;
+      return undefined;
+    }
+
+    if (startRef.current?.id !== recordingId) {
+      startRef.current = { id: recordingId, startedAt: Date.now() };
+    }
+
+    const intervalId = window.setInterval(() => forceTick((tick) => tick + 1), 1000);
+    return () => window.clearInterval(intervalId);
+  }, [status, recordingId]);
+
+  if (status !== 'transcribing' || !startRef.current || !durationSeconds) {
+    return null;
+  }
+
+  const elapsedMs = Date.now() - startRef.current.startedAt;
+  const estimatedTotalMs = durationSeconds * TRANSCRIBE_REAL_TIME_FACTOR * 1000;
+  const percent = Math.min(95, Math.round((elapsedMs / estimatedTotalMs) * 100));
+
+  return (
+    <span className="transcribe-progress" title="Оценка по длительности записи, не точный прогресс провайдера">
+      ⏳ {percent}%
+    </span>
+  );
 }
 
 function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage }) {
@@ -281,6 +321,7 @@ function App() {
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [processingId, setProcessingId] = useState(null);
+  const [cancellingId, setCancellingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [isJobsCollapsed, setIsJobsCollapsed] = useState(false);
 
@@ -313,10 +354,7 @@ function App() {
   const hasRecordings = recordings.length > 0;
   const sortedRecordings = useMemo(() => recordings, [recordings]);
   const canProcessSelected =
-    selectedRecording &&
-    selectedRecording.status !== 'queued' &&
-    selectedRecording.status !== 'processing' &&
-    processingId !== selectedRecording.id;
+    selectedRecording && !isProcessingStatus(selectedRecording.status) && processingId !== selectedRecording.id;
   const canExportSelected =
     selectedRecording &&
     (selectedRecording.summary || selectedRecording.transcript || selectedRecording.tasks?.length || selectedRecording.speakers?.length);
@@ -1117,6 +1155,37 @@ function App() {
     }
   }
 
+  async function handleCancelProcessing(recording) {
+    if (!recording) {
+      return;
+    }
+
+    setCancellingId(recording.id);
+    setStatus(`Отменяем обработку "${recording.title}"...`);
+
+    try {
+      const response = await apiFetch(`/api/recordings/${recording.id}/jobs/cancel`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error('Не удалось отменить обработку');
+      }
+
+      // Cancellation of an already-running job is cooperative - the worker
+      // stops at its next checkpoint rather than instantly, so the status
+      // right after this call may still briefly show as processing until
+      // the next poll picks up the final 'failed' state.
+      await loadRecordings(recording.id);
+      await loadRecordingDetail(recording.id);
+      setStatus(`Отмена "${recording.title}" запрошена`);
+    } catch (error) {
+      setStatus(error.message || 'Ошибка отмены обработки');
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
   async function handleSummarize(recording) {
     if (!recording?.transcript) {
       setStatus('Сначала нужна стенограмма');
@@ -1811,8 +1880,26 @@ function App() {
                   <p className="eyebrow">Детали</p>
                   <h2>{selectedRecording.title}</h2>
                 </div>
-                <span className={`status-pill status-${selectedRecording.status}`}>{selectedRecording.status}</span>
+                <div className="detail-header-status">
+                  <span className={`status-pill status-${selectedRecording.status}`}>{getStatusLabel(selectedRecording.status)}</span>
+                  <TranscribingProgress
+                    recordingId={selectedRecording.id}
+                    status={selectedRecording.status}
+                    durationSeconds={selectedRecording.durationSeconds}
+                  />
+                </div>
               </div>
+
+              {selectedRecording.status === 'failed' && selectedRecording.failureCount > 1 ? (
+                <div className="critical-failure-banner" role="alert">
+                  <p>
+                    Похоже, с этой записью систематическая проблема — обработка не удалась уже несколько раз подряд, автоматический
+                    перезапуск не помогает.
+                    {selectedRecording.jobs?.[0]?.error ? ` Последняя ошибка: ${selectedRecording.jobs[0].error}` : ''} Если это
+                    повторится, обратитесь в поддержку — опишите название записи и текст ошибки выше.
+                  </p>
+                </div>
+              ) : null}
 
               {selectedRecording.source === 'meeting_bot' ? (
                 <section className="detail-section meeting-bot-status">
@@ -1846,8 +1933,22 @@ function App() {
                   onClick={() => handleProcess(selectedRecording)}
                   disabled={!canProcessSelected}
                 >
-                  {processingId === selectedRecording.id ? 'Запускаем...' : 'Запустить обработку'}
+                  {processingId === selectedRecording.id
+                    ? 'Запускаем...'
+                    : selectedRecording.status === 'failed'
+                      ? 'Перезапустить обработку'
+                      : 'Запустить обработку'}
                 </button>
+                {isProcessingStatus(selectedRecording.status) ? (
+                  <button
+                    className="button button-danger"
+                    type="button"
+                    onClick={() => handleCancelProcessing(selectedRecording)}
+                    disabled={cancellingId === selectedRecording.id}
+                  >
+                    {cancellingId === selectedRecording.id ? 'Отменяем...' : 'Отменить'}
+                  </button>
+                ) : null}
                 <div className="summary-length-toggle" role="group" aria-label="Длина резюме">
                   {[
                     { value: 'brief', label: 'Кратко' },

@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile, appendFile } from 'node:fs/promises';
 import path from 'node:path';
 import { query } from './db.js';
-import { attachRecordingAudio } from './recordings.js';
+import { attachRecordingAudio, enqueueRecording } from './recordings.js';
 
 const STAGING_DIR = process.env.UPLOAD_STAGING_DIR || path.join(process.cwd(), 'data', 'upload-staging');
 const DEFAULT_CHUNK_SIZE_BYTES = Number(process.env.UPLOAD_CHUNK_SIZE_BYTES || 5 * 1024 * 1024);
@@ -170,7 +170,13 @@ export async function completeUploadSession(recordingId, ownerId) {
   };
 
   try {
-    return await attachRecordingAudio(recordingId, fileLike, ownerId);
+    const recording = await attachRecordingAudio(recordingId, fileLike, ownerId);
+    // The upload conveyor is meant to run end-to-end without a manual
+    // "Запустить обработку" click (US-4.1/4.2) - the meeting-bot recording
+    // path already auto-enqueues itself (see recordings.js), this is the
+    // equivalent trigger for the mic/file-picker upload path.
+    await enqueueRecording(recordingId, ownerId);
+    return recording;
   } finally {
     await deleteSessionRow(session);
   }

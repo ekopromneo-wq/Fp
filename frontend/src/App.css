@@ -686,9 +686,33 @@ h3 {
 }
 
 .status-processing,
-.status-queued {
+.status-queued,
+.status-transcribing,
+.status-summarizing {
   color: var(--accent-warning);
   background: rgba(251, 146, 60, 0.14);
+}
+
+.transcribe-progress {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.critical-failure-banner {
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin: 12px 0;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.critical-failure-banner p {
+  margin: 0;
 }
 
 .sync-pill {
@@ -784,6 +808,13 @@ h3 {
   overflow-wrap: anywhere;
   color: var(--text-primary);
   font-size: 1.15rem;
+}
+
+.detail-header-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
 }
 
 .detail-actions {

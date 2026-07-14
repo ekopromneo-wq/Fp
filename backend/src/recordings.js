@@ -47,6 +47,7 @@ function mapRecording(row) {
     meetingUrl: row.meeting_url || null,
     meetingBotTaskId: row.meeting_bot_task_id || null,
     recorderEngine: row.recorder_engine || null,
+    failureCount: row.failure_count || 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -70,6 +71,7 @@ function mapJob(row) {
     queueJobId: row.queue_job_id,
     status: row.status,
     error: row.error,
+    cancelRequested: Boolean(row.cancel_requested),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -407,7 +409,7 @@ export async function listRecordings(ownerId, filters = {}) {
         recordings.id, recordings.owner_id, recordings.project_id, recordings.title, recordings.status,
         recordings.source, recordings.duration_seconds, recordings.storage_key, recordings.created_at,
         recordings.updated_at, recordings.original_filename, recordings.mime_type, recordings.file_size_bytes,
-        recordings.auto_named, recordings.meeting_url, recordings.meeting_bot_task_id,
+        recordings.auto_named, recordings.meeting_url, recordings.meeting_bot_task_id, recordings.failure_count,
         projects.name as project_name, projects.color as project_color
       from recordings
       left join projects on projects.id = recordings.project_id
@@ -686,7 +688,7 @@ export async function getRecording(id, ownerId) {
     `
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
       , original_filename, mime_type, file_size_bytes, auto_named, project_id, meeting_url, meeting_bot_task_id,
-        recorder_engine,
+        recorder_engine, failure_count,
         (select name from projects where projects.id = recordings.project_id) as project_name,
         (select color from projects where projects.id = recordings.project_id) as project_color
       from recordings
@@ -702,7 +704,7 @@ export async function getRecording(id, ownerId) {
   const [jobs, transcript, summary, tasks, speakers] = await Promise.all([
     query(
       `
-        select id, recording_id, queue_job_id, status, error, created_at, updated_at
+        select id, recording_id, queue_job_id, status, error, cancel_requested, created_at, updated_at
         from processing_jobs
         where recording_id = $1
         order by created_at desc
@@ -1115,6 +1117,68 @@ export async function enqueueRecording(recordingId, ownerId) {
   return mapJob(updated.rows[0]);
 }
 
+// Cooperative cancellation: if the BullMQ job hasn't been picked up by the
+// worker yet, remove it outright and fail immediately. If it's already
+// running (mid ASR/LLM call), only set the flag - the worker checks it at
+// stage boundaries (see worker.js's checkCancelled) and stops there, rather
+// than aborting an in-flight external HTTP call.
+export async function cancelRecordingProcessing(recordingId, ownerId) {
+  const recording = await query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
+    recordingId,
+    ownerId,
+  ]);
+
+  if (recording.rowCount === 0) {
+    return null;
+  }
+
+  const jobRow = await query(
+    `
+      select id, queue_job_id
+      from processing_jobs
+      where recording_id = $1 and status in ('queued', 'processing')
+      order by created_at desc
+      limit 1
+    `,
+    [recordingId],
+  );
+
+  if (jobRow.rowCount === 0) {
+    return getRecording(recordingId, ownerId);
+  }
+
+  const { id: jobId, queue_job_id: queueJobId } = jobRow.rows[0];
+
+  await query('update processing_jobs set cancel_requested = true, updated_at = now() where id = $1', [jobId]);
+
+  let removedBeforeStart = false;
+
+  if (queueJobId) {
+    const queueJob = await queue.getJob(queueJobId);
+
+    if (queueJob) {
+      const state = await queueJob.getState();
+
+      if (state === 'waiting' || state === 'delayed') {
+        await queueJob.remove();
+        removedBeforeStart = true;
+      }
+    }
+  }
+
+  if (removedBeforeStart) {
+    await transaction(async (client) => {
+      await client.query(`update processing_jobs set status = 'failed', error = $2, updated_at = now() where id = $1`, [
+        jobId,
+        'Отменено пользователем',
+      ]);
+      await client.query(`update recordings set status = 'failed', updated_at = now() where id = $1`, [recordingId]);
+    });
+  }
+
+  return getRecording(recordingId, ownerId);
+}
+
 export async function attachRecordingAudio(recordingId, file, ownerId) {
   const recording = await query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
     recordingId,
@@ -1372,6 +1436,12 @@ export function registerRecordingRoutes(app) {
           return c.json({ error: 'Recording not found' }, 404);
         }
 
+        // Same auto-enqueue as the chunked-upload completion path
+        // (uploadSessions.js) - the pipeline runs end-to-end without a
+        // manual "Запустить обработку" click regardless of which upload
+        // route was used.
+        await enqueueRecording(c.req.param('id'), user.id);
+
         return c.json({ recording });
       } catch (error) {
         if (error instanceof UploadValidationError) {
@@ -1392,6 +1462,17 @@ export function registerRecordingRoutes(app) {
     }
 
     return c.json({ job }, 202);
+  });
+
+  app.post('/api/recordings/:id/jobs/cancel', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const recording = await cancelRecordingProcessing(c.req.param('id'), user.id);
+
+    if (!recording) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    return c.json({ recording });
   });
 
   app.post('/api/recordings/:id/summary', requireAuth, async (c) => {

@@ -225,6 +225,17 @@ const migrations = [
       );
     `,
   },
+  {
+    id: '014_pipeline_stages',
+    sql: `
+      alter table recordings drop constraint recordings_status_check;
+      alter table recordings add constraint recordings_status_check
+        check (status in ('uploaded', 'queued', 'processing', 'transcribing', 'summarizing', 'done', 'failed'));
+
+      alter table recordings add column if not exists failure_count integer not null default 0;
+      alter table processing_jobs add column if not exists cancel_requested boolean not null default false;
+    `,
+  },
 ];
 
 export async function runMigrations() {

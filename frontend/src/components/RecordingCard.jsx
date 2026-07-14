@@ -1,4 +1,5 @@
 import { formatDate, formatFileSize } from '../lib/format.js';
+import { getStatusLabel } from '../lib/statusLabels.js';
 import useSwipeAction from '../hooks/useSwipeAction.js';
 
 // syncState is a client-only concept (never sent to/read from the backend)
@@ -72,7 +73,9 @@ export default function RecordingCard({ recording, isSelected, onSelect, onDelet
             <div className="recording-meta">
               <span>{formatFileSize(recording.fileSizeBytes)}</span>
               <span>{formatDate(recording.createdAt)}</span>
-              {recording.status ? <span className={`status-pill status-${recording.status}`}>{recording.status}</span> : null}
+              {recording.status ? (
+                <span className={`status-pill status-${recording.status}`}>{getStatusLabel(recording.status)}</span>
+              ) : null}
               <SyncPill syncState={recording.syncState} syncProgress={recording.syncProgress} syncError={recording.syncError} />
               {recording.project ? (
                 <span className="project-chip" style={{ '--project-color': recording.project.color }}>
