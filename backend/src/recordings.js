@@ -15,13 +15,39 @@ import { sendTasksToBitrix, matchRecordingSpeakersToBitrix } from './bitrix.js';
 import { joinMeeting, stopMeeting, isSupportedMeetingUrl } from './meetingBot.js';
 import { detectPlatform, isSupportedMeetingUrl as isSelfHostedMeetingUrl, startRecorderJob, stopRecorderJob } from './recorderBot.js';
 import { Readable } from 'node:stream';
-import { deleteRecordingAudio, getRecordingAudioStream, saveRecordingAudio } from './storage.js';
+import { deleteRecordingAudio, getRecordingAudioRange, getRecordingAudioStream, saveRecordingAudio } from './storage.js';
 import { UploadValidationError, probeUploadedAudio } from './uploadValidation.js';
 
 const queue = createRecordingQueue();
 // Matches the product spec's stated max upload size (1 GB); override via env
 // if a deployment genuinely needs more.
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 1024 * 1024 * 1024);
+
+// Only single-range "bytes=start-end"/"bytes=start-" requests are
+// supported (exactly what browsers send for <audio> scrubbing) - multi-range
+// and unrecognized units just fall back to a full 200 response.
+function parseRangeHeader(headerValue, totalSize) {
+  if (!headerValue || !totalSize) {
+    return null;
+  }
+
+  const match = /^bytes=(\d+)-(\d*)$/.exec(headerValue.trim());
+
+  if (!match) {
+    return null;
+  }
+
+  const start = Number(match[1]);
+  const end = match[2] ? Number(match[2]) : totalSize - 1;
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= totalSize) {
+    return null;
+  }
+
+  const clampedEnd = Math.min(end, totalSize - 1);
+
+  return { offset: start, length: clampedEnd - start + 1 };
+}
 
 function mapRecording(row) {
   return {
@@ -86,6 +112,9 @@ function mapTranscript(row) {
         language: row.language,
         text: row.text,
         segments: row.segments,
+        originalText: row.original_text,
+        originalSegments: row.original_segments,
+        isLocked: Boolean(row.is_locked),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       }
@@ -713,7 +742,7 @@ export async function getRecording(id, ownerId) {
     ),
     query(
       `
-        select id, recording_id, job_id, language, text, segments, created_at, updated_at
+        select id, recording_id, job_id, language, text, segments, original_text, original_segments, is_locked, created_at, updated_at
         from transcripts
         where recording_id = $1
         order by created_at desc
@@ -858,6 +887,58 @@ export async function updateRecordingMetadata(recordingId, ownerId, input) {
   );
 
   return result.rowCount ? mapRecording(result.rows[0]) : null;
+}
+
+// original_text/original_segments are populated once at insert time
+// (worker.js) and never touched here - they're the immutable AI-produced
+// version, kept alongside whatever the user has since edited.
+export async function updateTranscript(recordingId, ownerId, input = {}) {
+  const data = input && typeof input === 'object' ? input : {};
+  const hasText = Object.prototype.hasOwnProperty.call(data, 'text');
+  const hasSegments = Object.prototype.hasOwnProperty.call(data, 'segments');
+  const hasLocked = Object.prototype.hasOwnProperty.call(data, 'locked');
+
+  const recording = await query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
+    recordingId,
+    ownerId,
+  ]);
+
+  if (recording.rowCount === 0) {
+    return null;
+  }
+
+  const transcriptResult = await query('select id, is_locked from transcripts where recording_id = $1 order by created_at desc limit 1', [
+    recordingId,
+  ]);
+  const transcriptRow = transcriptResult.rows[0];
+
+  if (!transcriptRow) {
+    throw new Error('Transcript not found');
+  }
+
+  if (transcriptRow.is_locked && (hasText || hasSegments)) {
+    throw new Error('Transcript is locked - unlock it before editing');
+  }
+
+  const text = hasText ? String(data.text ?? '') : null;
+  const segments = hasSegments ? data.segments : null;
+  const locked = hasLocked ? Boolean(data.locked) : null;
+
+  const result = await query(
+    `
+      update transcripts
+      set
+        text = case when $2 then $3 else transcripts.text end,
+        segments = case when $4 then $5::jsonb else transcripts.segments end,
+        is_locked = case when $6 then $7 else transcripts.is_locked end,
+        updated_at = now()
+      where transcripts.id = $1
+      returning id, recording_id, job_id, language, text, segments, original_text, original_segments, is_locked, created_at, updated_at
+    `,
+    [transcriptRow.id, hasText, text, hasSegments, JSON.stringify(segments), hasLocked, locked],
+  );
+
+  return mapTranscript(result.rows[0]);
 }
 
 export async function generateRecordingTitle(recordingId, ownerId) {
@@ -1024,7 +1105,10 @@ export async function updateRecordingSpeaker(recordingId, label, ownerId, input)
   return result.rowCount ? mapSpeaker(result.rows[0]) : null;
 }
 
-export async function getRecordingAudio(id, ownerId) {
+// Metadata-only lookup (no MinIO call) - used to know the total file size
+// before deciding whether/how to open a stream, so a Range request never
+// has to fetch the whole object just to find out how big it is.
+export async function getRecordingAudioMeta(id, ownerId) {
   const result = await query(
     `
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at,
@@ -1035,21 +1119,28 @@ export async function getRecordingAudio(id, ownerId) {
     [id, ownerId],
   );
 
-  if (result.rowCount === 0) {
+  return result.rowCount ? mapRecording(result.rows[0]) : null;
+}
+
+export async function getRecordingAudio(id, ownerId, range = null) {
+  const recording = await getRecordingAudioMeta(id, ownerId);
+
+  if (!recording) {
     return null;
   }
 
-  const recording = result.rows[0];
-
-  if (!recording.storage_key) {
-    return { recording: mapRecording(recording), stream: null };
+  if (!recording.storageKey) {
+    return { recording, stream: null };
   }
 
-  const stream = await getRecordingAudioStream(recording.storage_key);
+  const stream = range
+    ? await getRecordingAudioRange(recording.storageKey, range.offset, range.length)
+    : await getRecordingAudioStream(recording.storageKey);
 
   return {
-    recording: mapRecording(recording),
+    recording,
     stream,
+    range,
   };
 }
 
@@ -1357,13 +1448,21 @@ export function registerRecordingRoutes(app) {
 
   app.get('/api/recordings/:id/audio', requireAuth, async (c) => {
     const user = getAuthUser(c);
-    const audio = await getRecordingAudio(c.req.param('id'), user.id);
+    const meta = await getRecordingAudioMeta(c.req.param('id'), user.id);
 
-    if (!audio) {
+    if (!meta) {
       return c.json({ error: 'Recording not found' }, 404);
     }
 
-    if (!audio.stream) {
+    if (!meta.storageKey) {
+      return c.json({ error: 'Recording audio not found' }, 404);
+    }
+
+    const totalSize = meta.fileSizeBytes;
+    const range = parseRangeHeader(c.req.header('Range'), totalSize);
+    const audio = await getRecordingAudio(c.req.param('id'), user.id, range);
+
+    if (!audio?.stream) {
       return c.json({ error: 'Recording audio not found' }, 404);
     }
 
@@ -1371,10 +1470,17 @@ export function registerRecordingRoutes(app) {
     const headers = {
       'Content-Type': audio.recording.mimeType || 'application/octet-stream',
       'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(filename)}`,
+      'Accept-Ranges': 'bytes',
     };
 
-    if (audio.recording.fileSizeBytes) {
-      headers['Content-Length'] = String(audio.recording.fileSizeBytes);
+    if (range) {
+      headers['Content-Range'] = `bytes ${range.offset}-${range.offset + range.length - 1}/${totalSize}`;
+      headers['Content-Length'] = String(range.length);
+      return c.body(Readable.toWeb(audio.stream), 206, headers);
+    }
+
+    if (totalSize) {
+      headers['Content-Length'] = String(totalSize);
     }
 
     return c.body(Readable.toWeb(audio.stream), 200, headers);
@@ -1394,6 +1500,23 @@ export function registerRecordingRoutes(app) {
       return c.json({ recording });
     } catch (error) {
       return c.json({ error: error.message || 'Failed to update recording' }, 400);
+    }
+  });
+
+  app.patch('/api/recordings/:id/transcript', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+
+    try {
+      const transcript = await updateTranscript(c.req.param('id'), user.id, body);
+
+      if (!transcript) {
+        return c.json({ error: 'Recording not found' }, 404);
+      }
+
+      return c.json({ transcript });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to update transcript' }, 400);
     }
   });
 

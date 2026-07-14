@@ -12,6 +12,7 @@ import SpeakerRow from './components/SpeakerRow.jsx';
 import TaskForm from './components/TaskForm.jsx';
 import TaskRow from './components/TaskRow.jsx';
 import RecordingCard from './components/RecordingCard.jsx';
+import TranscriptView from './components/TranscriptView.jsx';
 import useMicRecorder from './hooks/useMicRecorder.js';
 import useIsMobile from './hooks/useIsMobile.js';
 import useUiStore from './store/uiStore.js';
@@ -1322,6 +1323,29 @@ function App() {
     }
   }
 
+  async function handleUpdateTranscript(payload) {
+    const recording = selectedRecording;
+
+    if (!recording) {
+      throw new Error('Запись не выбрана');
+    }
+
+    const response = await apiFetch(`/api/recordings/${recording.id}/transcript`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Не удалось обновить стенограмму');
+    }
+
+    setSelectedRecording((current) => (current?.id === recording.id ? { ...current, transcript: data.transcript } : current));
+    setRecordings((current) => current.map((item) => (item.id === recording.id ? { ...item, transcript: data.transcript } : item)));
+
+    return data.transcript;
+  }
+
   async function handleCopyExport(recording) {
     if (!recording) {
       return;
@@ -2216,25 +2240,21 @@ function App() {
                 </div>
               </dl>
 
-              {selectedRecording.storageKey ? (
-                <section className="detail-section">
-                  <h3>Аудио</h3>
-                  <audio controls preload="metadata" src={getAudioUrl(selectedRecording)} />
-                </section>
-              ) : (
+              {!selectedRecording.storageKey ? (
                 <section className="detail-section muted-section">
                   <h3>Аудио</h3>
                   <p>К этой записи пока не прикреплен файл.</p>
                 </section>
-              )}
+              ) : null}
 
               <section className="detail-section detail-section-wide">
                 <h3>Стенограмма</h3>
-                {selectedRecording.transcript ? (
-                  <p className="transcript-text">{selectedRecording.transcript.text}</p>
-                ) : (
-                  <p className="muted-text">Стенограммы пока нет. Запусти обработку записи.</p>
-                )}
+                <TranscriptView
+                  recording={selectedRecording}
+                  audioUrl={getAudioUrl(selectedRecording)}
+                  onUpdateTranscript={handleUpdateTranscript}
+                  setStatus={setStatus}
+                />
               </section>
 
               <section className="detail-section">

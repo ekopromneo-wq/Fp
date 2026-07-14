@@ -254,6 +254,16 @@ const migrations = [
       create index if not exists notifications_owner_id_idx on notifications(owner_id, created_at desc);
     `,
   },
+  {
+    id: '016_transcript_editing',
+    sql: `
+      alter table transcripts add column if not exists original_text text;
+      alter table transcripts add column if not exists original_segments jsonb;
+      alter table transcripts add column if not exists is_locked boolean not null default false;
+
+      update transcripts set original_text = text, original_segments = segments where original_text is null;
+    `,
+  },
 ];
 
 export async function runMigrations() {

@@ -182,8 +182,8 @@ async function processRecording(data) {
   await transaction(async (client) => {
     await client.query(
       `
-        insert into transcripts (recording_id, job_id, language, text, segments)
-        values ($1, $2, $3, $4, $5::jsonb)
+        insert into transcripts (recording_id, job_id, language, text, segments, original_text, original_segments)
+        values ($1, $2, $3, $4, $5::jsonb, $4, $5::jsonb)
       `,
       [recordingId, jobId, resolvedLanguage, finalText, JSON.stringify(finalSegments)],
     );
@@ -243,8 +243,8 @@ async function ingestCompletedMeeting(recording, statusBody) {
     }
 
     await client.query(
-      `insert into transcripts (recording_id, job_id, language, text, segments)
-       select $1, id, $2, $3, $4::jsonb from processing_jobs where recording_id = $1 order by created_at desc limit 1`,
+      `insert into transcripts (recording_id, job_id, language, text, segments, original_text, original_segments)
+       select $1, id, $2, $3, $4::jsonb, $3, $4::jsonb from processing_jobs where recording_id = $1 order by created_at desc limit 1`,
       [recording.id, language, finalText, JSON.stringify(finalSegments)],
     );
 

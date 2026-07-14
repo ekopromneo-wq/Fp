@@ -84,6 +84,18 @@ export async function getRecordingAudioStream(storageKey) {
   return storageClient.getObject(audioBucket, storageKey);
 }
 
+// Needed for the audio player's speed/seek controls (US-6.2) - without
+// range support, scrubbing to a later point in a large recording means the
+// browser has already buffered (or is still waiting on) everything before
+// it, which is slow and wasteful for multi-hour files.
+export async function getRecordingAudioRange(storageKey, offset, length) {
+  if (!storageKey) {
+    return null;
+  }
+
+  return storageClient.getPartialObject(audioBucket, storageKey, offset, length);
+}
+
 export async function getRecordingAudioBuffer(storageKey) {
   const stream = await getRecordingAudioStream(storageKey);
 
