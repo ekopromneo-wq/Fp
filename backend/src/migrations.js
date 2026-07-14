@@ -290,6 +290,26 @@ const migrations = [
       create index if not exists contacts_owner_id_idx on contacts(owner_id);
     `,
   },
+  {
+    id: '018_meeting_protocol',
+    sql: `
+      alter table recordings add column if not exists meeting_type text not null default 'meeting'
+        check (meeting_type in ('planning', 'negotiation', 'interview', 'project', 'meeting', 'freeform'));
+
+      alter table recording_summaries add column if not exists executive_summary text;
+      alter table recording_summaries add column if not exists original_summary jsonb;
+      alter table recording_summaries add column if not exists is_locked boolean not null default false;
+
+      update recording_summaries
+      set original_summary = jsonb_build_object(
+        'summary', summary,
+        'executiveSummary', executive_summary,
+        'protocol', protocol,
+        'topics', topics
+      )
+      where original_summary is null;
+    `,
+  },
 ];
 
 export async function runMigrations() {

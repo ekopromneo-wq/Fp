@@ -13,11 +13,18 @@ import { sendRecordingEmail } from './email.js';
 import { sendRecordingTelegram } from './telegram.js';
 import { sendTasksToBitrix, matchRecordingSpeakersToBitrix } from './bitrix.js';
 import { matchRecordingSpeakersToContacts } from './contacts.js';
+import {
+  MEETING_TYPES,
+  PROTOCOL_ALL_SECTIONS,
+  PROTOCOL_SECTION_LABELS,
+  getProtocolTemplate,
+} from './protocolTemplates.js';
 import { joinMeeting, stopMeeting, isSupportedMeetingUrl } from './meetingBot.js';
 import { detectPlatform, isSupportedMeetingUrl as isSelfHostedMeetingUrl, startRecorderJob, stopRecorderJob } from './recorderBot.js';
 import { Readable } from 'node:stream';
 import { deleteRecordingAudio, getRecordingAudioRange, getRecordingAudioStream, saveRecordingAudio } from './storage.js';
 import { UploadValidationError, probeUploadedAudio } from './uploadValidation.js';
+import { transcribeWithOpenRouter } from './openrouterAsr.js';
 
 const queue = createRecordingQueue();
 // Matches the product spec's stated max upload size (1 GB); override via env
@@ -65,6 +72,8 @@ function mapRecording(row) {
     title: row.title,
     status: row.status,
     source: row.source,
+    meetingType: row.meeting_type || 'meeting',
+    protocolTemplate: getProtocolTemplate(row.meeting_type),
     durationSeconds: row.duration_seconds,
     storageKey: row.storage_key,
     originalFilename: row.original_filename,
@@ -122,6 +131,29 @@ function mapTranscript(row) {
     : null;
 }
 
+function summaryIsEdited(row) {
+  const original = row.original_summary;
+
+  if (!original || typeof original !== 'object') {
+    return false;
+  }
+
+  const current = {
+    summary: row.summary || '',
+    executiveSummary: row.executive_summary || null,
+    protocol: normalizeProtocol(row.protocol),
+    topics: row.topics || [],
+  };
+  const snapshot = {
+    summary: original.summary || '',
+    executiveSummary: original.executiveSummary || null,
+    protocol: normalizeProtocol(original.protocol),
+    topics: original.topics || [],
+  };
+
+  return JSON.stringify(current) !== JSON.stringify(snapshot);
+}
+
 function mapSummary(row) {
   return row
     ? {
@@ -130,9 +162,12 @@ function mapSummary(row) {
         transcriptId: row.transcript_id,
         model: row.model,
         summary: row.summary,
+        executiveSummary: row.executive_summary || null,
         actionItems: row.action_items,
         topics: row.topics,
-        protocol: row.protocol || { agenda: [], decisions: [], risks: [] },
+        protocol: normalizeProtocol(row.protocol),
+        isLocked: Boolean(row.is_locked),
+        isEdited: summaryIsEdited(row),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       }
@@ -225,14 +260,39 @@ function mergeSpeakers(transcriptRow, speakerRows) {
   return [...storedByLabel.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
 
+function normalizeProtocolSection(sectionKey, value) {
+  const items = Array.isArray(value) ? value : [];
+
+  if (sectionKey === 'decisions') {
+    return items
+      .map((item) => {
+        if (item && typeof item === 'object') {
+          const text = String(item.text || '').trim();
+          return text ? { text, disputed: Boolean(item.disputed) } : null;
+        }
+
+        const text = String(item || '').trim();
+        return text ? { text, disputed: false } : null;
+      })
+      .filter(Boolean);
+  }
+
+  return items.map((item) => String(item || '').trim()).filter(Boolean);
+}
+
+// Always normalizes to the full section superset (empty arrays for sections
+// not part of the record's own template) so mapSummary/isEdited comparisons
+// have a uniform shape regardless of which template generated the row - the
+// UI picks which keys to actually render via getProtocolTemplate(meetingType).
 function normalizeProtocol(input) {
   const protocol = input && typeof input === 'object' ? input : {};
+  const normalized = {};
 
-  return {
-    agenda: Array.isArray(protocol.agenda) ? protocol.agenda.map(String).filter(Boolean) : [],
-    decisions: Array.isArray(protocol.decisions) ? protocol.decisions.map(String).filter(Boolean) : [],
-    risks: Array.isArray(protocol.risks) ? protocol.risks.map(String).filter(Boolean) : [],
-  };
+  for (const key of PROTOCOL_ALL_SECTIONS) {
+    normalized[key] = normalizeProtocolSection(key, protocol[key]);
+  }
+
+  return normalized;
 }
 
 function normalizeTask(input) {
@@ -280,16 +340,16 @@ function parseJsonObject(text) {
 const SUMMARY_LENGTHS = new Set(['brief', 'medium', 'long']);
 
 const SUMMARY_LENGTH_INSTRUCTIONS = {
-  brief: 'Длина: очень кратко. summary — 2-3 предложения с самой сутью. protocol и tasks — только самое важное (максимум по 3 пункта в каждом разделе agenda/decisions/risks).',
-  medium: 'Длина: средняя. summary — 1-3 абзаца. protocol — по несколько пунктов на раздел. tasks — все явно упомянутые задачи.',
-  long: 'Длина: подробная. summary — ОБЯЗАТЕЛЬНО не менее 4-6 абзацев (от 300 слов), пересказывающих ход обсуждения по порядку: кто что поднял, какие аргументы приводились, к чему пришли. Не сокращай и не обобщай в одно предложение. protocol — детальный разбор по каждому разделу (agenda/decisions/risks), ничего не упускай. tasks — все задачи с максимальной детализацией (кто, что, когда, в каком контексте это прозвучало).',
+  brief: 'Длина: очень кратко. summary — 2-3 предложения с самой сутью. executiveSummary — 3 строки. protocol и tasks — только самое важное (максимум по 3 пункта в каждом разделе protocol).',
+  medium: 'Длина: средняя. summary — 1-3 абзаца. executiveSummary — 3-5 строк. protocol — по несколько пунктов на раздел. tasks — все явно упомянутые задачи.',
+  long: 'Длина: подробная. summary — ОБЯЗАТЕЛЬНО не менее 4-6 абзацев (от 300 слов), пересказывающих ход обсуждения по порядку: кто что поднял, какие аргументы приводились, к чему пришли. Не сокращай и не обобщай в одно предложение. executiveSummary остаётся коротким (3-5 строк) даже при подробном summary. protocol — детальный разбор по каждому разделу, ничего не упускай. tasks — все задачи с максимальной детализацией (кто, что, когда, в каком контексте это прозвучало).',
 };
 
 function normalizeSummaryLength(length) {
   return SUMMARY_LENGTHS.has(length) ? length : 'medium';
 }
 
-async function generateSummaryWithOpenRouter(transcriptText, length = 'medium') {
+async function generateSummaryWithOpenRouter(transcriptText, { length = 'medium', meetingType = 'meeting', instruction = '' } = {}) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
@@ -297,7 +357,19 @@ async function generateSummaryWithOpenRouter(transcriptText, length = 'medium') 
   }
 
   const summaryLength = normalizeSummaryLength(length);
+  const template = getProtocolTemplate(meetingType);
   const model = process.env.OPENROUTER_LLM_MODEL || 'openai/gpt-4o-mini';
+  const sectionDescriptions = template.sections
+    .map((key) =>
+      key === 'decisions'
+        ? `- decisions: массив объектов {text:string, disputed:boolean} — "${PROTOCOL_SECTION_LABELS[key]}". disputed=true, если решение прозвучало неуверенно или не было явно подтверждено всеми участниками`
+        : `- ${key}: string[] — "${PROTOCOL_SECTION_LABELS[key]}"`,
+    )
+    .join('\n');
+  const instructionLine = instruction && String(instruction).trim()
+    ? `\n\nДополнительное указание пользователя (обязательно учти при генерации): ${String(instruction).trim()}`
+    : '';
+
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -313,12 +385,15 @@ async function generateSummaryWithOpenRouter(transcriptText, length = 'medium') 
         {
           role: 'system',
           content:
-            'Ты помощник VoxMate. Верни строго JSON без markdown. Поля: summary:string, topics:string[], protocol:{agenda:string[],decisions:string[],risks:string[]}, tasks:{assignee:string|null,description:string,dueText:string|null}[]. Пиши по-русски, конкретно. Если исполнитель или срок не названы явно, ставь null.\n\n' +
-            SUMMARY_LENGTH_INSTRUCTIONS[summaryLength],
+            `Ты помощник VoxMate. Верни строго JSON без markdown. Поля: summary:string (полная версия), executiveSummary:string (краткая выжимка сути встречи, 3-5 строк), topics:string[], protocol:{${template.sections.join(',')}}, tasks:{assignee:string|null,description:string,dueText:string|null}[]. ` +
+            `Разделы protocol (используй только перечисленные ниже, больше никаких других полей в protocol не добавляй):\n${sectionDescriptions}\n\n` +
+            'Пиши по-русски, конкретно. Если исполнитель или срок не названы явно, ставь null.\n\n' +
+            SUMMARY_LENGTH_INSTRUCTIONS[summaryLength] +
+            instructionLine,
         },
         {
           role: 'user',
-          content: `Сделай структурированный протокол стенограммы и извлеки задачи в формате кто-что-когда.\n\nСтенограмма:\n${transcriptText}`,
+          content: `Сделай структурированный протокол стенограммы (шаблон: ${template.label}) и извлеки задачи в формате кто-что-когда.\n\nСтенограмма:\n${transcriptText}`,
         },
       ],
     }),
@@ -337,6 +412,7 @@ async function generateSummaryWithOpenRouter(transcriptText, length = 'medium') 
   return {
     model,
     summary: String(parsed.summary || '').trim(),
+    executiveSummary: String(parsed.executiveSummary || '').trim(),
     actionItems: tasks.map((task) => task.description),
     topics: Array.isArray(parsed.topics) ? parsed.topics.map(String) : [],
     protocol: normalizeProtocol(parsed.protocol),
@@ -448,6 +524,7 @@ export async function listRecordings(ownerId, filters = {}) {
         recordings.source, recordings.duration_seconds, recordings.storage_key, recordings.created_at,
         recordings.updated_at, recordings.original_filename, recordings.mime_type, recordings.file_size_bytes,
         recordings.auto_named, recordings.meeting_url, recordings.meeting_bot_task_id, recordings.failure_count,
+        recordings.meeting_type,
         projects.name as project_name, projects.color as project_color
       from recordings
       left join projects on projects.id = recordings.project_id
@@ -474,16 +551,17 @@ export async function listRecordings(ownerId, filters = {}) {
 export async function createRecording(input, ownerId) {
   const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : 'Untitled recording';
   const source = typeof input.source === 'string' && input.source.trim() ? input.source.trim() : 'manual';
+  const meetingType = MEETING_TYPES.has(input.meetingType) ? input.meetingType : 'meeting';
 
   const result = await query(
     `
-      insert into recordings (owner_id, title, source, duration_seconds, storage_key)
-      values ($1, $2, $3, $4, $5)
+      insert into recordings (owner_id, title, source, duration_seconds, storage_key, meeting_type)
+      values ($1, $2, $3, $4, $5, $6)
       returning id, owner_id, project_id, title, status, source, duration_seconds, storage_key,
-        original_filename, mime_type, file_size_bytes, auto_named, created_at, updated_at,
+        original_filename, mime_type, file_size_bytes, auto_named, meeting_type, created_at, updated_at,
         null as project_name, null as project_color
     `,
-    [ownerId, title, source, input.durationSeconds || null, input.storageKey || null],
+    [ownerId, title, source, input.durationSeconds || null, input.storageKey || null, meetingType],
   );
 
   return mapRecording(result.rows[0]);
@@ -726,7 +804,7 @@ export async function getRecording(id, ownerId) {
     `
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
       , original_filename, mime_type, file_size_bytes, auto_named, project_id, meeting_url, meeting_bot_task_id,
-        recorder_engine, failure_count,
+        recorder_engine, failure_count, meeting_type,
         (select name from projects where projects.id = recordings.project_id) as project_name,
         (select color from projects where projects.id = recordings.project_id) as project_color
       from recordings
@@ -761,7 +839,8 @@ export async function getRecording(id, ownerId) {
     ),
     query(
       `
-        select id, recording_id, transcript_id, model, summary, action_items, topics, protocol, created_at, updated_at
+        select id, recording_id, transcript_id, model, summary, executive_summary, action_items, topics, protocol,
+          original_summary, is_locked, created_at, updated_at
         from recording_summaries
         where recording_id = $1
         order by created_at desc
@@ -802,7 +881,7 @@ export async function getRecording(id, ownerId) {
   };
 }
 
-export async function summarizeRecording(recordingId, ownerId, length = 'medium') {
+export async function summarizeRecording(recordingId, ownerId, { length = 'medium', instruction = '' } = {}) {
   const recording = await getRecording(recordingId, ownerId);
 
   if (!recording) {
@@ -813,23 +892,46 @@ export async function summarizeRecording(recordingId, ownerId, length = 'medium'
     throw new Error('Recording has no transcript yet');
   }
 
-  const generated = await generateSummaryWithOpenRouter(recording.transcript.text, length);
+  if (recording.summary?.isLocked) {
+    throw new Error('Protocol is locked - unlock it before regenerating');
+  }
+
+  const generated = await generateSummaryWithOpenRouter(recording.transcript.text, {
+    length,
+    meetingType: recording.meetingType,
+    instruction,
+  });
+  const originalSnapshot = JSON.stringify({
+    summary: generated.summary,
+    executiveSummary: generated.executiveSummary,
+    protocol: generated.protocol,
+    topics: generated.topics,
+  });
 
   return transaction(async (client) => {
+    // No version history is kept (US-8.2: "старая версия затирается") - each
+    // (re)generation replaces the row outright rather than accumulating one
+    // row per call the way the old code incidentally did.
+    await client.query('delete from recording_summaries where recording_id = $1', [recordingId]);
+
     const result = await client.query(
       `
-        insert into recording_summaries (recording_id, transcript_id, model, summary, action_items, topics, protocol)
-        values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb)
-        returning id, recording_id, transcript_id, model, summary, action_items, topics, protocol, created_at, updated_at
+        insert into recording_summaries
+          (recording_id, transcript_id, model, summary, executive_summary, action_items, topics, protocol, original_summary)
+        values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb)
+        returning id, recording_id, transcript_id, model, summary, executive_summary, action_items, topics, protocol,
+          original_summary, is_locked, created_at, updated_at
       `,
       [
         recordingId,
         recording.transcript.id,
         generated.model,
         generated.summary,
+        generated.executiveSummary,
         JSON.stringify(generated.actionItems),
         JSON.stringify(generated.topics),
         JSON.stringify(generated.protocol),
+        originalSnapshot,
       ],
     );
     const summary = mapSummary(result.rows[0]);
@@ -858,11 +960,17 @@ export async function updateRecordingMetadata(recordingId, ownerId, input) {
   const data = input && typeof input === 'object' ? input : {};
   const hasTitle = Object.prototype.hasOwnProperty.call(data, 'title');
   const hasProjectId = Object.prototype.hasOwnProperty.call(data, 'projectId');
+  const hasMeetingType = Object.prototype.hasOwnProperty.call(data, 'meetingType');
   const title = hasTitle && typeof data.title === 'string' ? data.title.trim() : null;
   const projectId = hasProjectId && typeof data.projectId === 'string' && data.projectId.trim() ? data.projectId.trim() : null;
+  const meetingType = hasMeetingType && MEETING_TYPES.has(data.meetingType) ? data.meetingType : null;
 
   if (hasTitle && !title) {
     throw new Error('Recording title is required');
+  }
+
+  if (hasMeetingType && !meetingType) {
+    throw new Error(`meetingType must be one of: ${[...MEETING_TYPES].join(', ')}`);
   }
 
   const result = await query(
@@ -872,6 +980,7 @@ export async function updateRecordingMetadata(recordingId, ownerId, input) {
         title = case when $3 then $4 else recordings.title end,
         project_id = case when $5 then $6::uuid else recordings.project_id end,
         auto_named = case when $3 then false else recordings.auto_named end,
+        meeting_type = case when $7 then $8 else recordings.meeting_type end,
         updated_at = now()
       where recordings.id = $1
         and (recordings.owner_id = $2 or recordings.owner_id is null)
@@ -889,11 +998,11 @@ export async function updateRecordingMetadata(recordingId, ownerId, input) {
         recordings.id, recordings.owner_id, recordings.project_id, recordings.title, recordings.status,
         recordings.source, recordings.duration_seconds, recordings.storage_key, recordings.created_at,
         recordings.updated_at, recordings.original_filename, recordings.mime_type, recordings.file_size_bytes,
-        recordings.auto_named,
+        recordings.auto_named, recordings.meeting_type,
         (select name from projects where projects.id = recordings.project_id) as project_name,
         (select color from projects where projects.id = recordings.project_id) as project_color
     `,
-    [recordingId, ownerId, hasTitle, title, hasProjectId, projectId],
+    [recordingId, ownerId, hasTitle, title, hasProjectId, projectId, hasMeetingType, meetingType],
   );
 
   return result.rowCount ? mapRecording(result.rows[0]) : null;
@@ -949,6 +1058,79 @@ export async function updateTranscript(recordingId, ownerId, input = {}) {
   );
 
   return mapTranscript(result.rows[0]);
+}
+
+// original_summary is populated once per (re)generation (summarizeRecording)
+// and never touched here - it's the immutable AI-produced snapshot used to
+// compute `isEdited`, kept alongside whatever the user has since edited.
+export async function updateRecordingSummary(recordingId, ownerId, input = {}) {
+  const data = input && typeof input === 'object' ? input : {};
+  const hasSummary = Object.prototype.hasOwnProperty.call(data, 'summary');
+  const hasExecutiveSummary = Object.prototype.hasOwnProperty.call(data, 'executiveSummary');
+  const hasProtocol = Object.prototype.hasOwnProperty.call(data, 'protocol');
+  const hasTopics = Object.prototype.hasOwnProperty.call(data, 'topics');
+  const hasLocked = Object.prototype.hasOwnProperty.call(data, 'locked');
+  const isContentEdit = hasSummary || hasExecutiveSummary || hasProtocol || hasTopics;
+
+  const recording = await query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
+    recordingId,
+    ownerId,
+  ]);
+
+  if (recording.rowCount === 0) {
+    return null;
+  }
+
+  const summaryResult = await query(
+    'select id, is_locked from recording_summaries where recording_id = $1 order by created_at desc limit 1',
+    [recordingId],
+  );
+  const summaryRow = summaryResult.rows[0];
+
+  if (!summaryRow) {
+    throw new Error('Protocol not found');
+  }
+
+  if (summaryRow.is_locked && isContentEdit) {
+    throw new Error('Protocol is locked - unlock it before editing');
+  }
+
+  const summary = hasSummary ? String(data.summary ?? '') : null;
+  const executiveSummary = hasExecutiveSummary ? String(data.executiveSummary ?? '') : null;
+  const protocol = hasProtocol ? normalizeProtocol(data.protocol) : null;
+  const topics = hasTopics ? (Array.isArray(data.topics) ? data.topics.map(String) : []) : null;
+  const locked = hasLocked ? Boolean(data.locked) : null;
+
+  const result = await query(
+    `
+      update recording_summaries
+      set
+        summary = case when $2 then $3 else recording_summaries.summary end,
+        executive_summary = case when $4 then $5 else recording_summaries.executive_summary end,
+        protocol = case when $6 then $7::jsonb else recording_summaries.protocol end,
+        topics = case when $8 then $9::jsonb else recording_summaries.topics end,
+        is_locked = case when $10 then $11 else recording_summaries.is_locked end,
+        updated_at = now()
+      where recording_summaries.id = $1
+      returning id, recording_id, transcript_id, model, summary, executive_summary, action_items, topics, protocol,
+        original_summary, is_locked, created_at, updated_at
+    `,
+    [
+      summaryRow.id,
+      hasSummary,
+      summary,
+      hasExecutiveSummary,
+      executiveSummary,
+      hasProtocol,
+      JSON.stringify(protocol),
+      hasTopics,
+      JSON.stringify(topics),
+      hasLocked,
+      locked,
+    ],
+  );
+
+  return mapSummary(result.rows[0]);
 }
 
 // Relabels every segment spoken by sourceLabel to targetLabel (both are
@@ -1019,7 +1201,7 @@ export async function generateRecordingTitle(recordingId, ownerId) {
         recordings.id, recordings.owner_id, recordings.project_id, recordings.title, recordings.status,
         recordings.source, recordings.duration_seconds, recordings.storage_key, recordings.created_at,
         recordings.updated_at, recordings.original_filename, recordings.mime_type, recordings.file_size_bytes,
-        recordings.auto_named,
+        recordings.auto_named, recordings.meeting_type,
         (select name from projects where projects.id = recordings.project_id) as project_name,
         (select color from projects where projects.id = recordings.project_id) as project_color
     `,
@@ -1699,7 +1881,7 @@ export function registerRecordingRoutes(app) {
     const body = await c.req.json().catch(() => ({}));
 
     try {
-      const result = await summarizeRecording(c.req.param('id'), user.id, body.length);
+      const result = await summarizeRecording(c.req.param('id'), user.id, { length: body.length, instruction: body.instruction });
 
       if (!result) {
         return c.json({ error: 'Recording not found' }, 404);
@@ -1710,6 +1892,54 @@ export function registerRecordingRoutes(app) {
       return c.json({ error: error.message || 'Failed to summarize recording' }, 400);
     }
   });
+
+  app.patch('/api/recordings/:id/summary', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+
+    try {
+      const summary = await updateRecordingSummary(c.req.param('id'), user.id, body);
+
+      if (!summary) {
+        return c.json({ error: 'Recording not found' }, 404);
+      }
+
+      return c.json({ summary });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to update protocol' }, 400);
+    }
+  });
+
+  // Not scoped to a recording - a lightweight ASR-only helper for
+  // dictating into a text field (protocol edit, regenerate instruction)
+  // instead of typing. Plain transcription via the same OpenRouter path
+  // worker.js uses as its ASR fallback, no diarization/pipeline/recording
+  // row involved.
+  app.post(
+    '/api/voice-note-transcript',
+    requireAuth,
+    bodyLimit({
+      maxSize: 25 * 1024 * 1024,
+      onError: (c) => c.json({ error: 'Voice note too large' }, 413),
+    }),
+    async (c) => {
+      const formData = await c.req.raw.formData().catch(() => null);
+      const file = formData?.get('file');
+
+      if (!file || typeof file.arrayBuffer !== 'function') {
+        return c.json({ error: 'Expected multipart form-data with file field named "file"' }, 400);
+      }
+
+      try {
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const result = await transcribeWithOpenRouter(file, buffer, {});
+
+        return c.json({ text: result?.text || '' });
+      } catch (error) {
+        return c.json({ error: error.message || 'Failed to transcribe voice note' }, 400);
+      }
+    },
+  );
 
   app.post('/api/recordings/:id/email', requireAuth, async (c) => {
     const user = getAuthUser(c);

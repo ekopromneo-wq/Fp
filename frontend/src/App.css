@@ -1231,6 +1231,162 @@ audio {
   line-height: 1.45;
 }
 
+.protocol-view {
+  display: grid;
+  gap: 14px;
+}
+
+.protocol-print-header {
+  display: none;
+}
+
+.protocol-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.protocol-toolbar .button {
+  width: auto;
+}
+
+.protocol-edited-badge,
+.protocol-locked-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.protocol-edited-badge {
+  color: var(--accent-warning);
+  background: rgba(251, 146, 60, 0.14);
+}
+
+.protocol-locked-badge {
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.protocol-section {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.protocol-section h4 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.84rem;
+}
+
+.protocol-section p {
+  margin: 0;
+  color: var(--text-primary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.protocol-section ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+
+.executive-summary {
+  border-color: var(--accent-primary);
+  background: rgba(129, 216, 208, 0.06);
+}
+
+.protocol-decision-disputed {
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin-left: -4px;
+  background: rgba(251, 146, 60, 0.16);
+}
+
+.protocol-field-with-dictate {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.protocol-field-with-dictate textarea {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 8px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.protocol-dictate-button {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.protocol-dictate-button.is-recording {
+  border-color: var(--accent-danger);
+  color: var(--accent-danger);
+  animation: protocol-dictate-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes protocol-dictate-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.protocol-regenerate {
+  background: var(--bg-elevated);
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .protocol-print-area,
+  .protocol-print-area * {
+    visibility: visible;
+  }
+
+  .protocol-print-area {
+    position: absolute;
+    inset: 0;
+    padding: 24px;
+  }
+
+  .protocol-print-header {
+    display: block;
+    margin-bottom: 16px;
+  }
+
+  .protocol-print-header h2 {
+    margin: 0;
+  }
+
+  .protocol-print-header p {
+    margin: 4px 0 0;
+    color: #555;
+  }
+
+  .protocol-toolbar,
+  .protocol-regenerate,
+  .protocol-field-with-dictate button {
+    display: none !important;
+  }
+}
+
 .task-row {
   display: grid;
   gap: 8px;

@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { PROTOCOL_SECTION_LABELS, getProtocolTemplate } from './protocolTemplates.js';
 
 function getSmtpConfig(input = {}) {
   const host = input.host || process.env.SMTP_HOST;
@@ -44,6 +45,17 @@ function normalizeRecipients(input) {
   }
 
   return unique;
+}
+
+// `decisions` items are {text, disputed} objects (US-8.1), everything else
+// in `protocol` is a plain string[] - normalize to display strings here so
+// the two list-formatters below don't need to know about the distinction.
+function protocolSectionLines(sectionKey, items) {
+  if (sectionKey === 'decisions') {
+    return (items || []).map((item) => (item?.disputed ? `⚠ ${item.text}` : item?.text)).filter(Boolean);
+  }
+
+  return (items || []).map((item) => String(item || '')).filter(Boolean);
 }
 
 function formatList(items) {
@@ -96,8 +108,16 @@ function buildTasksHtml(tasks) {
 
 function buildEmailContent(recording, message = '') {
   const summary = recording.summary;
-  const protocol = summary?.protocol;
+  const protocol = summary?.protocol || {};
+  const template = getProtocolTemplate(recording.meetingType);
   const intro = String(message || '').trim();
+
+  const protocolTextBlocks = template.sections.flatMap((key) => [
+    `### ${PROTOCOL_SECTION_LABELS[key]}`,
+    formatList(protocolSectionLines(key, protocol[key])),
+    '',
+  ]);
+
   const text = [
     intro,
     `# ${recording.title}`,
@@ -106,24 +126,23 @@ function buildEmailContent(recording, message = '') {
     `Проект: ${recording.project?.name || 'без проекта'}`,
     `Статус: ${recording.status}`,
     '',
+    ...(summary?.executiveSummary ? ['## Executive summary', summary.executiveSummary, ''] : []),
     '## Резюме',
     summary?.summary || 'Резюме пока нет.',
     '',
     '## Протокол',
-    '### Повестка',
-    formatList(protocol?.agenda),
-    '',
-    '### Решения',
-    formatList(protocol?.decisions),
-    '',
-    '### Риски',
-    formatList(protocol?.risks),
-    '',
+    ...protocolTextBlocks,
     '## Задачи',
     buildTasksText(recording.tasks),
   ]
     .filter((item, index) => index !== 0 || item)
     .join('\n');
+
+  const protocolHtmlBlocks = template.sections
+    .map(
+      (key) => `<h3>${escapeHtml(PROTOCOL_SECTION_LABELS[key])}</h3>${formatHtmlList(protocolSectionLines(key, protocol[key]))}`,
+    )
+    .join('');
 
   const html = `<!doctype html>
     <html>
@@ -135,15 +154,11 @@ function buildEmailContent(recording, message = '') {
           <strong>Проект:</strong> ${escapeHtml(recording.project?.name || 'без проекта')}<br>
           <strong>Статус:</strong> ${escapeHtml(recording.status)}
         </p>
+        ${summary?.executiveSummary ? `<h2>Executive summary</h2><p>${escapeHtml(summary.executiveSummary).replace(/\n/g, '<br>')}</p>` : ''}
         <h2>Резюме</h2>
         <p>${escapeHtml(summary?.summary || 'Резюме пока нет.')}</p>
         <h2>Протокол</h2>
-        <h3>Повестка</h3>
-        ${formatHtmlList(protocol?.agenda)}
-        <h3>Решения</h3>
-        ${formatHtmlList(protocol?.decisions)}
-        <h3>Риски</h3>
-        ${formatHtmlList(protocol?.risks)}
+        ${protocolHtmlBlocks}
         <h2>Задачи</h2>
         ${buildTasksHtml(recording.tasks)}
       </body>

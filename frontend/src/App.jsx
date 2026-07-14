@@ -13,6 +13,7 @@ import TaskForm from './components/TaskForm.jsx';
 import TaskRow from './components/TaskRow.jsx';
 import RecordingCard from './components/RecordingCard.jsx';
 import ContactsPage from './components/ContactsPage.jsx';
+import ProtocolView from './components/ProtocolView.jsx';
 import TranscriptView from './components/TranscriptView.jsx';
 import useMicRecorder from './hooks/useMicRecorder.js';
 import useIsMobile from './hooks/useIsMobile.js';
@@ -35,6 +36,28 @@ import { enqueueRecording, processQueue, getQueueSnapshot, toSyntheticRecording 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 const demoEmail = import.meta.env.VITE_DEMO_EMAIL || 'demo@voxmate.local';
 const demoPassword = import.meta.env.VITE_DEMO_PASSWORD || 'voxmate123';
+
+// Labels for the meeting-type picker only - the actual section structure per
+// type (which drives generation/rendering) lives server-side
+// (backend/src/protocolTemplates.js) and comes back on `recording.protocolTemplate`.
+const MEETING_TYPE_OPTIONS = [
+  { value: 'meeting', label: 'Совещание' },
+  { value: 'planning', label: 'Планёрка' },
+  { value: 'negotiation', label: 'Переговоры' },
+  { value: 'interview', label: 'Интервью' },
+  { value: 'project', label: 'Проектная встреча' },
+  { value: 'freeform', label: 'Свои мысли' },
+];
+
+const PROTOCOL_SECTION_LABELS = {
+  participants: 'Участники',
+  agenda: 'Повестка',
+  discussions: 'Обсуждения',
+  decisions: 'Решения',
+  risks: 'Риски',
+  questions: 'Открытые вопросы',
+  nextSteps: 'Следующие шаги',
+};
 
 function apiFetch(path, options = {}) {
   return fetch(`${apiBaseUrl}${path}`, {
@@ -59,6 +82,18 @@ function formatMarkdownList(items) {
   return items?.length ? items.map((item) => `- ${item}`).join('\n') : '- не выделено';
 }
 
+// `decisions` items are {text, disputed} objects - everything else in
+// `protocol` is a plain string[]. Disputed decisions get a ⚠ marker since
+// the yellow highlight (US-8.1) is a visual-only cue that plain text can't
+// reproduce.
+function protocolSectionLines(sectionKey, items) {
+  if (sectionKey === 'decisions') {
+    return (items || []).map((item) => (item?.disputed ? `⚠ ${item.text}` : item?.text)).filter(Boolean);
+  }
+
+  return (items || []).map((item) => String(item || '')).filter(Boolean);
+}
+
 function buildRecordingExport(recording) {
   const summary = recording.summary;
   const protocol = summary?.protocol;
@@ -74,13 +109,18 @@ function buildRecordingExport(recording) {
     '',
   ];
 
+  if (summary?.executiveSummary) {
+    lines.push('## Executive summary', '', summary.executiveSummary, '');
+  }
+
   lines.push('## Резюме', '', summary?.summary || 'Резюме пока нет.', '');
 
   lines.push('## Протокол', '');
   if (protocol) {
-    lines.push('### Повестка', formatMarkdownList(protocol.agenda), '');
-    lines.push('### Решения', formatMarkdownList(protocol.decisions), '');
-    lines.push('### Риски', formatMarkdownList(protocol.risks), '');
+    const template = recording.protocolTemplate || { sections: ['agenda', 'decisions', 'risks'] };
+    template.sections.forEach((key) => {
+      lines.push(`### ${PROTOCOL_SECTION_LABELS[key] || key}`, formatMarkdownList(protocolSectionLines(key, protocol[key])), '');
+    });
   } else {
     lines.push('Протокол пока не создан.', '');
   }
@@ -116,14 +156,84 @@ function buildRecordingExport(recording) {
   return lines.join('\n');
 }
 
-function createExportFilename(recording) {
-  const baseName = (recording.title || recording.originalFilename || 'recording')
+function exportBaseName(recording) {
+  return (recording.title || recording.originalFilename || 'recording')
     .toLowerCase()
     .replace(/[^a-zа-яё0-9]+/gi, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 80);
+    .slice(0, 80) || 'recording';
+}
 
-  return `${baseName || 'recording'}-protocol.md`;
+function createExportFilename(recording) {
+  return `${exportBaseName(recording)}-protocol.md`;
+}
+
+// Dynamically imported - same reasoning as TranscriptView.jsx's DOCX export:
+// docx roughly doubles the bundle and is a rarely-used path.
+async function buildProtocolDocxBlob(recording) {
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import('docx');
+  const summary = recording.summary;
+  const protocol = summary?.protocol;
+  const template = recording.protocolTemplate || { sections: ['agenda', 'decisions', 'risks'] };
+  const children = [
+    new Paragraph({ text: recording.title, heading: HeadingLevel.HEADING_1 }),
+    new Paragraph({ text: `${formatDate(recording.createdAt)} · ${recording.project?.name || 'без проекта'}` }),
+  ];
+
+  if (summary?.executiveSummary) {
+    children.push(new Paragraph({ text: 'Executive summary', heading: HeadingLevel.HEADING_2 }));
+    children.push(new Paragraph({ text: summary.executiveSummary }));
+  }
+
+  children.push(new Paragraph({ text: 'Резюме', heading: HeadingLevel.HEADING_2 }));
+  children.push(new Paragraph({ text: summary?.summary || 'Резюме пока нет.' }));
+
+  children.push(new Paragraph({ text: 'Протокол', heading: HeadingLevel.HEADING_2 }));
+  if (protocol) {
+    template.sections.forEach((key) => {
+      children.push(new Paragraph({ text: PROTOCOL_SECTION_LABELS[key] || key, heading: HeadingLevel.HEADING_3 }));
+      const lines = protocolSectionLines(key, protocol[key]);
+
+      if (lines.length) {
+        lines.forEach((line) => children.push(new Paragraph({ text: line, bullet: { level: 0 } })));
+      } else {
+        children.push(new Paragraph({ text: 'Не выделено.' }));
+      }
+    });
+  } else {
+    children.push(new Paragraph({ text: 'Протокол пока не создан.' }));
+  }
+
+  children.push(new Paragraph({ text: 'Задачи', heading: HeadingLevel.HEADING_2 }));
+  const tasks = recording.tasks || [];
+  if (tasks.length) {
+    tasks.forEach((task) => {
+      children.push(
+        new Paragraph({
+          children: [
+            new TextRun({ text: `${task.assignee || 'не указан'} · ${task.dueText || 'не указан'} · ${task.status}: `, bold: true }),
+            new TextRun({ text: task.description }),
+          ],
+        }),
+      );
+    });
+  } else {
+    children.push(new Paragraph({ text: 'Задач пока нет.' }));
+  }
+
+  const doc = new Document({ sections: [{ children }] });
+  return Packer.toBlob(doc);
+}
+
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 async function copyText(text) {
@@ -275,7 +385,7 @@ function App() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [searchQuery, setSearchQuery] = useState('');
   const [projectFilter, setProjectFilter] = useState('');
-  const [recordingDraft, setRecordingDraft] = useState({ title: '', projectId: '' });
+  const [recordingDraft, setRecordingDraft] = useState({ title: '', projectId: '', meetingType: 'meeting' });
   const [newProjectDraft, setNewProjectDraft] = useState({ name: '', color: '#235b4f' });
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [meetingBotDraft, setMeetingBotDraft] = useState({ meetingUrl: '', title: '' });
@@ -997,8 +1107,9 @@ function App() {
     setRecordingDraft({
       title: selectedRecording?.title || '',
       projectId: selectedRecording?.projectId || '',
+      meetingType: selectedRecording?.meetingType || 'meeting',
     });
-  }, [selectedRecording?.id, selectedRecording?.title, selectedRecording?.projectId]);
+  }, [selectedRecording?.id, selectedRecording?.title, selectedRecording?.projectId, selectedRecording?.meetingType]);
 
   useEffect(() => {
     const recipients = [
@@ -1112,6 +1223,7 @@ function App() {
         body: JSON.stringify({
           title: recordingDraft.title,
           projectId: recordingDraft.projectId || null,
+          meetingType: recordingDraft.meetingType,
         }),
       });
       const data = await response.json();
@@ -1309,7 +1421,7 @@ function App() {
     }
   }
 
-  async function handleSummarize(recording) {
+  async function handleSummarize(recording, { instruction } = {}) {
     if (!recording?.transcript) {
       setStatus('Сначала нужна стенограмма');
       return;
@@ -1321,7 +1433,7 @@ function App() {
     try {
       const response = await apiFetch(`/api/recordings/${recording.id}/summary`, {
         method: 'POST',
-        body: JSON.stringify({ length: summaryLength }),
+        body: JSON.stringify({ length: summaryLength, instruction }),
       });
       const data = await response.json();
 
@@ -1338,9 +1450,51 @@ function App() {
       setStatus(`Протокол "${recording.title}" готов`);
     } catch (error) {
       setStatus(error.message || 'Ошибка создания протокола');
+      throw error;
     } finally {
       setIsSummarizing(false);
     }
+  }
+
+  async function handleUpdateProtocol(payload) {
+    const recording = selectedRecording;
+
+    if (!recording) {
+      throw new Error('Запись не выбрана');
+    }
+
+    const response = await apiFetch(`/api/recordings/${recording.id}/summary`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Не удалось обновить протокол');
+    }
+
+    setSelectedRecording((current) => (current?.id === recording.id ? { ...current, summary: data.summary } : current));
+    setRecordings((current) => current.map((item) => (item.id === recording.id ? { ...item, summary: data.summary } : item)));
+
+    return data.summary;
+  }
+
+  async function handleDictateVoiceNote(blob) {
+    const formData = new FormData();
+    const extension = blob.type.includes('ogg') ? 'ogg' : 'webm';
+    formData.append('file', blob, `voice-note.${extension}`);
+
+    const response = await apiFetch('/api/voice-note-transcript', {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Не удалось распознать надиктовку');
+    }
+
+    return data.text || '';
   }
 
   async function handleUpdateTranscript(payload) {
@@ -1386,6 +1540,20 @@ function App() {
 
     downloadTextFile(createExportFilename(recording), buildRecordingExport(recording));
     setStatus(`Экспорт "${recording.title}" скачан`);
+  }
+
+  async function handleDownloadDocxExport(recording) {
+    if (!recording) {
+      return;
+    }
+
+    try {
+      const blob = await buildProtocolDocxBlob(recording);
+      downloadBlob(`${exportBaseName(recording)}-protocol.docx`, blob);
+      setStatus(`Экспорт "${recording.title}" (.docx) скачан`);
+    } catch (error) {
+      setStatus(error.message || 'Не удалось собрать .docx');
+    }
   }
 
   async function handleSendEmail(event) {
@@ -2494,6 +2662,14 @@ function App() {
                 >
                   Скачать .md
                 </button>
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  onClick={() => handleDownloadDocxExport(selectedRecording)}
+                  disabled={!canExportSelected}
+                >
+                  Скачать .docx
+                </button>
               </div>
 
               <section className="recording-edit-panel" aria-label="Редактирование записи">
@@ -2515,6 +2691,20 @@ function App() {
                     {projectOptions.map((project) => (
                       <option value={project.id} key={project.id}>
                         {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  Тип встречи
+                  <select
+                    value={recordingDraft.meetingType}
+                    onChange={(event) => setRecordingDraft((current) => ({ ...current, meetingType: event.target.value }))}
+                  >
+                    {MEETING_TYPE_OPTIONS.map((option) => (
+                      <option value={option.value} key={option.value}>
+                        {option.label}
                       </option>
                     ))}
                   </select>
@@ -2672,81 +2862,16 @@ function App() {
                 )}
               </section>
 
-              <section className="detail-section">
-                <h3>Резюме</h3>
-                {selectedRecording.summary ? (
-                  <div className="summary-block">
-                    <p>{selectedRecording.summary.summary}</p>
-
-                    {selectedRecording.summary.actionItems?.length ? (
-                      <>
-                        <h4>Action items</h4>
-                        <ul>
-                          {selectedRecording.summary.actionItems.map((item) => (
-                            <li key={item}>{item}</li>
-                          ))}
-                        </ul>
-                      </>
-                    ) : null}
-
-                    {selectedRecording.summary.topics?.length ? (
-                      <div className="topic-list">
-                        {selectedRecording.summary.topics.map((topic) => (
-                          <span key={topic}>{topic}</span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <p className="muted-text">Протокола пока нет. Сделай его после появления стенограммы.</p>
-                )}
+              <section className="detail-section detail-section-wide protocol-print-area">
+                <h3>Протокол</h3>
+                <ProtocolView
+                  recording={selectedRecording}
+                  onUpdateProtocol={handleUpdateProtocol}
+                  onGenerateProtocol={(options) => handleSummarize(selectedRecording, options)}
+                  onDictate={handleDictateVoiceNote}
+                  setStatus={setStatus}
+                />
               </section>
-
-              {selectedRecording.summary?.protocol ? (
-                <section className="detail-section detail-section-wide">
-                  <h3>Протокол</h3>
-                  <div className="protocol-grid">
-                    <div>
-                      <h4>Повестка</h4>
-                      {selectedRecording.summary.protocol.agenda?.length ? (
-                        <ul>
-                          {selectedRecording.summary.protocol.agenda.map((item) => (
-                            <li key={item}>{item}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="muted-text">Не выделена.</p>
-                      )}
-                    </div>
-
-                    <div>
-                      <h4>Решения</h4>
-                      {selectedRecording.summary.protocol.decisions?.length ? (
-                        <ul>
-                          {selectedRecording.summary.protocol.decisions.map((item) => (
-                            <li key={item}>{item}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="muted-text">Не выделены.</p>
-                      )}
-                    </div>
-
-                    <div>
-                      <h4>Риски</h4>
-                      {selectedRecording.summary.protocol.risks?.length ? (
-                        <ul>
-                          {selectedRecording.summary.protocol.risks.map((item) => (
-                            <li key={item}>{item}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="muted-text">Не выделены.</p>
-                      )}
-                    </div>
-                  </div>
-                </section>
-              ) : null}
 
               <section className="detail-section detail-section-wide">
                 <h3>Задачи</h3>
