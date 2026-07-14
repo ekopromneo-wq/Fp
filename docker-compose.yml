@@ -2,7 +2,11 @@ name: project
 
 services:
   web:
-    build: ./frontend
+    build:
+      context: ./frontend
+      # Dev server + bind mount below; the prod (static) stage is what
+      # docker-compose.client.yml uses.
+      target: dev
     ports:
       - '${WEB_PORT:-4173}:4173'
     environment:
