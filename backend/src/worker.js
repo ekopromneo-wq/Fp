@@ -37,7 +37,7 @@ async function checkCancelled(jobId) {
   }
 }
 
-async function processRecording(data) {
+async function processRecording(data, { attemptsMade = 0 } = {}) {
   const { jobId, recordingId, retranscribe = false } = data;
 
   await checkCancelled(jobId);
@@ -46,7 +46,11 @@ async function processRecording(data) {
   // негоден): сносим прошлую стенограмму и разметку спикеров, чтобы контрольная
   // точка ниже не увела нас сразу в резюме, а новые метки спикеров не унаследовали
   // имена от чужого разбиения.
-  if (retranscribe) {
+  //
+  // Только на первой попытке: дальше задачу повторяет BullMQ, и снос стенограммы
+  // на каждом круге обнулял бы удачную расшифровку из-за сбоя на этапе резюме —
+  // ровно то, от чего защищает контрольная точка ниже (US-4.3).
+  if (retranscribe && attemptsMade === 0) {
     await transaction(async (client) => {
       await client.query('delete from transcripts where recording_id = $1', [recordingId]);
       await client.query('delete from recording_speakers where recording_id = $1', [recordingId]);
@@ -422,7 +426,7 @@ async function main() {
   const worker = new Worker(
     RECORDING_QUEUE_NAME,
     async (job) => {
-      await processRecording(job.data);
+      await processRecording(job.data, { attemptsMade: job.attemptsMade });
     },
     {
       connection: createRedisConnection(),
