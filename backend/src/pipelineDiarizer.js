@@ -5,12 +5,26 @@ import path from 'node:path';
 import { getAudioFormat, getFfprobeDurationSeconds, runFfmpeg } from './ffmpeg.js';
 import { parseJsonObject } from './llmJson.js';
 import { transcribeChunkWithTimestamps } from './openrouterAsr.js';
+import { trySplitTranscriptBySpeaker } from './speakerSplit.js';
 
 // Chunking only applies to the Whisper step (see step 2) - the voice
 // diarization step (step 4) still sees the whole recording in one call, so
 // its S1/S2/S3 labels are already globally consistent and don't need
 // cross-chunk reconciliation.
+//
+// Расплата за это допущение: на длинной записи модель размечает голосом лишь
+// часть дорожки, а остальное молча доставалось ближайшему интервалу — на
+// 71-минутном совещании 66 минут «наговорил» один спикер. Поэтому покрытие
+// теперь измеряется и проверяется (см. voiceCoverage): разметке, покрывающей
+// меньше MIN_VOICE_COVERAGE речи, доверять нельзя.
 const CHUNK_SECONDS = Number(process.env.PIPELINE_CHUNK_SECONDS || 480);
+const MIN_VOICE_COVERAGE = Number(process.env.PIPELINE_MIN_VOICE_COVERAGE || 0.6);
+// Дальше этого расстояния сегмент считается лежащим вне размеченной области:
+// «ближайший» интервал в минутах от него ничего не говорит о том, кто говорит.
+const MAX_GAP_TO_NEAREST_MS = Number(process.env.PIPELINE_MAX_GAP_TO_NEAREST_MS || 30000);
+// Подпись для участков, которые разметка по голосу не накрыла. Честнее выдумать
+// её, чем приписать слова случайному участнику.
+const UNKNOWN_SPEAKER_LABEL = 'Спикер ?';
 const WHISPER_MODEL = process.env.PIPELINE_WHISPER_MODEL || 'openai/whisper-large-v3';
 const VOICE_MODEL = process.env.PIPELINE_VOICE_MODEL || 'google/gemini-2.5-pro';
 const IDENTITY_MODEL = process.env.PIPELINE_IDENTITY_MODEL || 'anthropic/claude-sonnet-5';
@@ -223,11 +237,57 @@ async function runVoiceDiarization(normalizedBuffer, apiKey, model) {
   }
 }
 
+function nearestInterval(segment, voiceIntervals) {
+  const midpointMs = (segment.startMs + segment.endMs) / 2;
+  let best = null;
+  let bestDistanceMs = Infinity;
+
+  for (const interval of voiceIntervals) {
+    // Расстояние до интервала, а не до его середины: длинный интервал рядом
+    // ближе короткого вдалеке, даже если середина у него дальше.
+    const distanceMs = Math.max(0, interval.startMs - midpointMs, midpointMs - interval.endMs);
+
+    if (distanceMs < bestDistanceMs) {
+      bestDistanceMs = distanceMs;
+      best = interval;
+    }
+  }
+
+  return { interval: best, distanceMs: bestDistanceMs };
+}
+
+/**
+ * Доля речи, которую разметка по голосу реально накрыла интервалами. Считаем по
+ * времени Whisper-сегментов, а не по длине записи: паузы, музыка и тишина в
+ * знаменателе только маскировали бы провал.
+ */
+function voiceCoverage(whisperSegments, voiceIntervals) {
+  let speechMs = 0;
+  let coveredMs = 0;
+
+  for (const segment of whisperSegments) {
+    const durationMs = Math.max(0, segment.endMs - segment.startMs);
+    speechMs += durationMs;
+
+    let overlapMs = 0;
+
+    for (const interval of voiceIntervals) {
+      overlapMs += Math.max(0, Math.min(segment.endMs, interval.endMs) - Math.max(segment.startMs, interval.startMs));
+    }
+
+    coveredMs += Math.min(durationMs, overlapMs);
+  }
+
+  return speechMs > 0 ? coveredMs / speechMs : 0;
+}
+
 /**
  * Assigns each precisely-timed Whisper segment to whichever voice interval
- * it overlaps most. Segments falling in a gap between intervals (no direct
- * overlap) fall back to the nearest interval by midpoint distance, so every
- * segment gets a speaker rather than being dropped.
+ * it overlaps most. Segments falling in a small gap between intervals fall
+ * back to the nearest interval, so short pauses don't drop a turn. Сегменты
+ * дальше MAX_GAP_TO_NEAREST_MS от любого интервала помечаются как неразмеченные
+ * (speaker: null): раньше их отдавали ближайшему интервалу, и вся неразмеченная
+ * часть записи молча приписывалась одному человеку.
  */
 function assignSpeakersToSegments(whisperSegments, voiceIntervals) {
   return whisperSegments.map((segment) => {
@@ -244,18 +304,12 @@ function assignSpeakersToSegments(whisperSegments, voiceIntervals) {
     }
 
     if (!bestInterval) {
-      const midpointMs = (segment.startMs + segment.endMs) / 2;
-
-      bestInterval = voiceIntervals.reduce((closest, interval) => {
-        const intervalMidMs = (interval.startMs + interval.endMs) / 2;
-        const closestMidMs = closest ? (closest.startMs + closest.endMs) / 2 : Infinity;
-
-        return Math.abs(intervalMidMs - midpointMs) < Math.abs(closestMidMs - midpointMs) ? interval : closest;
-      }, null);
+      const { interval, distanceMs } = nearestInterval(segment, voiceIntervals);
+      bestInterval = distanceMs <= MAX_GAP_TO_NEAREST_MS ? interval : null;
     }
 
     return {
-      speaker: bestInterval?.speaker || 'S1',
+      speaker: bestInterval?.speaker || null,
       text: segment.text,
       startMs: segment.startMs,
       endMs: segment.endMs,
@@ -291,7 +345,10 @@ function formatTimestamp(ms) {
 }
 
 async function requestSpeakerIdentities(segments, apiKey, model) {
+  // Неразмеченные куски имени не несут: кластера у них нет, а в стенограмме для
+  // модели они выглядели бы как ещё один участник по имени «null».
   const transcript = segments
+    .filter((segment) => segment.speaker)
     .map((segment) => `[${formatTimestamp(segment.startMs)}] ${segment.speaker}: ${segment.text}`)
     .join('\n');
 
@@ -341,7 +398,9 @@ function resolveSpeakerLabels(segments, identities) {
   const clusterOrder = [];
 
   for (const segment of segments) {
-    if (!clusterOrder.includes(segment.speaker)) {
+    // Неразмеченные куски (speaker: null) не заводят собственного «спикера»:
+    // это не человек, а признание, что участок не размечен.
+    if (segment.speaker && !clusterOrder.includes(segment.speaker)) {
       clusterOrder.push(segment.speaker);
     }
   }
@@ -364,7 +423,10 @@ function resolveSpeakerLabels(segments, identities) {
     }
   });
 
-  const relabeledSegments = segments.map((segment) => ({ ...segment, speaker: labelByCluster.get(segment.speaker) || segment.speaker }));
+  const relabeledSegments = segments.map((segment) => ({
+    ...segment,
+    speaker: segment.speaker ? labelByCluster.get(segment.speaker) || segment.speaker : UNKNOWN_SPEAKER_LABEL,
+  }));
 
   return { segments: relabeledSegments, identities: identitiesByLabel };
 }
@@ -377,8 +439,32 @@ function formatFinalOutput(segments) {
   return {
     text,
     segments,
-    speakerCount: new Set(segments.map((segment) => segment.speaker)).size,
+    // «Спикер ?» — это не участник встречи, а неразмеченный участок: в счёт
+    // говорящих он не идёт.
+    speakerCount: new Set(segments.map((segment) => segment.speaker)).size - (segments.some((s) => s.speaker === UNKNOWN_SPEAKER_LABEL) ? 1 : 0),
   };
+}
+
+/**
+ * Разметка по голосу не удалась, но расшифровка Whisper на руках — размечаем
+ * спикеров по тексту, а не выбрасываем работу: воркеровский запасной путь всё
+ * равно сделал бы то же самое, только сначала прогнал бы ASR по всей записи
+ * заново. Таймкоды при этом теряются: текстовая разметка не знает о времени.
+ */
+async function textSplitFallback(whisperSegments, config) {
+  const text = whisperSegments
+    .map((segment) => segment.text.trim())
+    .filter(Boolean)
+    .join(' ');
+  const split = await trySplitTranscriptBySpeaker(text);
+
+  if (!split) {
+    return null;
+  }
+
+  console.log(`Pipeline: text-based speaker split produced ${split.speakerCount} speaker(s)`);
+
+  return { ...split, language: config.language || null, identities: {} };
 }
 
 /**
@@ -418,6 +504,29 @@ export async function transcribeWithAccuratePipeline(file, audioBuffer, config =
     if (!whisperSegments.length || !voiceIntervals.length) {
       console.warn('Pipeline: missing Whisper segments or voice intervals, aborting');
       return null;
+    }
+
+    // Диагностика: до какой минуты вообще дотянулась разметка по голосу и какую
+    // долю речи она накрыла. Без этих двух чисел негодная разметка выглядела
+    // ровно как удачная.
+    const speechEndMs = Math.max(...whisperSegments.map((segment) => segment.endMs));
+    const intervalsEndMs = Math.max(...voiceIntervals.map((interval) => interval.endMs));
+    const coverage = voiceCoverage(whisperSegments, voiceIntervals);
+
+    console.log(
+      `Pipeline: voice intervals span ${(Math.min(...voiceIntervals.map((i) => i.startMs)) / 60000).toFixed(1)}-${(
+        intervalsEndMs / 60000
+      ).toFixed(1)} min of a ${(speechEndMs / 60000).toFixed(1)} min recording and cover ${(coverage * 100).toFixed(1)}% of transcribed speech`,
+    );
+
+    if (coverage < MIN_VOICE_COVERAGE) {
+      console.warn(
+        `Pipeline: voice diarization covered only ${(coverage * 100).toFixed(1)}% of speech (need ${(
+          MIN_VOICE_COVERAGE * 100
+        ).toFixed(0)}%) - слишком мало, чтобы доверять; размечаем спикеров по тексту расшифровки`,
+      );
+
+      return textSplitFallback(whisperSegments, config);
     }
 
     const merged = mergeAdjacentSameSpeaker(assignSpeakersToSegments(whisperSegments, voiceIntervals));
