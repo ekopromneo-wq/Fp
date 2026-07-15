@@ -38,9 +38,20 @@ async function checkCancelled(jobId) {
 }
 
 async function processRecording(data) {
-  const { jobId, recordingId } = data;
+  const { jobId, recordingId, retranscribe = false } = data;
 
   await checkCancelled(jobId);
+
+  // Перерасшифровка (пользователь сменил метод диаризации или прошлый результат
+  // негоден): сносим прошлую стенограмму и разметку спикеров, чтобы контрольная
+  // точка ниже не увела нас сразу в резюме, а новые метки спикеров не унаследовали
+  // имена от чужого разбиения.
+  if (retranscribe) {
+    await transaction(async (client) => {
+      await client.query('delete from transcripts where recording_id = $1', [recordingId]);
+      await client.query('delete from recording_speakers where recording_id = $1', [recordingId]);
+    });
+  }
 
   // Checkpoint: BullMQ retries re-run this same job from the top. If a
   // transcript already exists from an earlier (partially successful)

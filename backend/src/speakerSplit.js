@@ -2,12 +2,80 @@ import { parseJsonObject } from './llmJson.js';
 
 const MIN_WORDS_TO_SPLIT = 20;
 const MIN_COVERAGE = 0.8;
+// Модель обязана вернуть весь присланный текст обратно, поэтому длина куска
+// упирается не в контекст, а в лимит вывода. ~12k символов на кусок — это
+// примерно 4-5k токенов ответа: с запасом влезает даже в скромные лимиты.
+// Часовое совещание (~50k символов) раньше уходило одним запросом и обрывалось
+// на середине JSON.
+const MAX_CHUNK_CHARS = Number(process.env.SPEAKER_SPLIT_CHUNK_CHARS || 12000);
 
 function countWords(text) {
   return text.split(/\s+/).filter(Boolean).length;
 }
 
-async function callOpenRouterSpeakerSplit(transcriptText, model) {
+/**
+ * Режет стенограмму на куски по границам предложений: разрыв посреди фразы
+ * мешает модели понять, кто говорит, и плодит лишние смены спикера на стыках.
+ */
+function splitIntoChunks(text, maxChars) {
+  if (text.length <= maxChars) {
+    return [text];
+  }
+
+  const sentences = text.match(/[^.!?…]+[.!?…]+[\s]*|[^.!?…]+$/g) || [text];
+  const chunks = [];
+  let current = '';
+
+  for (const sentence of sentences) {
+    if (current && current.length + sentence.length > maxChars) {
+      chunks.push(current.trim());
+      current = '';
+    }
+
+    // Одно предложение длиннее куска (расшифровка без пунктуации) — режем как есть.
+    if (sentence.length > maxChars) {
+      for (let i = 0; i < sentence.length; i += maxChars) {
+        const piece = sentence.slice(i, i + maxChars);
+
+        if (i + maxChars >= sentence.length) {
+          current = piece;
+        } else {
+          chunks.push(piece);
+        }
+      }
+
+      continue;
+    }
+
+    current += sentence;
+  }
+
+  if (current.trim()) {
+    chunks.push(current.trim());
+  }
+
+  return chunks;
+}
+
+/**
+ * Склеивает реплики соседних кусков: если на стыке продолжает говорить тот же
+ * человек, две части его реплики должны остаться одной.
+ */
+function mergeAdjacentTurns(turns) {
+  return turns.reduce((merged, turn) => {
+    const previous = merged.at(-1);
+
+    if (previous && previous.speaker === turn.speaker) {
+      previous.text = `${previous.text} ${turn.text}`.trim();
+      return merged;
+    }
+
+    merged.push({ ...turn });
+    return merged;
+  }, []);
+}
+
+async function callOpenRouterSpeakerSplit(transcriptText, model, { knownSpeakers = [], previousTail = '' } = {}) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
@@ -43,7 +111,21 @@ async function callOpenRouterSpeakerSplit(transcriptText, model) {
         },
         {
           role: 'user',
-          content: `Раздели эту стенограмму по говорящим:\n\n${transcriptText}`,
+          content: [
+            // Куски размечаются отдельными запросами, поэтому имена и хвост
+            // предыдущего куска передаём явно: иначе «Спикер 2» во втором куске
+            // окажется другим человеком, чем в первом.
+            knownSpeakers.length
+              ? `Говорящие, уже найденные в предыдущих фрагментах этой же встречи: ${knownSpeakers.join(', ')}. ` +
+                'Используй ровно эти подписи для тех же людей, новые заводи только для новых голосов.'
+              : '',
+            previousTail
+              ? `Конец предыдущего фрагмента (только для контекста, НЕ включай его в ответ):\n"""${previousTail}"""`
+              : '',
+            `Раздели по говорящим этот фрагмент стенограммы:\n\n${transcriptText}`,
+          ]
+            .filter(Boolean)
+            .join('\n\n'),
         },
       ],
     }),
@@ -81,6 +163,10 @@ function turnsToSegments(turns) {
  * callers should fall back to the original single-segment transcript in that case.
  * `model` overrides the default (env var / gpt-4o-mini), used by text-only
  * diarization methods like Kimi that want a specific model for the split.
+ *
+ * Длинные стенограммы размечаются по кускам: модель возвращает весь текст
+ * обратно, и часовое совещание одним запросом упирается в лимит вывода —
+ * ответ обрывается посреди JSON, и разметка терялась целиком.
  */
 async function trySplitTranscriptBySpeaker(transcriptText, model) {
   const text = String(transcriptText || '').trim();
@@ -90,7 +176,23 @@ async function trySplitTranscriptBySpeaker(transcriptText, model) {
   }
 
   try {
-    const turns = await callOpenRouterSpeakerSplit(text, model);
+    const chunks = splitIntoChunks(text, MAX_CHUNK_CHARS);
+    const collected = [];
+
+    for (const [index, chunk] of chunks.entries()) {
+      const knownSpeakers = [...new Set(collected.map((turn) => turn.speaker))];
+      const previousTail = collected.at(-1)?.text.slice(-400) || '';
+
+      // Сбой одного куска не должен обнулять разметку всей встречи: пропускаем
+      // его и идём дальше, а годность итога решает проверка покрытия ниже.
+      try {
+        collected.push(...(await callOpenRouterSpeakerSplit(chunk, model, { knownSpeakers, previousTail })));
+      } catch (error) {
+        console.warn(`Speaker split failed for chunk ${index + 1}/${chunks.length}: ${error.message}`);
+      }
+    }
+
+    const turns = mergeAdjacentTurns(collected);
 
     if (!turns.length) {
       return null;

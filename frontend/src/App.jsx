@@ -757,17 +757,30 @@ function App() {
     await uploadRecordingFile(file);
   }
 
-  async function handleProcess(recording) {
+  async function handleProcess(recording, { retranscribe = false } = {}) {
     if (!recording) {
       return;
     }
 
+    // Перерасшифровка перезаписывает стенограмму и разметку спикеров — в том
+    // числе ручные правки и имена, поэтому спрашиваем.
+    if (retranscribe) {
+      const confirmed = window.confirm(
+        `Расшифровать "${recording.title}" заново?\n\nТекущая стенограмма, правки в ней и имена спикеров будут заменены результатом новой расшифровки.`,
+      );
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
     setProcessingId(recording.id);
-    setStatus(`Запускаем обработку "${recording.title}"...`);
+    setStatus(retranscribe ? `Расшифровываем "${recording.title}" заново...` : `Запускаем обработку "${recording.title}"...`);
 
     try {
       const response = await apiFetch(`/api/recordings/${recording.id}/jobs`, {
         method: 'POST',
+        body: JSON.stringify({ retranscribe }),
       });
 
       if (!response.ok) {

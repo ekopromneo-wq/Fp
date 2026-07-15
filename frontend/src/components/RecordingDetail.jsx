@@ -120,6 +120,20 @@ function RecordingDetail({
               ? 'Перезапустить обработку'
               : 'Запустить обработку'}
         </button>
+        {/* Обычная обработка переиспользует готовую стенограмму (пересобирает
+            только протокол). Чтобы применить другой метод диаризации или
+            переделать неудачную расшифровку, нужен явный запуск с нуля. */}
+        {recording.transcript && !isProcessingStatus(recording.status) ? (
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={() => onProcess(recording, { retranscribe: true })}
+            disabled={!canProcess}
+            title="Расшифровать заново текущим методом диаризации — стенограмма будет перезаписана"
+          >
+            Расшифровать заново
+          </button>
+        ) : null}
         {isProcessingStatus(recording.status) ? (
           <button
             className="button button-danger"

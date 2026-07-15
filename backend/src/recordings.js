@@ -1910,7 +1910,14 @@ export async function getRecordingAudio(id, ownerId, range = null) {
   };
 }
 
-export async function enqueueRecording(recordingId, ownerId) {
+/**
+ * `retranscribe` заставляет воркер расшифровать запись заново, а не
+ * переиспользовать готовую стенограмму. Нужен, когда пользователь сменил метод
+ * диаризации или прошлая расшифровка вышла негодной: без него повторная
+ * обработка всегда упиралась в контрольную точку в воркере и пересобирала
+ * протокол из той же стенограммы.
+ */
+export async function enqueueRecording(recordingId, ownerId, { retranscribe = false } = {}) {
   const job = await transaction(async (client) => {
     const recording = await client.query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
       recordingId,
@@ -1951,6 +1958,7 @@ export async function enqueueRecording(recordingId, ownerId) {
     {
       jobId: job.id,
       recordingId,
+      retranscribe,
     },
     {
       attempts: Number(process.env.RECORDING_JOB_ATTEMPTS || 3),
@@ -2405,7 +2413,8 @@ export function registerRecordingRoutes(app) {
 
   app.post('/api/recordings/:id/jobs', requireAuth, async (c) => {
     const user = getAuthUser(c);
-    const job = await enqueueRecording(c.req.param('id'), user.id);
+    const body = await c.req.json().catch(() => ({}));
+    const job = await enqueueRecording(c.req.param('id'), user.id, { retranscribe: body.retranscribe === true });
 
     if (!job) {
       return c.json({ error: 'Recording not found' }, 404);

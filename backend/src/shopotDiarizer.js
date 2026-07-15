@@ -1,6 +1,10 @@
 const SHOPOT_API_URL = process.env.SHOPOT_API_URL || 'https://api.shopot.ai';
 const SHOPOT_POLL_INTERVAL_MS = Number(process.env.SHOPOT_POLL_INTERVAL_MS || 5000);
 const SHOPOT_POLL_TIMEOUT_MS = Number(process.env.SHOPOT_POLL_TIMEOUT_MS || 30 * 60 * 1000);
+// Сколько опросов подряд может провалиться, прежде чем считать задачу
+// потерянной. Опрос идёт десятки минут, и одна сетевая осечка (или 502 от
+// балансировщика) не значит, что расшифровка на стороне Shopot умерла.
+const SHOPOT_POLL_MAX_CONSECUTIVE_ERRORS = Number(process.env.SHOPOT_POLL_MAX_CONSECUTIVE_ERRORS || 5);
 
 function sleep(ms) {
   return new Promise((resolve) => {
@@ -66,27 +70,60 @@ async function submitShopotJob(file, audioBuffer, apiKey) {
   return body.id;
 }
 
+/**
+ * Опрашивает задачу до готовности. Сетевые сбои и 5xx не прерывают опрос:
+ * задача живёт на стороне Shopot, и разумнее подождать следующего цикла, чем
+ * выбросить многоминутную расшифровку из-за одного неудачного запроса. Отказ
+ * самой задачи (FAILED) и 4xx — окончательные, их повторять незачем.
+ */
 async function pollShopotJob(taskId, apiKey) {
   const deadline = Date.now() + SHOPOT_POLL_TIMEOUT_MS;
+  let consecutiveErrors = 0;
 
   while (Date.now() < deadline) {
-    const response = await fetch(`${SHOPOT_API_URL}/v1/status/${taskId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    const body = await response.json().catch(() => null);
+    try {
+      const response = await fetch(`${SHOPOT_API_URL}/v1/status/${taskId}`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      const body = await response.json().catch(() => null);
 
-    if (!response.ok) {
-      throw new Error(body?.error || body?.message || `Shopot status check failed with ${response.status}`);
-    }
+      if (response.status >= 500) {
+        throw new Error(body?.error || body?.message || `Shopot status check failed with ${response.status}`);
+      }
 
-    const status = body?.transcription_status;
+      if (!response.ok) {
+        throw Object.assign(new Error(body?.error || body?.message || `Shopot status check failed with ${response.status}`), {
+          permanent: true,
+        });
+      }
 
-    if (status === 'FAILED') {
-      throw new Error(`Shopot transcription failed for task ${taskId}`);
-    }
+      const status = body?.transcription_status;
 
-    if (status === 'TRANSCRIBED' || status === 'COMPLETED') {
-      return body;
+      if (status === 'FAILED') {
+        throw Object.assign(new Error(`Shopot transcription failed for task ${taskId}`), { permanent: true });
+      }
+
+      if (status === 'TRANSCRIBED' || status === 'COMPLETED') {
+        return body;
+      }
+
+      consecutiveErrors = 0;
+    } catch (error) {
+      if (error.permanent) {
+        throw error;
+      }
+
+      consecutiveErrors += 1;
+
+      if (consecutiveErrors >= SHOPOT_POLL_MAX_CONSECUTIVE_ERRORS) {
+        throw new Error(
+          `Shopot status check failed ${consecutiveErrors} times in a row for task ${taskId}: ${error.message}`,
+        );
+      }
+
+      console.warn(
+        `Shopot status check failed (${consecutiveErrors}/${SHOPOT_POLL_MAX_CONSECUTIVE_ERRORS}) for task ${taskId}, retrying: ${error.message}`,
+      );
     }
 
     await sleep(SHOPOT_POLL_INTERVAL_MS);
