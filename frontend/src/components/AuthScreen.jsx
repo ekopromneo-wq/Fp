@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { demoEmail, demoPassword } from '../lib/api.js';
+import InstallButton from './InstallButton.jsx';
 
 function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage }) {
   const [email, setEmail] = useState(demoEmail);
@@ -58,6 +59,10 @@ function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage
         </button>
 
         {authMessage ? <p className="auth-message">{authMessage}</p> : null}
+
+        <div className="auth-install">
+          <InstallButton variant="full" />
+        </div>
       </section>
     </main>
   );

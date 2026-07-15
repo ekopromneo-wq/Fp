@@ -2265,3 +2265,30 @@ audio {
     grid-template-columns: 1fr;
   }
 }
+
+/* ===== Кнопка установки PWA ===== */
+.auth-install {
+  margin-top: 14px;
+  display: flex;
+  justify-content: center;
+}
+
+.install-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.install-ios {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+.install-ios-hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  text-align: center;
+  max-width: 320px;
+}

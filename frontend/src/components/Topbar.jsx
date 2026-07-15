@@ -3,6 +3,7 @@ import microphoneIcon from '../assets/icons/microphone.png';
 import refreshIcon from '../assets/icons/refresh.png';
 import settingsIcon from '../assets/icons/settings.png';
 import { formatDate, formatDuration } from '../lib/format.js';
+import InstallButton from './InstallButton.jsx';
 
 function BellIcon() {
   return (
@@ -233,6 +234,8 @@ export default function Topbar({
               </button>
             </>
           )}
+
+          <InstallButton variant="compact" />
 
           <NotificationsMenu
             notifications={notifications}
