@@ -8,3 +8,6 @@ build
 *.log
 npm-debug.log*
 backend/data
+# Deploy-time артефакты на сервере (наполняются при деплое, монтируются в caddy)
+/download/
+/app/

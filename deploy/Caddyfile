@@ -1,8 +1,14 @@
 {$CADDY_DOMAIN} {
-	# Защищённая паролем раздача готового PWA-билда (HTTP Basic Auth).
-	# /download/voxmate-pwa.zip → /srv/pwa/voxmate-pwa.zip (handle_path срезает
-	# префикс). Логин: voxmate. Хеш ниже — bcrypt (cost 14) от пароля,
-	# переданного пользователю отдельно; сам пароль в репозиторий не попадает.
+	# API и health-эндпоинты — БЕЗ Basic Auth: к ним ходят и клиент-ноутбук
+	# (кросс-домен, без пароля), и сам PWA (same-origin). Пароль здесь сломал
+	# бы клиента-ноутбука. Совпадает первым, поэтому оценивается раньше catch-all.
+	@backend path /api/* /health*
+	handle @backend {
+		reverse_proxy api:4000
+	}
+
+	# Скачивание готового zip-архива PWA за паролем (логин voxmate).
+	# /download/voxmate-pwa.zip → /srv/pwa/voxmate-pwa.zip (префикс срезается).
 	handle_path /download/* {
 		basic_auth {
 			voxmate $2a$14$9Zen4VjrvBxGIgHGOjkOSeJDBIXe5EGiYL/zwpfX4KMmtLXGFE3Na
@@ -11,8 +17,15 @@
 		file_server
 	}
 
-	# Всё остальное — как раньше, на API.
+	# Сам PWA — открыть/установить прямо с сервера за тем же паролем: статика
+	# распакованного билда + SPA-фолбэк на index.html. Хеш — bcrypt (cost 14),
+	# пароль в репозиторий не коммитится (передан пользователю отдельно).
 	handle {
-		reverse_proxy api:4000
+		basic_auth {
+			voxmate $2a$14$9Zen4VjrvBxGIgHGOjkOSeJDBIXe5EGiYL/zwpfX4KMmtLXGFE3Na
+		}
+		root * /srv/app
+		try_files {path} /index.html
+		file_server
 	}
 }

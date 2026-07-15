@@ -13,6 +13,9 @@ services:
       # Готовый PWA-билд для защищённого паролем скачивания (see Caddyfile
       # /download). Каталог на сервере наполняется при деплое, вне git.
       - ./download:/srv/pwa:ro
+      # Распакованный PWA для открытия/установки прямо с сервера за паролем
+      # (see Caddyfile catch-all). Тоже наполняется при деплое, вне git.
+      - ./app:/srv/app:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
