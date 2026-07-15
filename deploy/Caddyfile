@@ -1,3 +1,18 @@
 {$CADDY_DOMAIN} {
-	reverse_proxy api:4000
+	# Защищённая паролем раздача готового PWA-билда (HTTP Basic Auth).
+	# /download/voxmate-pwa.zip → /srv/pwa/voxmate-pwa.zip (handle_path срезает
+	# префикс). Логин: voxmate. Хеш ниже — bcrypt (cost 14) от пароля,
+	# переданного пользователю отдельно; сам пароль в репозиторий не попадает.
+	handle_path /download/* {
+		basic_auth {
+			voxmate $2a$14$9Zen4VjrvBxGIgHGOjkOSeJDBIXe5EGiYL/zwpfX4KMmtLXGFE3Na
+		}
+		root * /srv/pwa
+		file_server
+	}
+
+	# Всё остальное — как раньше, на API.
+	handle {
+		reverse_proxy api:4000
+	}
 }

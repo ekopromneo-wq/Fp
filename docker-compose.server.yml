@@ -10,6 +10,9 @@ services:
       - CADDY_DOMAIN=${CADDY_DOMAIN:-:80}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Готовый PWA-билд для защищённого паролем скачивания (see Caddyfile
+      # /download). Каталог на сервере наполняется при деплое, вне git.
+      - ./download:/srv/pwa:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
