@@ -11,3 +11,6 @@ backend/data
 # Deploy-time артефакты на сервере (наполняются при деплое, монтируются в caddy)
 /download/
 /app/
+
+# Артефакт сборки PWA: собирается локально и заливается на сервер, не в git.
+frontend/voxmate-pwa.zip
