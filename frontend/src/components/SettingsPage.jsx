@@ -3,6 +3,7 @@ import SmtpSettingsPanel from './settings/SmtpSettingsPanel.jsx';
 import TelegramSettingsPanel from './settings/TelegramSettingsPanel.jsx';
 import BitrixSettingsPanel from './settings/BitrixSettingsPanel.jsx';
 import NotificationSettingsPanel from './settings/NotificationSettingsPanel.jsx';
+import SendSettingsPanel from './settings/SendSettingsPanel.jsx';
 import MicrophoneSettingsPanel from './settings/MicrophoneSettingsPanel.jsx';
 
 function SettingsPage({ settings, micDeviceId, setMicDeviceId, status }) {
@@ -52,6 +53,14 @@ function SettingsPage({ settings, micDeviceId, setMicDeviceId, status }) {
         setDraft={settings.setNotificationSettingsDraft}
         onSubmit={settings.handleSaveNotificationSettings}
         isSaving={settings.isSavingNotificationSettings}
+        isSettingsLoading={settings.isSettingsLoading}
+      />
+
+      <SendSettingsPanel
+        draft={settings.sendSettingsDraft}
+        setDraft={settings.setSendSettingsDraft}
+        onSubmit={settings.handleSaveSendSettings}
+        isSaving={settings.isSavingSendSettings}
         isSettingsLoading={settings.isSettingsLoading}
       />
 

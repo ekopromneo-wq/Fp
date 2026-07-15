@@ -8,6 +8,7 @@ import { registerUploadSessionRoutes } from './uploadSessionRoutes.js';
 import { cleanupStaleUploadSessions } from './uploadSessions.js';
 import { registerNotificationRoutes, cleanupOldNotifications } from './notifications.js';
 import { registerContactRoutes } from './contacts.js';
+import { registerSendingRoutes } from './sendingRoutes.js';
 import { runMigrations } from './migrations.js';
 import { ensureAudioBucket } from './storage.js';
 
@@ -86,6 +87,7 @@ registerRecordingRoutes(app);
 registerUploadSessionRoutes(app);
 registerNotificationRoutes(app);
 registerContactRoutes(app);
+registerSendingRoutes(app);
 
 const CLEANUP_INTERVAL_MS = Number(process.env.CLEANUP_INTERVAL_MS || 60 * 60 * 1000);
 

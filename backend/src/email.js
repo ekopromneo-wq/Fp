@@ -1,5 +1,7 @@
 import nodemailer from 'nodemailer';
 import { PROTOCOL_SECTION_LABELS, getProtocolTemplate } from './protocolTemplates.js';
+import { PAYLOAD_KINDS, PermanentSendError } from './sending.js';
+import { buildProtocolDocxBuffer } from './protocolDocx.js';
 
 function getSmtpConfig(input = {}) {
   const host = input.host || process.env.SMTP_HOST;
@@ -9,7 +11,7 @@ function getSmtpConfig(input = {}) {
   const from = input.from || process.env.SMTP_FROM || user;
 
   if (!host || !from) {
-    throw new Error('SMTP is not configured');
+    throw new PermanentSendError('Почта не настроена — укажите SMTP в настройках');
   }
 
   return {
@@ -31,20 +33,33 @@ function escapeHtml(value) {
     .replace(/'/g, '&#039;');
 }
 
-function normalizeRecipients(input) {
+// US-11.2: «Недействительный адрес → сообщение + предложение выбрать другой».
+// Называем конкретный адрес — иначе из списка в десяток получателей непонятно,
+// какой именно переписывать. PermanentSendError, чтобы отправка не уходила на
+// три круга повторов из-за опечатки.
+function normalizeRecipients(input, { field = 'Получатель' } = {}) {
   const source = Array.isArray(input) ? input : String(input || '').split(/[,\n;]/);
   const recipients = source.map((item) => String(item || '').trim()).filter(Boolean);
   const unique = [...new Set(recipients.map((item) => item.toLowerCase()))];
 
   if (unique.length === 0) {
-    throw new Error('At least one recipient is required');
+    throw new PermanentSendError('Укажите хотя бы одного получателя');
   }
 
-  if (unique.some((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
-    throw new Error('Recipient email is invalid');
+  const invalid = unique.filter((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+
+  if (invalid.length) {
+    throw new PermanentSendError(`${field}: недействительный адрес — ${invalid.join(', ')}. Укажите другой.`);
   }
 
   return unique;
+}
+
+// CC/BCC опциональны (US-11.2): пустое поле — это не ошибка, в отличие от
+// пустого списка основных получателей.
+function normalizeOptionalRecipients(input, field) {
+  const hasValue = Array.isArray(input) ? input.length > 0 : String(input || '').trim().length > 0;
+  return hasValue ? normalizeRecipients(input, { field }) : [];
 }
 
 // `decisions` items are {text, disputed} objects (US-8.1), everything else
@@ -106,11 +121,26 @@ function buildTasksHtml(tasks) {
   </table>`;
 }
 
-function buildEmailContent(recording, message = '') {
+// Названия проектов записи: с эпика 10 встреча живёт в нескольких проектах, а
+// письмо до сих пор показывало только первый (recording.project).
+function projectNames(recording) {
+  const projects = recording.projects?.length ? recording.projects : recording.project ? [recording.project] : [];
+  return projects.map((project) => project.name).join(', ') || 'без проекта';
+}
+
+/**
+ * US-11.1: «Отправляем: протокол, краткое резюме, задачи» — payloadKind решает,
+ * что попадёт в письмо/сообщение. 'protocol' — прежнее поведение (всё целиком),
+ * поэтому он же и по умолчанию: старые вызовы не меняют смысла.
+ */
+function buildEmailContent(recording, message = '', payloadKind = 'protocol') {
   const summary = recording.summary;
   const protocol = summary?.protocol || {};
   const template = getProtocolTemplate(recording.meetingType);
   const intro = String(message || '').trim();
+  const withSummary = payloadKind === 'protocol' || payloadKind === 'summary';
+  const withProtocol = payloadKind === 'protocol';
+  const withTasks = payloadKind === 'protocol' || payloadKind === 'tasks';
 
   const protocolTextBlocks = template.sections.flatMap((key) => [
     `### ${PROTOCOL_SECTION_LABELS[key]}`,
@@ -123,17 +153,13 @@ function buildEmailContent(recording, message = '') {
     `# ${recording.title}`,
     '',
     `Файл: ${recording.originalFilename || 'не прикреплен'}`,
-    `Проект: ${recording.project?.name || 'без проекта'}`,
+    `Проект: ${projectNames(recording)}`,
     `Статус: ${recording.status}`,
     '',
-    ...(summary?.executiveSummary ? ['## Executive summary', summary.executiveSummary, ''] : []),
-    '## Резюме',
-    summary?.summary || 'Резюме пока нет.',
-    '',
-    '## Протокол',
-    ...protocolTextBlocks,
-    '## Задачи',
-    buildTasksText(recording.tasks),
+    ...(withSummary && summary?.executiveSummary ? ['## Executive summary', summary.executiveSummary, ''] : []),
+    ...(withSummary ? ['## Резюме', summary?.summary || 'Резюме пока нет.', ''] : []),
+    ...(withProtocol ? ['## Протокол', ...protocolTextBlocks] : []),
+    ...(withTasks ? ['## Задачи', buildTasksText(recording.tasks)] : []),
   ]
     .filter((item, index) => index !== 0 || item)
     .join('\n');
@@ -151,23 +177,32 @@ function buildEmailContent(recording, message = '') {
         <h1>${escapeHtml(recording.title)}</h1>
         <p>
           <strong>Файл:</strong> ${escapeHtml(recording.originalFilename || 'не прикреплен')}<br>
-          <strong>Проект:</strong> ${escapeHtml(recording.project?.name || 'без проекта')}<br>
+          <strong>Проект:</strong> ${escapeHtml(projectNames(recording))}<br>
           <strong>Статус:</strong> ${escapeHtml(recording.status)}
         </p>
-        ${summary?.executiveSummary ? `<h2>Executive summary</h2><p>${escapeHtml(summary.executiveSummary).replace(/\n/g, '<br>')}</p>` : ''}
-        <h2>Резюме</h2>
-        <p>${escapeHtml(summary?.summary || 'Резюме пока нет.')}</p>
-        <h2>Протокол</h2>
-        ${protocolHtmlBlocks}
-        <h2>Задачи</h2>
-        ${buildTasksHtml(recording.tasks)}
+        ${withSummary && summary?.executiveSummary ? `<h2>Executive summary</h2><p>${escapeHtml(summary.executiveSummary).replace(/\n/g, '<br>')}</p>` : ''}
+        ${withSummary ? `<h2>Резюме</h2><p>${escapeHtml(summary?.summary || 'Резюме пока нет.')}</p>` : ''}
+        ${withProtocol ? `<h2>Протокол</h2>${protocolHtmlBlocks}` : ''}
+        ${withTasks ? `<h2>Задачи</h2>${buildTasksHtml(recording.tasks)}` : ''}
       </body>
     </html>`;
 
   return { text, html };
 }
 
-export { buildEmailContent };
+// US-11.2: «тема/текст формируются автоматически» — тема зависит от того, что
+// именно шлём, иначе письмо с одними задачами приходит с темой про протокол.
+const SUBJECT_PREFIXES = {
+  protocol: 'Протокол встречи',
+  summary: 'Краткое резюме встречи',
+  tasks: 'Задачи по встрече',
+};
+
+function buildSubject(recording, payloadKind) {
+  return `${SUBJECT_PREFIXES[payloadKind] || SUBJECT_PREFIXES.protocol}: ${recording.title}`;
+}
+
+export { buildEmailContent, buildSubject };
 
 // Sends a single task (US-9.4 "внешний исполнитель ... задача уходит по
 // Email"), not the whole recording protocol - deliberately separate from
@@ -230,9 +265,12 @@ export async function sendNotificationEmail(smtpConfig, to, subject, text) {
 
 export async function sendRecordingEmail(recording, input = {}, smtpConfig = {}) {
   const config = getSmtpConfig(smtpConfig || {});
+  const payloadKind = PAYLOAD_KINDS.includes(input.payloadKind) ? input.payloadKind : 'protocol';
   const to = normalizeRecipients(input.recipients);
-  const subject = String(input.subject || '').trim() || `VoxMate: ${recording.title}`;
-  const { text, html } = buildEmailContent(recording, input.message);
+  const cc = normalizeOptionalRecipients(input.cc, 'Копия');
+  const bcc = normalizeOptionalRecipients(input.bcc, 'Скрытая копия');
+  const subject = String(input.subject || '').trim() || buildSubject(recording, payloadKind);
+  const { text, html } = buildEmailContent(recording, input.message, payloadKind);
   const transporter = nodemailer.createTransport({
     host: config.host,
     port: config.port,
@@ -240,17 +278,30 @@ export async function sendRecordingEmail(recording, input = {}, smtpConfig = {})
     auth: config.auth,
   });
 
+  const attachments = [];
+
+  if (input.attachDocx) {
+    const { filename, buffer } = await buildProtocolDocxBuffer(recording, payloadKind);
+    attachments.push({ filename, content: buffer });
+  }
+
   const result = await transporter.sendMail({
     from: config.from,
     to,
+    ...(cc.length ? { cc } : {}),
+    ...(bcc.length ? { bcc } : {}),
     subject,
     text,
     html,
+    ...(attachments.length ? { attachments } : {}),
   });
 
   return {
     messageId: result.messageId,
     accepted: result.accepted || [],
     rejected: result.rejected || [],
+    cc,
+    bcc,
+    attached: attachments.map((item) => item.filename),
   };
 }

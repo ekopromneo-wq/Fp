@@ -1,10 +1,12 @@
+import { PermanentSendError } from './sending.js';
+
 function getBitrixConfig(input = {}) {
   const webhookUrl = input.webhookUrl || process.env.BITRIX_WEBHOOK_URL;
   const defaultResponsibleId = input.defaultResponsibleId || process.env.BITRIX_DEFAULT_RESPONSIBLE_ID;
   const defaultGroupId = input.defaultGroupId || process.env.BITRIX_DEFAULT_GROUP_ID;
 
   if (!webhookUrl) {
-    throw new Error('Bitrix24 is not configured');
+    throw new PermanentSendError('Битрикс24 не настроен — укажите вебхук в настройках');
   }
 
   return {

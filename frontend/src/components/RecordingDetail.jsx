@@ -3,6 +3,7 @@ import SpeakerRow from './SpeakerRow.jsx';
 import TaskForm from './TaskForm.jsx';
 import TaskRow from './TaskRow.jsx';
 import ProtocolView from './ProtocolView.jsx';
+import SendPanel from './SendPanel.jsx';
 import TranscriptView from './TranscriptView.jsx';
 import TranscribingProgress from './TranscribingProgress.jsx';
 import { getAudioUrl, isProcessingStatus } from '../lib/api.js';
@@ -12,10 +13,10 @@ import { getStatusLabel } from '../lib/statusLabels.js';
 
 /**
  * The right-hand detail panel for one recording: status, actions, metadata
- * editing, email/telegram sends, transcript, speakers, protocol, tasks and
- * job history. `tasks` and `speakers` are the whole useTasks/useSpeakers
- * hook results - the sections consume so much of each that itemizing every
- * field as its own prop would just restate the hook's return shape.
+ * editing, sending (SendPanel), transcript, speakers, protocol, tasks and
+ * job history. `tasks`, `speakers` and `sending` are the whole hook results
+ * - the sections consume so much of each that itemizing every field as its
+ * own prop would just restate the hook's return shape.
  */
 function RecordingDetail({
   recording,
@@ -41,14 +42,9 @@ function RecordingDetail({
   onGenerateTitle,
   isSavingRecording,
   onSaveRecordingMetadata,
-  emailDraft,
-  setEmailDraft,
-  isSendingEmail,
-  onSendEmail,
-  telegramDraft,
-  setTelegramDraft,
-  isSendingTelegram,
-  onSendTelegram,
+  sending,
+  sendConfig,
+  onCopyShareLink,
   onUpdateTranscript,
   onUpdateProtocol,
   onDictate,
@@ -253,53 +249,7 @@ function RecordingDetail({
         </button>
       </section>
 
-      <form className="email-send-panel" onSubmit={onSendEmail}>
-        <h3>Email</h3>
-        <label>
-          Получатели
-          <input
-            value={emailDraft.recipients}
-            onChange={(event) => setEmailDraft((current) => ({ ...current, recipients: event.target.value }))}
-            placeholder="name@example.com, team@example.com"
-          />
-        </label>
-        <label>
-          Комментарий
-          <textarea
-            value={emailDraft.message}
-            onChange={(event) => setEmailDraft((current) => ({ ...current, message: event.target.value }))}
-            rows={3}
-            placeholder="Короткое сопроводительное сообщение"
-          />
-        </label>
-        <button className="button button-secondary" type="submit" disabled={!canExport || isSendingEmail}>
-          {isSendingEmail ? 'Отправляем...' : 'Отправить протокол'}
-        </button>
-      </form>
-
-      <form className="email-send-panel" onSubmit={onSendTelegram}>
-        <h3>Telegram</h3>
-        <label>
-          Chat ID (необязательно)
-          <input
-            value={telegramDraft.chatId}
-            onChange={(event) => setTelegramDraft((current) => ({ ...current, chatId: event.target.value }))}
-            placeholder="По умолчанию из настроек"
-          />
-        </label>
-        <label>
-          Комментарий
-          <textarea
-            value={telegramDraft.message}
-            onChange={(event) => setTelegramDraft((current) => ({ ...current, message: event.target.value }))}
-            rows={3}
-            placeholder="Короткое сопроводительное сообщение"
-          />
-        </label>
-        <button className="button button-secondary" type="submit" disabled={!canExport || isSendingTelegram}>
-          {isSendingTelegram ? 'Отправляем...' : 'Отправить в Telegram'}
-        </button>
-      </form>
+      <SendPanel sending={sending} sendConfig={sendConfig} canSend={canExport} onCopyShareLink={onCopyShareLink} />
 
       <dl className="detail-grid">
         <div>

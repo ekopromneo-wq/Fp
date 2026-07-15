@@ -30,6 +30,10 @@ services:
       - PORT=4000
       - NODE_ENV=production
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:4173}
+      # Адрес, по которому открывается приложение: из него собираются ссылки на
+      # результат (US-11.1). Без него ссылка соберётся из origin запроса, а он у
+      # PWA и клиента-ноутбука разный.
+      - PUBLIC_APP_URL=${PUBLIC_APP_URL:-}
       # Закрытая регистрация: аккаунты только у администратора, вход по паролю
       # аккаунта служит защитой всего PWA (вместо Basic Auth на оболочке).
       - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}

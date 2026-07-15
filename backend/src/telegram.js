@@ -1,4 +1,5 @@
 import { buildEmailContent } from './email.js';
+import { PAYLOAD_KINDS, PermanentSendError } from './sending.js';
 
 const TELEGRAM_MESSAGE_LIMIT = 4000;
 
@@ -7,7 +8,7 @@ function getTelegramConfig(input = {}) {
   const chatId = input.chatId || process.env.TELEGRAM_DEFAULT_CHAT_ID;
 
   if (!botToken || !chatId) {
-    throw new Error('Telegram is not configured');
+    throw new PermanentSendError('Telegram не настроен — укажите бота и чат в настройках');
   }
 
   return { botToken, chatId };
@@ -48,7 +49,15 @@ async function sendTelegramMessage(botToken, chatId, text) {
   const body = await response.json().catch(() => null);
 
   if (!response.ok || !body?.ok) {
-    throw new Error(body?.description || `Telegram sendMessage failed with ${response.status}`);
+    const message = body?.description || `Telegram sendMessage failed with ${response.status}`;
+
+    // 400/403 — чат не найден, бот заблокирован, текст не принят: повтор ничего
+    // не изменит. 429/5xx — временное, их повторяем (US-11.1).
+    if (response.status === 400 || response.status === 403) {
+      throw new PermanentSendError(message);
+    }
+
+    throw new Error(message);
   }
 
   return body.result;
@@ -63,7 +72,8 @@ export async function sendNotificationTelegram(telegramConfig, text) {
 
 export async function sendRecordingTelegram(recording, input = {}, telegramConfig = {}) {
   const config = getTelegramConfig({ ...telegramConfig, chatId: input.chatId || telegramConfig.chatId });
-  const { text } = buildEmailContent(recording, input.message);
+  const payloadKind = PAYLOAD_KINDS.includes(input.payloadKind) ? input.payloadKind : 'protocol';
+  const { text } = buildEmailContent(recording, input.message, payloadKind);
   const chunks = splitIntoChunks(text, TELEGRAM_MESSAGE_LIMIT);
   const messages = [];
 

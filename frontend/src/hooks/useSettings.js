@@ -3,11 +3,12 @@ import { apiFetch } from '../lib/api.js';
 
 /**
  * Owns every settings panel's draft state and its load/save round-trips
- * (SMTP, Telegram, Bitrix24, diarization, notifications). Extracted
- * verbatim from App.jsx - the only coupling back to the app is setStatus
- * for the shared status line.
+ * (SMTP, Telegram, Bitrix24, diarization, notifications, sending). Extracted
+ * verbatim from App.jsx - the couplings back to the app are setStatus for the
+ * shared status line and onSendConfigSaved, which lets the send panel pick up
+ * new defaults without a reload.
  */
-export default function useSettings(setStatus) {
+export default function useSettings(setStatus, onSendConfigSaved) {
   const [smtpDraft, setSmtpDraft] = useState({ host: '', port: '587', secure: false, user: '', pass: '', from: '' });
   const [smtpHasPassword, setSmtpHasPassword] = useState(false);
   const [telegramSettingsDraft, setTelegramSettingsDraft] = useState({ chatId: '', botToken: '' });
@@ -29,6 +30,8 @@ export default function useSettings(setStatus) {
   const [isSavingDiarizationSettings, setIsSavingDiarizationSettings] = useState(false);
   const [notificationSettingsDraft, setNotificationSettingsDraft] = useState({ channels: ['in_app', 'email'], dnd: false });
   const [isSavingNotificationSettings, setIsSavingNotificationSettings] = useState(false);
+  const [sendSettingsDraft, setSendSettingsDraft] = useState({ preview: true, defaultChannel: 'email', attachDocx: true });
+  const [isSavingSendSettings, setIsSavingSendSettings] = useState(false);
   const [isSettingsLoading, setIsSettingsLoading] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
 
@@ -289,12 +292,58 @@ export default function useSettings(setStatus) {
     }
   }
 
+  async function loadSendSettings() {
+    setIsSettingsLoading(true);
+
+    try {
+      const response = await apiFetch('/api/settings/send');
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось загрузить настройки отправки');
+      }
+
+      setSendSettingsDraft(data.send);
+    } catch (error) {
+      setStatus(error.message || 'Ошибка загрузки настроек отправки');
+    } finally {
+      setIsSettingsLoading(false);
+    }
+  }
+
+  async function handleSaveSendSettings(event) {
+    event.preventDefault();
+    setIsSavingSendSettings(true);
+    setStatus('Сохраняем настройки отправки...');
+
+    try {
+      const response = await apiFetch('/api/settings/send', {
+        method: 'PATCH',
+        body: JSON.stringify(sendSettingsDraft),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось сохранить настройки отправки');
+      }
+
+      setSendSettingsDraft(data.send);
+      setStatus('Настройки отправки сохранены');
+      onSendConfigSaved?.(data.send);
+    } catch (error) {
+      setStatus(error.message || 'Ошибка сохранения настроек отправки');
+    } finally {
+      setIsSavingSendSettings(false);
+    }
+  }
+
   function loadAllSettings() {
     loadSmtpSettings();
     loadTelegramSettings();
     loadBitrixSettings();
     loadDiarizationSettings();
     loadNotificationSettings();
+    loadSendSettings();
   }
 
   return {
@@ -317,6 +366,9 @@ export default function useSettings(setStatus) {
     notificationSettingsDraft,
     setNotificationSettingsDraft,
     isSavingNotificationSettings,
+    sendSettingsDraft,
+    setSendSettingsDraft,
+    isSavingSendSettings,
     isSettingsLoading,
     isSavingSettings,
     loadAllSettings,
@@ -325,5 +377,6 @@ export default function useSettings(setStatus) {
     handleSaveBitrixSettings,
     handleSaveDiarizationSettings,
     handleSaveNotificationSettings,
+    handleSaveSendSettings,
   };
 }

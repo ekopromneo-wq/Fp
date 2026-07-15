@@ -352,6 +352,47 @@ const migrations = [
       create index if not exists project_members_project_id_idx on project_members(project_id);
     `,
   },
+  {
+    id: '021_deliveries_and_share_links',
+    sql: `
+      -- US-11.1 «фиксируем доставку»: одна строка на попытку отправки в канал,
+      -- включая проваленные — журнал нужен и для показа ошибки с предложением
+      -- сменить канал, и для подсказки получателей по истории.
+      create table if not exists deliveries (
+        id uuid primary key default gen_random_uuid(),
+        owner_id uuid not null references app_users(id) on delete cascade,
+        recording_id uuid not null references recordings(id) on delete cascade,
+        channel text not null check (channel in ('email', 'telegram', 'bitrix')),
+        payload_kind text not null check (payload_kind in ('protocol', 'summary', 'tasks')),
+        recipients jsonb not null default '[]'::jsonb,
+        status text not null check (status in ('sent', 'failed')),
+        attempts integer not null default 1,
+        last_error text,
+        external_refs jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now()
+      );
+
+      create index if not exists deliveries_recording_id_idx on deliveries(recording_id, created_at desc);
+      create index if not exists deliveries_owner_id_idx on deliveries(owner_id, created_at desc);
+
+      -- US-11.1 «ссылка на результат»: срок действия неделя, доступ отзывается,
+      -- пароль не нужен — токена достаточно.
+      create table if not exists share_links (
+        id uuid primary key default gen_random_uuid(),
+        token text not null unique,
+        owner_id uuid not null references app_users(id) on delete cascade,
+        recording_id uuid not null references recordings(id) on delete cascade,
+        payload_kind text not null check (payload_kind in ('protocol', 'summary', 'tasks')),
+        expires_at timestamptz not null,
+        revoked_at timestamptz,
+        created_at timestamptz not null default now()
+      );
+
+      create index if not exists share_links_recording_id_idx on share_links(recording_id, created_at desc);
+
+      alter table app_users add column if not exists send_config jsonb;
+    `,
+  },
 ];
 
 export async function runMigrations() {

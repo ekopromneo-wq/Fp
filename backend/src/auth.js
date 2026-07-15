@@ -248,6 +248,31 @@ function publicNotificationConfig(config = {}) {
   };
 }
 
+// US-11.1: «Подтверждение и предпросмотр — по настройке». По умолчанию
+// предпросмотр включён: отправка — необратимое действие наружу, и спека требует
+// подтверждать её всегда (раздел про AI: «Всегда с подтверждением: ... отправка»).
+const SEND_CHANNELS = new Set(['email', 'telegram']);
+
+function normalizeSendConfig(input = {}, previous = {}) {
+  const preview = typeof input.preview === 'boolean' ? input.preview : previous.preview;
+  const defaultChannel = SEND_CHANNELS.has(input.defaultChannel)
+    ? input.defaultChannel
+    : SEND_CHANNELS.has(previous.defaultChannel)
+      ? previous.defaultChannel
+      : 'email';
+  const attachDocx = typeof input.attachDocx === 'boolean' ? input.attachDocx : previous.attachDocx;
+
+  return {
+    preview: preview === undefined ? true : preview,
+    defaultChannel,
+    attachDocx: attachDocx === undefined ? true : attachDocx,
+  };
+}
+
+function publicSendConfig(config = {}) {
+  return normalizeSendConfig(config, config);
+}
+
 async function createSession(userId) {
   const token = randomBytes(32).toString('base64url');
   const tokenHash = hashToken(token);
@@ -346,6 +371,11 @@ export async function getUserDiarizationConfig(userId) {
 export async function getUserNotificationConfig(userId) {
   const result = await query('select notification_config from app_users where id = $1', [userId]);
   return result.rows[0]?.notification_config || null;
+}
+
+export async function getUserSendConfig(userId) {
+  const result = await query('select send_config from app_users where id = $1', [userId]);
+  return result.rows[0]?.send_config || null;
 }
 
 export function registerAuthRoutes(app) {
@@ -457,6 +487,27 @@ export function registerAuthRoutes(app) {
     ]);
 
     return c.json({ notifications: publicNotificationConfig(config) });
+  });
+
+  app.get('/api/settings/send', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const config = await getUserSendConfig(user.id);
+
+    return c.json({ send: publicSendConfig(config || {}) });
+  });
+
+  app.patch('/api/settings/send', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const previous = (await getUserSendConfig(user.id)) || {};
+    const config = normalizeSendConfig(body, previous);
+
+    await query('update app_users set send_config = $1::jsonb, updated_at = now() where id = $2', [
+      JSON.stringify(config),
+      user.id,
+    ]);
+
+    return c.json({ send: publicSendConfig(config) });
   });
 
   app.post('/api/auth/register', async (c) => {

@@ -9,6 +9,7 @@ import SettingsPage from './components/SettingsPage.jsx';
 import LibraryControls from './components/LibraryControls.jsx';
 import RecordingDetail from './components/RecordingDetail.jsx';
 import AuthScreen from './components/AuthScreen.jsx';
+import SharePage from './components/SharePage.jsx';
 import VoicePanel from './components/VoicePanel/VoicePanel.jsx';
 import useMicRecorder from './hooks/useMicRecorder.js';
 import useIsMobile from './hooks/useIsMobile.js';
@@ -19,6 +20,7 @@ import useProjects from './hooks/useProjects.js';
 import useTaskSearch from './hooks/useTaskSearch.js';
 import useTasks from './hooks/useTasks.js';
 import useSpeakers from './hooks/useSpeakers.js';
+import useSending from './hooks/useSending.js';
 import { apiFetch, isProcessingStatus } from './lib/api.js';
 import {
   buildRecordingExport,
@@ -50,6 +52,9 @@ function App() {
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [recordings, setRecordings] = useState([]);
   const [projects, setProjects] = useState([]);
+  // Токен читается один раз при монтировании: смена адреса без роутера всё
+  // равно перезагружает страницу.
+  const [shareToken] = useState(() => new URLSearchParams(window.location.search).get('share'));
   const [activePage, setActivePage] = useState('library');
   const [selectedRecordingId, setSelectedRecordingId] = useState(null);
   const [selectedRecording, setSelectedRecording] = useState(null);
@@ -77,10 +82,7 @@ function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [summaryLength, setSummaryLength] = useState('medium');
-  const [emailDraft, setEmailDraft] = useState({ recipients: '', message: '' });
-  const [telegramDraft, setTelegramDraft] = useState({ chatId: '', message: '' });
-  const [isSendingTelegram, setIsSendingTelegram] = useState(false);
-  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [sendConfig, setSendConfig] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -89,12 +91,24 @@ function App() {
   const [deletingId, setDeletingId] = useState(null);
   const [isJobsCollapsed, setIsJobsCollapsed] = useState(false);
 
-  const settings = useSettings(setStatus);
+  const settings = useSettings(setStatus, setSendConfig);
   const contactsPage = useContacts(setStatus);
   const projectsPage = useProjects(setStatus, loadProjects);
   const taskSearch = useTaskSearch(setStatus);
   const tasks = useTasks({ selectedRecording, setSelectedRecording, setStatus, loadRecordingDetail });
   const speakers = useSpeakers({ selectedRecording, setSelectedRecording, setRecordings, setStatus });
+  // Получателей подставляем из почт спикеров встречи: чаще всего протокол уходит
+  // именно участникам.
+  const speakerRecipients = useMemo(
+    () => [...new Set((selectedRecording?.speakers || []).map((speaker) => speaker.contactEmail).filter(Boolean))].join(', '),
+    [selectedRecording?.id, selectedRecording?.speakers],
+  );
+  const sending = useSending({
+    recordingId: selectedRecording?.id || null,
+    sendConfig,
+    setStatus,
+    defaultRecipients: speakerRecipients,
+  });
 
   const micDeviceId = useUiStore((state) => state.micDeviceId);
   const setMicDeviceId = useUiStore((state) => state.setMicDeviceId);
@@ -470,6 +484,28 @@ function App() {
     }
   }, [currentUser?.id, activePage]);
 
+  // Настройки отправки нужны панели отправки в деталях записи, а не только
+  // странице настроек, — грузим сразу после входа.
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+
+    (async () => {
+      try {
+        const response = await apiFetch('/api/settings/send');
+        const data = await response.json();
+
+        if (response.ok) {
+          setSendConfig(data.send);
+        }
+      } catch {
+        // Панель отправки переживёт отсутствие настроек: у черновика есть
+        // собственные значения по умолчанию.
+      }
+    })();
+  }, [currentUser?.id]);
+
   useEffect(() => {
     if (currentUser && activePage === 'contacts') {
       contactsPage.loadContacts();
@@ -499,13 +535,6 @@ function App() {
     });
   }, [selectedRecording?.id, selectedRecording?.title, selectedProjectIds.join(','), selectedRecording?.meetingType]);
 
-  useEffect(() => {
-    const recipients = [
-      ...new Set((selectedRecording?.speakers || []).map((speaker) => speaker.contactEmail).filter(Boolean)),
-    ].join(', ');
-
-    setEmailDraft({ recipients, message: '' });
-  }, [selectedRecording?.id]);
 
   // Переход к встрече из сводки проекта или результатов поиска задач.
   function openRecordingFromAnywhere(recordingId) {
@@ -921,67 +950,9 @@ function App() {
     }
   }
 
-  async function handleSendEmail(event) {
-    event.preventDefault();
-
-    if (!selectedRecording) {
-      return;
-    }
-
-    if (!emailDraft.recipients.trim()) {
-      setStatus('Укажи хотя бы одного получателя');
-      return;
-    }
-
-    setIsSendingEmail(true);
-    setStatus(`Отправляем протокол "${selectedRecording.title}"...`);
-
-    try {
-      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/email`, {
-        method: 'POST',
-        body: JSON.stringify(emailDraft),
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Не удалось отправить письмо');
-      }
-
-      setStatus(`Протокол "${selectedRecording.title}" отправлен`);
-    } catch (error) {
-      setStatus(error.message || 'Ошибка отправки письма');
-    } finally {
-      setIsSendingEmail(false);
-    }
-  }
-
-  async function handleSendTelegram(event) {
-    event.preventDefault();
-
-    if (!selectedRecording) {
-      return;
-    }
-
-    setIsSendingTelegram(true);
-    setStatus(`Отправляем "${selectedRecording.title}" в Telegram...`);
-
-    try {
-      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/telegram`, {
-        method: 'POST',
-        body: JSON.stringify(telegramDraft),
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Не удалось отправить в Telegram');
-      }
-
-      setStatus(`Протокол "${selectedRecording.title}" отправлен в Telegram`);
-    } catch (error) {
-      setStatus(error.message || 'Ошибка отправки в Telegram');
-    } finally {
-      setIsSendingTelegram(false);
-    }
+  async function handleCopyShareLink(url) {
+    const copied = await copyText(url);
+    setStatus(copied ? 'Ссылка скопирована' : 'Не удалось скопировать ссылку');
   }
 
   async function handleDelete(recording) {
@@ -1013,6 +984,13 @@ function App() {
     } finally {
       setDeletingId(null);
     }
+  }
+
+  // Ссылка на результат (US-11.1) открывается внешним получателем без аккаунта,
+  // поэтому проверяется до экрана входа. Роутера в проекте нет — страница
+  // включается параметром ?share=<token>.
+  if (shareToken) {
+    return <SharePage token={shareToken} />;
   }
 
   if (isAuthLoading) {
@@ -1209,14 +1187,9 @@ function App() {
                   onGenerateTitle={handleGenerateTitle}
                   isSavingRecording={isSavingRecording}
                   onSaveRecordingMetadata={handleSaveRecordingMetadata}
-                  emailDraft={emailDraft}
-                  setEmailDraft={setEmailDraft}
-                  isSendingEmail={isSendingEmail}
-                  onSendEmail={handleSendEmail}
-                  telegramDraft={telegramDraft}
-                  setTelegramDraft={setTelegramDraft}
-                  isSendingTelegram={isSendingTelegram}
-                  onSendTelegram={handleSendTelegram}
+                  sending={sending}
+                  sendConfig={sendConfig}
+                  onCopyShareLink={handleCopyShareLink}
                   onUpdateTranscript={handleUpdateTranscript}
                   onUpdateProtocol={handleUpdateProtocol}
                   onDictate={handleDictateVoiceNote}
