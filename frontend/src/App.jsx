@@ -44,6 +44,7 @@ import { enqueueRecording, processQueue, getQueueSnapshot, toSyntheticRecording 
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [registrationEnabled, setRegistrationEnabled] = useState(true);
   const [authMode, setAuthMode] = useState('login');
   const [authMessage, setAuthMessage] = useState('');
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
@@ -138,6 +139,7 @@ function App() {
       const response = await apiFetch('/api/auth/me');
       const data = await response.json();
       setCurrentUser(data.user || null);
+      setRegistrationEnabled(data.registrationEnabled !== false);
 
       if (data.user) {
         putCachedCurrentUser(data.user);
@@ -1032,6 +1034,7 @@ function App() {
         onSubmit={handleAuthSubmit}
         isSubmitting={isAuthSubmitting}
         authMessage={authMessage}
+        registrationOpen={registrationEnabled}
       />
     );
   }

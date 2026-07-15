@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { demoEmail, demoPassword } from '../lib/api.js';
 import InstallButton from './InstallButton.jsx';
 
-function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage }) {
+function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage, registrationOpen = true }) {
   const [email, setEmail] = useState(demoEmail);
   const [password, setPassword] = useState(demoPassword);
   const [displayName, setDisplayName] = useState('Demo User');
-  const isRegister = authMode === 'register';
+  // Регистрация закрыта на сервере → показываем только вход.
+  const isRegister = registrationOpen && authMode === 'register';
 
   function handleSubmit(event) {
     event.preventDefault();
@@ -54,9 +55,11 @@ function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage
           </button>
         </form>
 
-        <button className="link-button" type="button" onClick={() => setAuthMode(isRegister ? 'login' : 'register')}>
-          {isRegister ? 'Уже есть аккаунт' : 'Создать новый аккаунт'}
-        </button>
+        {registrationOpen ? (
+          <button className="link-button" type="button" onClick={() => setAuthMode(isRegister ? 'login' : 'register')}>
+            {isRegister ? 'Уже есть аккаунт' : 'Создать новый аккаунт'}
+          </button>
+        ) : null}
 
         {authMessage ? <p className="auth-message">{authMessage}</p> : null}
 

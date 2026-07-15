@@ -17,13 +17,12 @@
 		file_server
 	}
 
-	# Сам PWA — открыть/установить прямо с сервера за тем же паролем: статика
-	# распакованного билда + SPA-фолбэк на index.html. Хеш — bcrypt (cost 14),
-	# пароль в репозиторий не коммитится (передан пользователю отдельно).
+	# Сам PWA — БЕЗ Basic Auth: иначе Chrome/Android не может установить
+	# приложение (движок установки и service worker подгружают манифест/иконки/
+	# ассеты в отдельном контексте, где введённого во вкладке пароля нет → 401 →
+	# не устанавливается). Доступ к данным защищён логином приложения
+	# (регистрация закрыта, ALLOW_REGISTRATION=false). Статика + SPA-фолбэк.
 	handle {
-		basic_auth {
-			voxmate $2a$14$9Zen4VjrvBxGIgHGOjkOSeJDBIXe5EGiYL/zwpfX4KMmtLXGFE3Na
-		}
 		root * /srv/app
 		try_files {path} /index.html
 		file_server

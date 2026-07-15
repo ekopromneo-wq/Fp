@@ -3,6 +3,11 @@ import { query } from './db.js';
 
 const SESSION_COOKIE = 'voxmate_session';
 const SESSION_TTL_DAYS = 30;
+// Закрытая регистрация (ALLOW_REGISTRATION=false) — доступ в приложение только
+// у существующих аккаунтов. Так вход по паролю аккаунта служит защитой всего
+// PWA вместо Basic Auth (который ломает устанавливаемость). По умолчанию
+// открыта, чтобы не ломать локальную разработку.
+const REGISTRATION_ENABLED = process.env.ALLOW_REGISTRATION !== 'false';
 
 function normalizeEmail(email) {
   return typeof email === 'string' ? email.trim().toLowerCase() : '';
@@ -346,7 +351,7 @@ export async function getUserNotificationConfig(userId) {
 export function registerAuthRoutes(app) {
   app.get('/api/auth/me', async (c) => {
     const user = await getCurrentUser(c);
-    return c.json({ user });
+    return c.json({ user, registrationEnabled: REGISTRATION_ENABLED });
   });
 
   app.get('/api/settings/smtp', requireAuth, async (c) => {
@@ -455,6 +460,10 @@ export function registerAuthRoutes(app) {
   });
 
   app.post('/api/auth/register', async (c) => {
+    if (!REGISTRATION_ENABLED) {
+      return c.json({ error: 'Регистрация закрыта — обратитесь к администратору' }, 403);
+    }
+
     if (isRateLimited(`register:${clientIp(c)}`, 5, 60 * 60 * 1000)) {
       return c.json({ error: 'Too many registration attempts - try again later' }, 429);
     }

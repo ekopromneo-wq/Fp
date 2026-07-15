@@ -28,25 +28,40 @@ function detectIos() {
  * установка только вручную, поэтому там показываем инструкцию.
  */
 export default function useInstallPrompt() {
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  // Событие могло прийти до монтирования — ранний перехватчик в index.html
+  // прячет его на window.__deferredInstallPrompt.
+  const [deferredPrompt, setDeferredPrompt] = useState(() => window.__deferredInstallPrompt || null);
   const [isInstalled, setIsInstalled] = useState(detectStandalone());
 
   useEffect(() => {
     function handleBeforeInstall(event) {
       event.preventDefault();
+      window.__deferredInstallPrompt = event;
       setDeferredPrompt(event);
+    }
+
+    function handleEarlyCapture() {
+      if (window.__deferredInstallPrompt) {
+        setDeferredPrompt(window.__deferredInstallPrompt);
+      }
     }
 
     function handleInstalled() {
       setIsInstalled(true);
+      window.__deferredInstallPrompt = null;
       setDeferredPrompt(null);
     }
 
+    // На случай если событие прилетело между рендером и этим эффектом.
+    handleEarlyCapture();
+
     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('pwa-install-available', handleEarlyCapture);
     window.addEventListener('appinstalled', handleInstalled);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('pwa-install-available', handleEarlyCapture);
       window.removeEventListener('appinstalled', handleInstalled);
     };
   }, []);
@@ -58,6 +73,7 @@ export default function useInstallPrompt() {
 
     deferredPrompt.prompt();
     const choice = await deferredPrompt.userChoice.catch(() => null);
+    window.__deferredInstallPrompt = null;
     setDeferredPrompt(null);
     return choice?.outcome || null;
   }

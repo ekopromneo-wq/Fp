@@ -11,6 +11,16 @@
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="64x64" href="/icons/favicon-64.png" />
     <title>VoxMate PWA</title>
+    <script>
+      // Ловим beforeinstallprompt как можно раньше: Chrome может прислать его
+      // до монтирования React, и тогда useEffect-подписчик его не застанет.
+      // Прячем событие на window, хук установки его подхватит.
+      window.addEventListener('beforeinstallprompt', function (event) {
+        event.preventDefault();
+        window.__deferredInstallPrompt = event;
+        window.dispatchEvent(new Event('pwa-install-available'));
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>
