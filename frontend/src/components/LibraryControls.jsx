@@ -1,27 +1,60 @@
+import { useState } from 'react';
+import VoiceInputButton from './VoiceInputButton.jsx';
+import { MEETING_TYPE_OPTIONS } from '../lib/exporters.js';
+
+// Значения соответствуют фильтру бэкенда (listRecordings): 'bot' на сервере
+// раскрывается в оба бот-источника (meeting_bot + recorder_bot).
+const SOURCE_OPTIONS = [
+  { value: '', label: 'Любой источник' },
+  { value: 'frontend-upload', label: 'Загрузка файла' },
+  { value: 'frontend-microphone', label: 'Микрофон' },
+  { value: 'bot', label: 'Бот на встрече' },
+];
+
+const STATUS_OPTIONS = [
+  { value: '', label: 'Любой статус' },
+  { value: 'uploaded', label: 'Загружено' },
+  { value: 'queued', label: 'В очереди' },
+  { value: 'transcribing', label: 'Расшифровываем' },
+  { value: 'summarizing', label: 'Создаём протокол' },
+  { value: 'done', label: 'Готово' },
+  { value: 'failed', label: 'Ошибка' },
+];
+
 function LibraryControls({
   searchQuery,
   setSearchQuery,
   projectFilter,
   setProjectFilter,
   projectOptions,
-  newProjectDraft,
-  setNewProjectDraft,
-  isCreatingProject,
-  onCreateProject,
+  filters,
+  setFilters,
+  onDictate,
+  setStatus,
   meetingBotDraft,
   setMeetingBotDraft,
   isJoiningMeeting,
   onJoinMeeting,
 }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const activeExtraCount = Object.values(filters).filter(Boolean).length;
+
+  function setFilter(key, value) {
+    setFilters((current) => ({ ...current, [key]: value }));
+  }
+
   return (
     <section className="library-controls" aria-label="Фильтры библиотеки">
       <label>
         Поиск
-        <input
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="Название, файл, проект или текст стенограммы"
-        />
+        <span className="search-input-group">
+          <input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Название, файл, проект или текст стенограммы"
+          />
+          <VoiceInputButton onDictate={onDictate} onText={setSearchQuery} setStatus={setStatus} title="Голосовой поиск" />
+        </span>
       </label>
 
       <label>
@@ -31,28 +64,11 @@ function LibraryControls({
           {projectOptions.map((project) => (
             <option value={project.id} key={project.id}>
               {project.name}
+              {project.isArchived ? ' (архив)' : ''}
             </option>
           ))}
         </select>
       </label>
-
-      <form className="project-create-form" onSubmit={onCreateProject}>
-        <input
-          value={newProjectDraft.name}
-          onChange={(event) => setNewProjectDraft((current) => ({ ...current, name: event.target.value }))}
-          placeholder="Новый проект"
-        />
-        <input
-          className="project-color-input"
-          value={newProjectDraft.color}
-          onChange={(event) => setNewProjectDraft((current) => ({ ...current, color: event.target.value }))}
-          type="color"
-          aria-label="Цвет проекта"
-        />
-        <button className="button button-secondary" type="submit" disabled={isCreatingProject}>
-          {isCreatingProject ? 'Создаём...' : 'Создать'}
-        </button>
-      </form>
 
       <form className="meeting-bot-form" onSubmit={onJoinMeeting}>
         <input
@@ -69,6 +85,93 @@ function LibraryControls({
           {isJoiningMeeting ? 'Отправляем...' : 'Пригласить бота'}
         </button>
       </form>
+
+      <button
+        className="button button-secondary library-filters-toggle"
+        type="button"
+        onClick={() => setIsExpanded((current) => !current)}
+        aria-expanded={isExpanded}
+      >
+        {isExpanded ? 'Скрыть фильтры' : `Ещё фильтры${activeExtraCount ? ` (${activeExtraCount})` : ''}`}
+      </button>
+
+      {isExpanded ? (
+        <div className="library-extra-filters">
+          <label>
+            Дата с
+            <input type="date" value={filters.dateFrom} onChange={(event) => setFilter('dateFrom', event.target.value)} />
+          </label>
+
+          <label>
+            Дата по
+            <input type="date" value={filters.dateTo} onChange={(event) => setFilter('dateTo', event.target.value)} />
+          </label>
+
+          <label>
+            Статус
+            <select value={filters.status} onChange={(event) => setFilter('status', event.target.value)}>
+              {STATUS_OPTIONS.map((option) => (
+                <option value={option.value} key={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            Источник
+            <select value={filters.source} onChange={(event) => setFilter('source', event.target.value)}>
+              {SOURCE_OPTIONS.map((option) => (
+                <option value={option.value} key={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            Тип встречи
+            <select value={filters.meetingType} onChange={(event) => setFilter('meetingType', event.target.value)}>
+              <option value="">Любой тип</option>
+              {MEETING_TYPE_OPTIONS.map((option) => (
+                <option value={option.value} key={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            Участник
+            <input
+              value={filters.participant}
+              onChange={(event) => setFilter('participant', event.target.value)}
+              placeholder="Имя спикера или контакта"
+            />
+          </label>
+
+          <label>
+            Задачи
+            <select value={filters.hasTasks} onChange={(event) => setFilter('hasTasks', event.target.value)}>
+              <option value="">Неважно</option>
+              <option value="yes">Есть задачи</option>
+              <option value="no">Нет задач</option>
+            </select>
+          </label>
+
+          {activeExtraCount ? (
+            <button
+              className="button button-secondary library-filters-reset"
+              type="button"
+              onClick={() =>
+                setFilters({ dateFrom: '', dateTo: '', status: '', source: '', meetingType: '', participant: '', hasTasks: '' })
+              }
+            >
+              Сбросить
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -3,6 +3,8 @@ import './App.css';
 import Topbar from './components/Topbar.jsx';
 import RecordingCard from './components/RecordingCard.jsx';
 import ContactsPage from './components/ContactsPage.jsx';
+import ProjectsPage from './components/ProjectsPage.jsx';
+import TaskSearchPage from './components/TaskSearchPage.jsx';
 import SettingsPage from './components/SettingsPage.jsx';
 import LibraryControls from './components/LibraryControls.jsx';
 import RecordingDetail from './components/RecordingDetail.jsx';
@@ -13,6 +15,8 @@ import useIsMobile from './hooks/useIsMobile.js';
 import useUiStore from './store/uiStore.js';
 import useSettings from './hooks/useSettings.js';
 import useContacts from './hooks/useContacts.js';
+import useProjects from './hooks/useProjects.js';
+import useTaskSearch from './hooks/useTaskSearch.js';
 import useTasks from './hooks/useTasks.js';
 import useSpeakers from './hooks/useSpeakers.js';
 import { apiFetch, isProcessingStatus } from './lib/api.js';
@@ -52,9 +56,16 @@ function App() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [searchQuery, setSearchQuery] = useState('');
   const [projectFilter, setProjectFilter] = useState('');
-  const [recordingDraft, setRecordingDraft] = useState({ title: '', projectId: '', meetingType: 'meeting' });
-  const [newProjectDraft, setNewProjectDraft] = useState({ name: '', color: '#235b4f' });
-  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [libraryFilters, setLibraryFilters] = useState({
+    dateFrom: '',
+    dateTo: '',
+    status: '',
+    source: '',
+    meetingType: '',
+    participant: '',
+    hasTasks: '',
+  });
+  const [recordingDraft, setRecordingDraft] = useState({ title: '', projectIds: [], meetingType: 'meeting' });
   const [meetingBotDraft, setMeetingBotDraft] = useState({ meetingUrl: '', title: '' });
   const [isJoiningMeeting, setIsJoiningMeeting] = useState(false);
   const [isStoppingMeetingBot, setIsStoppingMeetingBot] = useState(false);
@@ -79,6 +90,8 @@ function App() {
 
   const settings = useSettings(setStatus);
   const contactsPage = useContacts(setStatus);
+  const projectsPage = useProjects(setStatus, loadProjects);
+  const taskSearch = useTaskSearch(setStatus);
   const tasks = useTasks({ selectedRecording, setSelectedRecording, setStatus, loadRecordingDetail });
   const speakers = useSpeakers({ selectedRecording, setSelectedRecording, setRecordings, setStatus });
 
@@ -251,6 +264,12 @@ function App() {
       if (projectFilter) {
         params.set('projectId', projectFilter);
       }
+
+      Object.entries(libraryFilters).forEach(([key, value]) => {
+        if (value) {
+          params.set(key, value);
+        }
+      });
 
       const response = await apiFetch(`/api/recordings${params.toString() ? `?${params.toString()}` : ''}`);
 
@@ -435,7 +454,7 @@ function App() {
       loadProjects();
       loadRecordings();
     }
-  }, [currentUser?.id, searchQuery, projectFilter]);
+  }, [currentUser?.id, searchQuery, projectFilter, JSON.stringify(libraryFilters)]);
 
   useEffect(() => {
     if (currentUser) {
@@ -468,13 +487,15 @@ function App() {
     return () => window.clearInterval(intervalId);
   }, [currentUser?.id]);
 
+  const selectedProjectIds = (selectedRecording?.projects || []).map((project) => project.id);
+
   useEffect(() => {
     setRecordingDraft({
       title: selectedRecording?.title || '',
-      projectId: selectedRecording?.projectId || '',
+      projectIds: selectedProjectIds,
       meetingType: selectedRecording?.meetingType || 'meeting',
     });
-  }, [selectedRecording?.id, selectedRecording?.title, selectedRecording?.projectId, selectedRecording?.meetingType]);
+  }, [selectedRecording?.id, selectedRecording?.title, selectedProjectIds.join(','), selectedRecording?.meetingType]);
 
   useEffect(() => {
     const recipients = [
@@ -484,35 +505,10 @@ function App() {
     setEmailDraft({ recipients, message: '' });
   }, [selectedRecording?.id]);
 
-  async function handleCreateProject(event) {
-    event.preventDefault();
-
-    if (!newProjectDraft.name.trim()) {
-      setStatus('Заполни название проекта');
-      return;
-    }
-
-    setIsCreatingProject(true);
-
-    try {
-      const response = await apiFetch('/api/projects', {
-        method: 'POST',
-        body: JSON.stringify(newProjectDraft),
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Не удалось создать проект');
-      }
-
-      setProjects((current) => [...current, data.project].sort((a, b) => a.name.localeCompare(b.name)));
-      setNewProjectDraft({ name: '', color: '#235b4f' });
-      setStatus('Проект создан');
-    } catch (error) {
-      setStatus(error.message || 'Ошибка создания проекта');
-    } finally {
-      setIsCreatingProject(false);
-    }
+  // Переход к встрече из сводки проекта или результатов поиска задач.
+  function openRecordingFromAnywhere(recordingId) {
+    setActivePage('library');
+    setSelectedRecordingId(recordingId);
   }
 
   async function handleJoinMeeting(event) {
@@ -587,7 +583,7 @@ function App() {
         method: 'PATCH',
         body: JSON.stringify({
           title: recordingDraft.title,
-          projectId: recordingDraft.projectId || null,
+          projectIds: recordingDraft.projectIds,
           meetingType: recordingDraft.meetingType,
         }),
       });
@@ -599,6 +595,8 @@ function App() {
 
       setSelectedRecording((current) => (current?.id === data.recording.id ? { ...current, ...data.recording } : current));
       setRecordings((current) => current.map((recording) => (recording.id === data.recording.id ? { ...recording, ...data.recording } : recording)));
+      // Счётчики встреч в проектах могли измениться вместе с привязкой.
+      loadProjects();
       setStatus('Запись сохранена');
     } catch (error) {
       setStatus(error.message || 'Ошибка сохранения записи');
@@ -1083,6 +1081,26 @@ function App() {
 
       {activePage === 'settings' ? (
         <SettingsPage settings={settings} micDeviceId={micDeviceId} setMicDeviceId={setMicDeviceId} status={status} />
+      ) : activePage === 'projects' ? (
+        <>
+          <section className="status-line" aria-live="polite">
+            {status || `${projects.length} проектов`}
+          </section>
+          <ProjectsPage projects={projects} projectsPage={projectsPage} onOpenRecording={openRecordingFromAnywhere} />
+        </>
+      ) : activePage === 'tasksearch' ? (
+        <>
+          <section className="status-line" aria-live="polite">
+            {status}
+          </section>
+          <TaskSearchPage
+            search={taskSearch}
+            projectOptions={projectOptions}
+            onOpenRecording={openRecordingFromAnywhere}
+            onDictate={handleDictateVoiceNote}
+            setStatus={setStatus}
+          />
+        </>
       ) : activePage === 'contacts' ? (
         <ContactsPage
           contacts={contactsPage.contacts}
@@ -1113,10 +1131,10 @@ function App() {
             projectFilter={projectFilter}
             setProjectFilter={setProjectFilter}
             projectOptions={projectOptions}
-            newProjectDraft={newProjectDraft}
-            setNewProjectDraft={setNewProjectDraft}
-            isCreatingProject={isCreatingProject}
-            onCreateProject={handleCreateProject}
+            filters={libraryFilters}
+            setFilters={setLibraryFilters}
+            onDictate={handleDictateVoiceNote}
+            setStatus={setStatus}
             meetingBotDraft={meetingBotDraft}
             setMeetingBotDraft={setMeetingBotDraft}
             isJoiningMeeting={isJoiningMeeting}

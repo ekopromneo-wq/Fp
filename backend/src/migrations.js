@@ -322,6 +322,36 @@ const migrations = [
         check (type in ('done', 'failed', 'task_overdue'));
     `,
   },
+  {
+    id: '020_projects_search',
+    sql: `
+      alter table projects add column if not exists description text;
+      alter table projects add column if not exists archived_at timestamptz;
+
+      create table if not exists recording_projects (
+        recording_id uuid not null references recordings(id) on delete cascade,
+        project_id uuid not null references projects(id) on delete cascade,
+        created_at timestamptz not null default now(),
+        primary key (recording_id, project_id)
+      );
+
+      create index if not exists recording_projects_project_id_idx on recording_projects(project_id);
+
+      insert into recording_projects (recording_id, project_id)
+      select id, project_id from recordings where project_id is not null
+      on conflict do nothing;
+
+      create table if not exists project_members (
+        id uuid primary key default gen_random_uuid(),
+        project_id uuid not null references projects(id) on delete cascade,
+        contact_id uuid references contacts(id) on delete set null,
+        display_name text not null,
+        created_at timestamptz not null default now()
+      );
+
+      create index if not exists project_members_project_id_idx on project_members(project_id);
+    `,
+  },
 ];
 
 export async function runMigrations() {

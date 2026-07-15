@@ -195,20 +195,32 @@ function RecordingDetail({
           />
         </label>
 
-        <label>
-          Проект
-          <select
-            value={recordingDraft.projectId}
-            onChange={(event) => setRecordingDraft((current) => ({ ...current, projectId: event.target.value }))}
-          >
-            <option value="">Без проекта</option>
-            {projectOptions.map((project) => (
-              <option value={project.id} key={project.id}>
-                {project.name}
-              </option>
+        <fieldset className="project-multi-select">
+          <legend>Проекты</legend>
+          {projectOptions.length === 0 ? <p className="muted-text">Проектов пока нет — создайте на странице «Проекты».</p> : null}
+          {projectOptions
+            .filter((project) => !project.isArchived || recordingDraft.projectIds.includes(project.id))
+            .map((project) => (
+              <label className="project-multi-option" key={project.id}>
+                <input
+                  type="checkbox"
+                  checked={recordingDraft.projectIds.includes(project.id)}
+                  onChange={(event) =>
+                    setRecordingDraft((current) => ({
+                      ...current,
+                      projectIds: event.target.checked
+                        ? [...current.projectIds, project.id]
+                        : current.projectIds.filter((id) => id !== project.id),
+                    }))
+                  }
+                />
+                <span className="project-chip" style={{ '--project-color': project.color }}>
+                  {project.name}
+                </span>
+                {project.isArchived ? <span className="muted-text">(в архиве)</span> : null}
+              </label>
             ))}
-          </select>
-        </label>
+        </fieldset>
 
         <label>
           Тип встречи

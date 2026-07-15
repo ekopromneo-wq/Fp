@@ -77,11 +77,11 @@ export default function RecordingCard({ recording, isSelected, onSelect, onDelet
                 <span className={`status-pill status-${recording.status}`}>{getStatusLabel(recording.status)}</span>
               ) : null}
               <SyncPill syncState={recording.syncState} syncProgress={recording.syncProgress} syncError={recording.syncError} />
-              {recording.project ? (
-                <span className="project-chip" style={{ '--project-color': recording.project.color }}>
-                  {recording.project.name}
+              {(recording.projects?.length ? recording.projects : recording.project ? [recording.project] : []).map((project) => (
+                <span className="project-chip" key={project.id} style={{ '--project-color': project.color }}>
+                  {project.name}
                 </span>
-              ) : null}
+              ))}
             </div>
           </div>
 

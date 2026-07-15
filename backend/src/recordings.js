@@ -56,17 +56,18 @@ function parseRangeHeader(headerValue, totalSize) {
 }
 
 function mapRecording(row) {
+  // recording_projects (m2m, US-10.1) is the source of truth; the legacy
+  // recordings.project_id column is backfilled into it by migration 020 and
+  // no longer written. projectId/project stay as "the first project" for
+  // callers that predate multi-project (cards, offline cache).
+  const projects = Array.isArray(row.projects) ? row.projects : [];
+
   return {
     id: row.id,
     ownerId: row.owner_id,
-    projectId: row.project_id,
-    project: row.project_id
-      ? {
-          id: row.project_id,
-          name: row.project_name,
-          color: row.project_color,
-        }
-      : null,
+    projects,
+    projectId: projects[0]?.id || null,
+    project: projects[0] || null,
     title: row.title,
     status: row.status,
     source: row.source,
@@ -93,10 +94,27 @@ function mapProject(row) {
     ownerId: row.owner_id,
     name: row.name,
     color: row.color,
+    description: row.description || null,
+    isArchived: Boolean(row.archived_at),
+    archivedAt: row.archived_at || null,
+    members: Array.isArray(row.members) ? row.members : [],
+    meetingsCount: row.meetings_count === undefined ? null : Number(row.meetings_count),
+    openTasksCount: row.open_tasks_count === undefined ? null : Number(row.open_tasks_count),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
+
+// Correlated subquery reused by every recording-returning select - keeps the
+// m2m projects list in one shape everywhere without a separate round-trip.
+const RECORDING_PROJECTS_SELECT = `
+  (
+    select json_agg(json_build_object('id', p.id, 'name', p.name, 'color', p.color) order by p.name)
+    from recording_projects rp
+    join projects p on p.id = rp.project_id
+    where rp.recording_id = recordings.id
+  ) as projects
+`;
 
 function mapJob(row) {
   return {
@@ -503,11 +521,37 @@ async function generateTitleWithOpenRouter(recording) {
   return title.slice(0, 160);
 }
 
+const PROJECT_SELECT = `
+  select
+    projects.id, projects.owner_id, projects.name, projects.color, projects.description,
+    projects.archived_at, projects.created_at, projects.updated_at,
+    (
+      select count(*)::int
+      from recording_projects rp
+      where rp.project_id = projects.id
+    ) as meetings_count,
+    (
+      select count(*)::int
+      from recording_tasks t
+      join recording_projects rp on rp.recording_id = t.recording_id
+      where rp.project_id = projects.id
+        and t.status in ('extracted', 'confirmed', 'sent')
+    ) as open_tasks_count,
+    coalesce(
+      (
+        select json_agg(json_build_object('id', m.id, 'contactId', m.contact_id, 'name', m.display_name) order by m.created_at)
+        from project_members m
+        where m.project_id = projects.id
+      ),
+      '[]'::json
+    ) as members
+  from projects
+`;
+
 export async function listProjects(ownerId) {
   const result = await query(
     `
-      select id, owner_id, name, color, created_at, updated_at
-      from projects
+      ${PROJECT_SELECT}
       where owner_id = $1 or owner_id is null
       order by name asc
     `,
@@ -517,58 +561,385 @@ export async function listProjects(ownerId) {
   return result.rows.map(mapProject);
 }
 
+export async function getProject(projectId, ownerId) {
+  const result = await query(
+    `
+      ${PROJECT_SELECT}
+      where projects.id = $1 and (owner_id = $2 or owner_id is null)
+    `,
+    [projectId, ownerId],
+  );
+
+  return result.rowCount ? mapProject(result.rows[0]) : null;
+}
+
+// Participants carry no access rights in MVP (access groups are explicitly
+// out of scope per US-10.1) - they're an informational list, optionally
+// linked to a contact so the name survives contact deletion via display_name.
+function normalizeProjectMembers(participants) {
+  if (!Array.isArray(participants)) {
+    return [];
+  }
+
+  return participants
+    .map((participant) => ({
+      contactId: typeof participant?.contactId === 'string' && participant.contactId.trim() ? participant.contactId.trim() : null,
+      name: typeof participant?.name === 'string' ? participant.name.trim() : '',
+    }))
+    .filter((participant) => participant.name);
+}
+
+async function replaceProjectMembers(client, projectId, members) {
+  await client.query('delete from project_members where project_id = $1', [projectId]);
+
+  for (const member of members) {
+    await client.query('insert into project_members (project_id, contact_id, display_name) values ($1, $2, $3)', [
+      projectId,
+      member.contactId,
+      member.name,
+    ]);
+  }
+}
+
 export async function createProject(input, ownerId) {
   const name = typeof input.name === 'string' && input.name.trim() ? input.name.trim() : '';
   const color = typeof input.color === 'string' && input.color.trim() ? input.color.trim() : '#235b4f';
+  const description = typeof input.description === 'string' && input.description.trim() ? input.description.trim() : null;
+  const members = normalizeProjectMembers(input.participants);
 
   if (!name) {
     throw new Error('Project name is required');
   }
 
-  const result = await query(
-    `
-      insert into projects (owner_id, name, color)
-      values ($1, $2, $3)
-      returning id, owner_id, name, color, created_at, updated_at
-    `,
-    [ownerId, name, color],
-  );
+  const projectId = await transaction(async (client) => {
+    const result = await client.query(
+      `
+        insert into projects (owner_id, name, color, description)
+        values ($1, $2, $3, $4)
+        returning id
+      `,
+      [ownerId, name, color, description],
+    );
 
-  return mapProject(result.rows[0]);
+    if (members.length) {
+      await replaceProjectMembers(client, result.rows[0].id, members);
+    }
+
+    return result.rows[0].id;
+  });
+
+  return getProject(projectId, ownerId);
+}
+
+export async function updateProject(projectId, ownerId, input = {}) {
+  const data = input && typeof input === 'object' ? input : {};
+  const hasName = Object.prototype.hasOwnProperty.call(data, 'name');
+  const hasColor = Object.prototype.hasOwnProperty.call(data, 'color');
+  const hasDescription = Object.prototype.hasOwnProperty.call(data, 'description');
+  const hasArchived = Object.prototype.hasOwnProperty.call(data, 'archived');
+  const hasParticipants = Object.prototype.hasOwnProperty.call(data, 'participants');
+  const name = hasName && typeof data.name === 'string' ? data.name.trim() : null;
+  const color = hasColor && typeof data.color === 'string' && data.color.trim() ? data.color.trim() : null;
+  const description = hasDescription && typeof data.description === 'string' && data.description.trim() ? data.description.trim() : null;
+
+  if (hasName && !name) {
+    throw new Error('Project name is required');
+  }
+
+  const updated = await transaction(async (client) => {
+    const result = await client.query(
+      `
+        update projects
+        set
+          name = case when $3 then $4 else projects.name end,
+          color = case when $5 then $6 else projects.color end,
+          description = case when $7 then $8 else projects.description end,
+          archived_at = case
+            when not $9 then projects.archived_at
+            when $10 then coalesce(projects.archived_at, now())
+            else null
+          end,
+          updated_at = now()
+        where projects.id = $1 and (projects.owner_id = $2 or projects.owner_id is null)
+        returning id
+      `,
+      [projectId, ownerId, hasName, name, hasColor, color, hasDescription, description, hasArchived, Boolean(data.archived)],
+    );
+
+    if (result.rowCount === 0) {
+      return false;
+    }
+
+    if (hasParticipants) {
+      await replaceProjectMembers(client, projectId, normalizeProjectMembers(data.participants));
+    }
+
+    return true;
+  });
+
+  return updated ? getProject(projectId, ownerId) : null;
+}
+
+// US-10.1 / ADR-030: deleting a project must NOT delete its meetings - the
+// recording_projects rows cascade away and the recordings become "Без
+// проекта". The legacy recordings.project_id FK is on delete set null,
+// covering pre-migration rows too.
+export async function deleteProject(projectId, ownerId) {
+  const result = await query('delete from projects where id = $1 and (owner_id = $2 or owner_id is null) returning id', [
+    projectId,
+    ownerId,
+  ]);
+
+  return result.rowCount ? { id: projectId } : null;
+}
+
+// Decisions live inside recording_summaries.protocol->'decisions' as either
+// plain strings (pre-epic-8 rows) or {text, disputed} objects - normalize
+// both into the timeline shape.
+export async function getProjectSummary(projectId, ownerId) {
+  const project = await getProject(projectId, ownerId);
+
+  if (!project) {
+    return null;
+  }
+
+  const [recordings, openTasksResult, decisionsResult, doneTasksResult] = await Promise.all([
+    listRecordings(ownerId, { projectId }),
+    query(
+      `
+        select t.id, t.recording_id, t.summary_id, t.transcript_id, t.assignee, t.description, t.due_text,
+          t.due_date, t.assignee_external, t.status, t.external_refs, t.created_at, t.updated_at,
+          r.title as recording_title
+        from recording_tasks t
+        join recordings r on r.id = t.recording_id
+        join recording_projects rp on rp.recording_id = t.recording_id and rp.project_id = $1
+        where (r.owner_id = $2 or r.owner_id is null)
+          and t.status in ('extracted', 'confirmed', 'sent')
+        order by t.due_date asc nulls last, t.created_at desc
+      `,
+      [projectId, ownerId],
+    ),
+    query(
+      `
+        select r.id as recording_id, r.title as recording_title, r.created_at as recording_created_at, d.value as decision
+        from recordings r
+        join recording_projects rp on rp.recording_id = r.id and rp.project_id = $1
+        join recording_summaries s on s.recording_id = r.id
+        cross join lateral jsonb_array_elements(s.protocol->'decisions') as d(value)
+        where (r.owner_id = $2 or r.owner_id is null)
+          and jsonb_typeof(s.protocol->'decisions') = 'array'
+        order by r.created_at desc
+      `,
+      [projectId, ownerId],
+    ),
+    query(
+      `
+        select count(*)::int as done_count
+        from recording_tasks t
+        join recordings r on r.id = t.recording_id
+        join recording_projects rp on rp.recording_id = t.recording_id and rp.project_id = $1
+        where (r.owner_id = $2 or r.owner_id is null) and t.status = 'done'
+      `,
+      [projectId, ownerId],
+    ),
+  ]);
+
+  const openTasks = openTasksResult.rows.map((row) => ({ ...mapTask(row), recordingTitle: row.recording_title }));
+  const decisions = decisionsResult.rows.map((row) => {
+    const raw = row.decision;
+    const isObject = raw && typeof raw === 'object';
+
+    return {
+      text: isObject ? String(raw.text || '') : String(raw || ''),
+      disputed: isObject ? Boolean(raw.disputed) : false,
+      recordingId: row.recording_id,
+      recordingTitle: row.recording_title,
+      date: row.recording_created_at,
+    };
+  });
+
+  return {
+    project,
+    recordings,
+    openTasks,
+    decisions: decisions.filter((decision) => decision.text),
+    counters: {
+      meetings: recordings.length,
+      openTasks: openTasks.length,
+      doneTasks: doneTasksResult.rows[0].done_count,
+      decisions: decisions.length,
+    },
+  };
+}
+
+function cleanFilterString(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+// yyyy-mm-dd from <input type="date"> - anything else is ignored rather than
+// passed into a ::date cast that would throw on garbage query params.
+function cleanFilterDate(value) {
+  const cleaned = cleanFilterString(value);
+  return cleaned && /^\d{4}-\d{2}-\d{2}$/.test(cleaned) ? cleaned : null;
 }
 
 export async function listRecordings(ownerId, filters = {}) {
-  const search = typeof filters.search === 'string' ? filters.search.trim() : '';
-  const projectId = typeof filters.projectId === 'string' && filters.projectId.trim() ? filters.projectId.trim() : null;
+  const params = [ownerId];
+  const conditions = ['(recordings.owner_id = $1 or recordings.owner_id is null)'];
+  const bind = (value) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
+
+  const search = cleanFilterString(filters.search);
+  if (search) {
+    const p = bind(search);
+    conditions.push(`(
+      recordings.title ilike '%' || ${p} || '%'
+      or recordings.original_filename ilike '%' || ${p} || '%'
+      or exists (
+        select 1
+        from recording_projects rp
+        join projects p2 on p2.id = rp.project_id
+        where rp.recording_id = recordings.id and p2.name ilike '%' || ${p} || '%'
+      )
+      or exists (
+        select 1
+        from transcripts
+        where transcripts.recording_id = recordings.id
+          and transcripts.text ilike '%' || ${p} || '%'
+      )
+    )`);
+  }
+
+  const projectId = cleanFilterString(filters.projectId);
+  if (projectId) {
+    conditions.push(
+      `exists (select 1 from recording_projects rp where rp.recording_id = recordings.id and rp.project_id = ${bind(projectId)}::uuid)`,
+    );
+  }
+
+  const dateFrom = cleanFilterDate(filters.dateFrom);
+  if (dateFrom) {
+    conditions.push(`recordings.created_at >= ${bind(dateFrom)}::date`);
+  }
+
+  const dateTo = cleanFilterDate(filters.dateTo);
+  if (dateTo) {
+    conditions.push(`recordings.created_at < ${bind(dateTo)}::date + interval '1 day'`);
+  }
+
+  const status = cleanFilterString(filters.status);
+  if (status) {
+    conditions.push(`recordings.status = ${bind(status)}`);
+  }
+
+  // The UI offers one "бот на встрече" option covering both bot flows.
+  const source = cleanFilterString(filters.source);
+  if (source === 'bot') {
+    conditions.push(`recordings.source in ('meeting_bot', 'recorder_bot')`);
+  } else if (source) {
+    conditions.push(`recordings.source = ${bind(source)}`);
+  }
+
+  const meetingType = cleanFilterString(filters.meetingType);
+  if (meetingType && MEETING_TYPES.has(meetingType)) {
+    conditions.push(`recordings.meeting_type = ${bind(meetingType)}`);
+  }
+
+  const participant = cleanFilterString(filters.participant);
+  if (participant) {
+    const p = bind(participant);
+    conditions.push(`exists (
+      select 1
+      from recording_speakers sp
+      where sp.recording_id = recordings.id
+        and (sp.display_name ilike '%' || ${p} || '%' or sp.contact_name ilike '%' || ${p} || '%')
+    )`);
+  }
+
+  const hasTasks = cleanFilterString(filters.hasTasks);
+  if (hasTasks === 'yes' || hasTasks === 'no') {
+    const taskExists = `exists (select 1 from recording_tasks t where t.recording_id = recordings.id and t.status <> 'dismissed')`;
+    conditions.push(hasTasks === 'yes' ? taskExists : `not ${taskExists}`);
+  }
+
   const result = await query(
     `
       select
-        recordings.id, recordings.owner_id, recordings.project_id, recordings.title, recordings.status,
+        recordings.id, recordings.owner_id, recordings.title, recordings.status,
         recordings.source, recordings.duration_seconds, recordings.storage_key, recordings.created_at,
         recordings.updated_at, recordings.original_filename, recordings.mime_type, recordings.file_size_bytes,
         recordings.auto_named, recordings.meeting_url, recordings.meeting_bot_task_id, recordings.failure_count,
         recordings.meeting_type,
-        projects.name as project_name, projects.color as project_color
+        ${RECORDING_PROJECTS_SELECT}
       from recordings
-      left join projects on projects.id = recordings.project_id
-      where (recordings.owner_id = $1 or recordings.owner_id is null)
-        and ($2 = '' or recordings.title ilike '%' || $2 || '%'
-          or recordings.original_filename ilike '%' || $2 || '%'
-          or projects.name ilike '%' || $2 || '%'
-          or exists (
-            select 1
-            from transcripts
-            where transcripts.recording_id = recordings.id
-              and transcripts.text ilike '%' || $2 || '%'
-          ))
-        and ($3::uuid is null or recordings.project_id = $3::uuid)
+      where ${conditions.join('\n        and ')}
       order by recordings.created_at desc
       limit 50
     `,
-    [ownerId, search, projectId],
+    params,
   );
 
   return result.rows.map(mapRecording);
+}
+
+// US-10.2: cross-recording task search - one text query over assignee +
+// description, plus due-date range / status / project narrowing. Returns the
+// owning recording's title so results can link back to the meeting.
+export async function searchTasks(ownerId, filters = {}) {
+  const params = [ownerId];
+  const conditions = [`(r.owner_id = $1 or r.owner_id is null)`, `t.status <> 'dismissed'`];
+  const bind = (value) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
+
+  const search = cleanFilterString(filters.search);
+  if (search) {
+    const p = bind(search);
+    conditions.push(`(t.description ilike '%' || ${p} || '%' or t.assignee ilike '%' || ${p} || '%')`);
+  }
+
+  const status = cleanFilterString(filters.status);
+  if (status) {
+    conditions.push(`t.status = ${bind(status)}`);
+  }
+
+  const projectId = cleanFilterString(filters.projectId);
+  if (projectId) {
+    conditions.push(`exists (select 1 from recording_projects rp where rp.recording_id = t.recording_id and rp.project_id = ${bind(projectId)}::uuid)`);
+  }
+
+  const dueFrom = cleanFilterDate(filters.dueFrom);
+  if (dueFrom) {
+    conditions.push(`t.due_date >= ${bind(dueFrom)}::date`);
+  }
+
+  const dueTo = cleanFilterDate(filters.dueTo);
+  if (dueTo) {
+    conditions.push(`t.due_date < ${bind(dueTo)}::date + interval '1 day'`);
+  }
+
+  const result = await query(
+    `
+      select t.id, t.recording_id, t.summary_id, t.transcript_id, t.assignee, t.description, t.due_text,
+        t.due_date, t.assignee_external, t.status, t.external_refs, t.created_at, t.updated_at,
+        r.title as recording_title, r.created_at as recording_created_at
+      from recording_tasks t
+      join recordings r on r.id = t.recording_id
+      where ${conditions.join('\n        and ')}
+      order by t.due_date asc nulls last, t.created_at desc
+      limit 100
+    `,
+    params,
+  );
+
+  return result.rows.map((row) => ({
+    ...mapTask(row),
+    recordingTitle: row.recording_title,
+    recordingCreatedAt: row.recording_created_at,
+  }));
 }
 
 export async function createRecording(input, ownerId) {
@@ -580,9 +951,9 @@ export async function createRecording(input, ownerId) {
     `
       insert into recordings (owner_id, title, source, duration_seconds, storage_key, meeting_type)
       values ($1, $2, $3, $4, $5, $6)
-      returning id, owner_id, project_id, title, status, source, duration_seconds, storage_key,
+      returning id, owner_id, title, status, source, duration_seconds, storage_key,
         original_filename, mime_type, file_size_bytes, auto_named, meeting_type, created_at, updated_at,
-        null as project_name, null as project_color
+        null as projects
     `,
     [ownerId, title, source, input.durationSeconds || null, input.storageKey || null, meetingType],
   );
@@ -826,10 +1197,9 @@ export async function getRecording(id, ownerId) {
   const result = await query(
     `
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
-      , original_filename, mime_type, file_size_bytes, auto_named, project_id, meeting_url, meeting_bot_task_id,
+      , original_filename, mime_type, file_size_bytes, auto_named, meeting_url, meeting_bot_task_id,
         recorder_engine, failure_count, meeting_type,
-        (select name from projects where projects.id = recordings.project_id) as project_name,
-        (select color from projects where projects.id = recordings.project_id) as project_color
+        ${RECORDING_PROJECTS_SELECT}
       from recordings
       where id = $1 and (owner_id = $2 or owner_id is null)
     `,
@@ -997,11 +1367,21 @@ export async function summarizeRecording(recordingId, ownerId, { length = 'mediu
 export async function updateRecordingMetadata(recordingId, ownerId, input) {
   const data = input && typeof input === 'object' ? input : {};
   const hasTitle = Object.prototype.hasOwnProperty.call(data, 'title');
-  const hasProjectId = Object.prototype.hasOwnProperty.call(data, 'projectId');
   const hasMeetingType = Object.prototype.hasOwnProperty.call(data, 'meetingType');
+  // projectIds (array, US-10.1 multi-project) is the current contract;
+  // a single projectId is still accepted from pre-epic-10 callers and
+  // treated as a one-element (or empty) set.
+  const hasProjectIds = Object.prototype.hasOwnProperty.call(data, 'projectIds');
+  const hasProjectId = Object.prototype.hasOwnProperty.call(data, 'projectId');
   const title = hasTitle && typeof data.title === 'string' ? data.title.trim() : null;
-  const projectId = hasProjectId && typeof data.projectId === 'string' && data.projectId.trim() ? data.projectId.trim() : null;
   const meetingType = hasMeetingType && MEETING_TYPES.has(data.meetingType) ? data.meetingType : null;
+
+  let projectIds = null;
+  if (hasProjectIds) {
+    projectIds = [...new Set((Array.isArray(data.projectIds) ? data.projectIds : []).filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))];
+  } else if (hasProjectId) {
+    projectIds = typeof data.projectId === 'string' && data.projectId.trim() ? [data.projectId.trim()] : [];
+  }
 
   if (hasTitle && !title) {
     throw new Error('Recording title is required');
@@ -1011,39 +1391,51 @@ export async function updateRecordingMetadata(recordingId, ownerId, input) {
     throw new Error(`meetingType must be one of: ${[...MEETING_TYPES].join(', ')}`);
   }
 
-  const result = await query(
-    `
-      update recordings
-      set
-        title = case when $3 then $4 else recordings.title end,
-        project_id = case when $5 then $6::uuid else recordings.project_id end,
-        auto_named = case when $3 then false else recordings.auto_named end,
-        meeting_type = case when $7 then $8 else recordings.meeting_type end,
-        updated_at = now()
-      where recordings.id = $1
-        and (recordings.owner_id = $2 or recordings.owner_id is null)
-        and (
-          not $5
-          or $6::uuid is null
-          or exists (
-            select 1
-            from projects
-            where projects.id = $6::uuid
-              and (projects.owner_id = $2 or projects.owner_id is null)
-          )
-        )
-      returning
-        recordings.id, recordings.owner_id, recordings.project_id, recordings.title, recordings.status,
-        recordings.source, recordings.duration_seconds, recordings.storage_key, recordings.created_at,
-        recordings.updated_at, recordings.original_filename, recordings.mime_type, recordings.file_size_bytes,
-        recordings.auto_named, recordings.meeting_type,
-        (select name from projects where projects.id = recordings.project_id) as project_name,
-        (select color from projects where projects.id = recordings.project_id) as project_color
-    `,
-    [recordingId, ownerId, hasTitle, title, hasProjectId, projectId, hasMeetingType, meetingType],
-  );
+  const updated = await transaction(async (client) => {
+    const result = await client.query(
+      `
+        update recordings
+        set
+          title = case when $3 then $4 else recordings.title end,
+          auto_named = case when $3 then false else recordings.auto_named end,
+          meeting_type = case when $5 then $6 else recordings.meeting_type end,
+          updated_at = now()
+        where recordings.id = $1
+          and (recordings.owner_id = $2 or recordings.owner_id is null)
+        returning recordings.id
+      `,
+      [recordingId, ownerId, hasTitle, title, hasMeetingType, meetingType],
+    );
 
-  return result.rowCount ? mapRecording(result.rows[0]) : null;
+    if (result.rowCount === 0) {
+      return false;
+    }
+
+    if (projectIds !== null) {
+      // Silently dropping ids the user doesn't own (instead of erroring)
+      // matches the old single-project behavior, where a foreign projectId
+      // simply didn't pass the ownership guard.
+      const owned = projectIds.length
+        ? await client.query(`select id from projects where id = any($1::uuid[]) and (owner_id = $2 or owner_id is null)`, [
+            projectIds,
+            ownerId,
+          ])
+        : { rows: [] };
+
+      await client.query('delete from recording_projects where recording_id = $1', [recordingId]);
+
+      for (const row of owned.rows) {
+        await client.query('insert into recording_projects (recording_id, project_id) values ($1, $2) on conflict do nothing', [
+          recordingId,
+          row.id,
+        ]);
+      }
+    }
+
+    return true;
+  });
+
+  return updated ? getRecording(recordingId, ownerId) : null;
 }
 
 // original_text/original_segments are populated once at insert time
@@ -1242,12 +1634,11 @@ export async function generateRecordingTitle(recordingId, ownerId) {
       where recordings.id = $1
         and (recordings.owner_id = $2 or recordings.owner_id is null)
       returning
-        recordings.id, recordings.owner_id, recordings.project_id, recordings.title, recordings.status,
+        recordings.id, recordings.owner_id, recordings.title, recordings.status,
         recordings.source, recordings.duration_seconds, recordings.storage_key, recordings.created_at,
         recordings.updated_at, recordings.original_filename, recordings.mime_type, recordings.file_size_bytes,
         recordings.auto_named, recordings.meeting_type,
-        (select name from projects where projects.id = recordings.project_id) as project_name,
-        (select color from projects where projects.id = recordings.project_id) as project_color
+        ${RECORDING_PROJECTS_SELECT}
     `,
     [recordingId, ownerId, title],
   );
@@ -1730,13 +2121,74 @@ export function registerRecordingRoutes(app) {
     }
   });
 
+  app.patch('/api/projects/:id', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+
+    try {
+      const project = await updateProject(c.req.param('id'), user.id, body);
+
+      if (!project) {
+        return c.json({ error: 'Project not found' }, 404);
+      }
+
+      return c.json({ project });
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to update project' }, 400);
+    }
+  });
+
+  app.delete('/api/projects/:id', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const deleted = await deleteProject(c.req.param('id'), user.id);
+
+    if (!deleted) {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+
+    return c.json({ deleted });
+  });
+
+  app.get('/api/projects/:id/summary', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const summary = await getProjectSummary(c.req.param('id'), user.id);
+
+    if (!summary) {
+      return c.json({ error: 'Project not found' }, 404);
+    }
+
+    return c.json(summary);
+  });
+
   app.get('/api/recordings', requireAuth, async (c) => {
     const user = getAuthUser(c);
-    const search = c.req.query('search') || '';
-    const projectId = c.req.query('projectId') || '';
 
     return c.json({
-      recordings: await listRecordings(user.id, { search, projectId }),
+      recordings: await listRecordings(user.id, {
+        search: c.req.query('search') || '',
+        projectId: c.req.query('projectId') || '',
+        dateFrom: c.req.query('dateFrom') || '',
+        dateTo: c.req.query('dateTo') || '',
+        status: c.req.query('status') || '',
+        source: c.req.query('source') || '',
+        meetingType: c.req.query('meetingType') || '',
+        participant: c.req.query('participant') || '',
+        hasTasks: c.req.query('hasTasks') || '',
+      }),
+    });
+  });
+
+  app.get('/api/tasks/search', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+
+    return c.json({
+      tasks: await searchTasks(user.id, {
+        search: c.req.query('search') || '',
+        status: c.req.query('status') || '',
+        projectId: c.req.query('projectId') || '',
+        dueFrom: c.req.query('dueFrom') || '',
+        dueTo: c.req.query('dueTo') || '',
+      }),
     });
   });
 

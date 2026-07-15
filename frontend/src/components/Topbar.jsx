@@ -13,6 +13,23 @@ function BellIcon() {
   );
 }
 
+function ProjectsIcon() {
+  return (
+    <svg className="icon-button-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    </svg>
+  );
+}
+
+function TaskSearchIcon() {
+  return (
+    <svg className="icon-button-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.35-4.35M8.5 11l1.8 1.8 3.2-3.6" />
+    </svg>
+  );
+}
+
 function ContactsIcon() {
   return (
     <svg className="icon-button-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -117,7 +134,15 @@ export default function Topbar({
       <div>
         <p className="eyebrow">VoxMate</p>
         <h1 id="page-title">
-          {activePage === 'settings' ? 'Настройки' : activePage === 'contacts' ? 'Контакты' : 'Записи'}
+          {activePage === 'settings'
+            ? 'Настройки'
+            : activePage === 'contacts'
+              ? 'Контакты'
+              : activePage === 'projects'
+                ? 'Проекты'
+                : activePage === 'tasksearch'
+                  ? 'Поиск задач'
+                  : 'Записи'}
           {isOnline ? null : (
             <span className="offline-badge" role="status" title="Нет подключения к сети — показаны сохранённые данные">
               Офлайн
@@ -225,6 +250,26 @@ export default function Topbar({
             title={theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему'}
           >
             <ThemeIcon theme={theme} />
+          </button>
+
+          <button
+            className={`button icon-button ${activePage === 'projects' ? 'button-primary' : 'button-secondary'}`}
+            type="button"
+            onClick={() => setActivePage('projects')}
+            aria-label="Проекты"
+            title="Проекты"
+          >
+            <ProjectsIcon />
+          </button>
+
+          <button
+            className={`button icon-button ${activePage === 'tasksearch' ? 'button-primary' : 'button-secondary'}`}
+            type="button"
+            onClick={() => setActivePage('tasksearch')}
+            aria-label="Поиск задач"
+            title="Поиск задач"
+          >
+            <TaskSearchIcon />
           </button>
 
           <button

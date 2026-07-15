@@ -16,3 +16,15 @@ const RECORDING_STATUS_LABELS = {
 export function getStatusLabel(status) {
   return RECORDING_STATUS_LABELS[status] || status;
 }
+
+export const TASK_STATUS_LABELS = {
+  extracted: 'Извлечена',
+  confirmed: 'Подтверждена',
+  sent: 'Отправлена',
+  done: 'Готова',
+  dismissed: 'Скрыта',
+};
+
+export function getTaskStatusLabel(status) {
+  return TASK_STATUS_LABELS[status] || status;
+}

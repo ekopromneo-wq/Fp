@@ -2020,3 +2020,248 @@ audio {
     grid-template-columns: 1fr;
   }
 }
+
+/* ===== Эпик 10: проекты и поиск ===== */
+
+/* Поисковая строка с кнопкой голосового ввода (US-10.2). */
+.search-input-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.library-filters-toggle {
+  align-self: end;
+}
+
+.library-extra-filters {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  align-items: end;
+  padding: 8px 12px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+}
+
+/* Мультивыбор проектов записи (US-10.1: встреча в нескольких проектах). */
+.project-multi-select {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.project-multi-select legend {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  padding: 0 4px;
+}
+
+.project-multi-option {
+  display: flex !important;
+  grid-template-columns: none !important;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  text-transform: none !important;
+}
+
+.project-multi-option input[type='checkbox'] {
+  width: auto !important;
+  min-height: 0 !important;
+}
+
+/* Страница «Проекты». */
+.projects-page {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.project-create-panel,
+.project-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.project-create-fields,
+.project-card-edit {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 64px minmax(180px, 1.4fr) minmax(180px, 1.4fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.project-create-fields label,
+.project-card-edit label,
+.task-search-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.project-create-fields input,
+.project-card-edit input,
+.task-search-form input,
+.task-search-form select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  padding: 0 10px;
+  text-transform: none;
+}
+
+.project-list {
+  display: grid;
+  gap: 12px;
+}
+
+.project-card.is-archived {
+  opacity: 0.72;
+}
+
+.project-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.project-card-counters {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  margin-left: auto;
+}
+
+.project-card-description,
+.project-card-members {
+  margin: 0;
+}
+
+.project-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.project-summary {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.project-summary h4 {
+  margin: 6px 0 0;
+}
+
+.project-summary-counters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.project-summary-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.projects-archive summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-weight: 800;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-primary);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+
+/* Страница «Поиск задач» (US-10.2). */
+.task-search-page {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.task-search-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.6fr) repeat(4, minmax(140px, 1fr));
+  gap: 10px;
+  align-items: end;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  padding: 14px 16px;
+}
+
+.task-search-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.task-search-results {
+  display: grid;
+  gap: 10px;
+}
+
+.task-search-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  padding: 10px 14px;
+}
+
+.task-search-result-main {
+  flex: 1 1 320px;
+  display: grid;
+  gap: 4px;
+}
+
+.task-search-result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 720px) {
+  .project-create-fields,
+  .project-card-edit,
+  .task-search-form {
+    grid-template-columns: 1fr;
+  }
+}

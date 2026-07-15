@@ -1,4 +1,5 @@
 import { formatDate } from './format.js';
+import { getTaskStatusLabel } from './statusLabels.js';
 
 // Labels for the meeting-type picker only - the actual section structure per
 // type (which drives generation/rendering) lives server-side
@@ -24,6 +25,13 @@ export const PROTOCOL_SECTION_LABELS = {
 
 function escapeTableCell(value) {
   return String(value || '-').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+}
+
+// С эпика 10 запись может состоять в нескольких проектах (recording.projects);
+// одиночный recording.project остаётся как «первый проект» для старых данных.
+function projectNames(recording) {
+  const projects = recording.projects?.length ? recording.projects : recording.project ? [recording.project] : [];
+  return projects.map((project) => project.name).join(', ') || 'без проекта';
 }
 
 function formatMarkdownList(items) {
@@ -53,7 +61,7 @@ export function buildRecordingExport(recording) {
     `Файл: ${recording.originalFilename || 'не прикреплен'}`,
     `Дата загрузки: ${formatDate(recording.createdAt)}`,
     `Статус: ${recording.status}`,
-    `Проект: ${recording.project?.name || 'без проекта'}`,
+    `Проекты: ${projectNames(recording)}`,
     '',
   ];
 
@@ -125,7 +133,7 @@ export async function buildProtocolDocxBlob(recording) {
   const template = recording.protocolTemplate || { sections: ['agenda', 'decisions', 'risks'] };
   const children = [
     new Paragraph({ text: recording.title, heading: HeadingLevel.HEADING_1 }),
-    new Paragraph({ text: `${formatDate(recording.createdAt)} · ${recording.project?.name || 'без проекта'}` }),
+    new Paragraph({ text: `${formatDate(recording.createdAt)} · ${projectNames(recording)}` }),
   ];
 
   if (summary?.executiveSummary) {
@@ -171,6 +179,37 @@ export async function buildProtocolDocxBlob(recording) {
 
   const doc = new Document({ sections: [{ children }] });
   return Packer.toBlob(doc);
+}
+
+// US-10.2: экспорт результатов поиска задач в Markdown-таблицу.
+export function buildTaskSearchExport(tasks, filters = {}) {
+  const activeFilters = Object.entries(filters)
+    .filter(([, value]) => value && String(value).trim())
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(', ');
+  const lines = [
+    '# Поиск задач',
+    '',
+    `Дата экспорта: ${formatDate(new Date().toISOString())}`,
+    activeFilters ? `Фильтры: ${activeFilters}` : 'Фильтры: не заданы',
+    `Найдено задач: ${tasks.length}`,
+    '',
+  ];
+
+  if (tasks.length) {
+    lines.push('| Исполнитель | Срок | Статус | Задача | Встреча |');
+    lines.push('| --- | --- | --- | --- | --- |');
+    tasks.forEach((task) => {
+      lines.push(
+        `| ${escapeTableCell(task.assignee)} | ${escapeTableCell(task.dueDate ? formatDate(task.dueDate) : task.dueText)} | ${escapeTableCell(getTaskStatusLabel(task.status))} | ${escapeTableCell(task.description)} | ${escapeTableCell(task.recordingTitle)} |`,
+      );
+    });
+    lines.push('');
+  } else {
+    lines.push('Ничего не найдено.', '');
+  }
+
+  return lines.join('\n');
 }
 
 export function downloadBlob(filename, blob) {

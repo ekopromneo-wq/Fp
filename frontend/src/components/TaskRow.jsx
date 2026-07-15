@@ -1,14 +1,7 @@
 import { useState } from 'react';
 import { formatDate } from '../lib/format.js';
+import { TASK_STATUS_LABELS as STATUS_LABELS } from '../lib/statusLabels.js';
 import TaskForm from './TaskForm.jsx';
-
-const STATUS_LABELS = {
-  extracted: 'Извлечена',
-  confirmed: 'Подтверждена',
-  sent: 'Отправлена',
-  done: 'Готова',
-  dismissed: 'Скрыта',
-};
 
 export default function TaskRow({
   task,
