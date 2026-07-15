@@ -1984,12 +1984,9 @@ audio {
   }
 
   .topbar {
+    display: grid;
     align-items: stretch;
     grid-template-columns: 1fr;
-  }
-
-  .topbar {
-    display: grid;
   }
 
   .topbar-right,
@@ -1997,12 +1994,27 @@ audio {
     justify-items: stretch;
   }
 
+  /* Растягиваем только текстовые кнопки: у кнопки-иконки ширина фиксированная
+     (40px), и растяжение ломало и топбар, и любой ряд, где иконка стоит рядом
+     с полем ввода (надиктовка, голосовой поиск). */
   .actions,
-  .button {
+  .button:not(.icon-button) {
     width: 100%;
   }
 
+  .actions {
+    justify-content: flex-start;
+  }
+
+  /* Кнопки в одном ряду с заголовком/полем — по содержимому, иначе выезжают
+     за пределы контейнера. */
+  .jobs-header .button,
+  .speaker-section-header .button {
+    width: auto;
+  }
+
   .library-controls,
+  .meeting-bot-form,
   .project-create-form,
   .settings-form {
     grid-template-columns: 1fr;
