@@ -2784,3 +2784,28 @@ a.bitrix-sent-badge {
     flex: 1;
   }
 }
+
+/* US-14.1: привязка личного чата к боту. */
+.telegram-link-section {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.telegram-link-code {
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px;
+  border: 1px dashed var(--accent-primary);
+  border-radius: 10px;
+}
+
+.telegram-link-code strong {
+  font-size: 1.6rem;
+  letter-spacing: 0.35em;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-primary);
+}

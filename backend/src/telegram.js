@@ -67,8 +67,37 @@ async function callTelegram(botToken, method, payload) {
   return body.result;
 }
 
-function sendTelegramMessage(botToken, chatId, text, extra = {}) {
+export function sendTelegramMessage(botToken, chatId, text, extra = {}) {
   return callTelegram(botToken, 'sendMessage', { chat_id: chatId, text, ...extra });
+}
+
+// Длинный текст (протокол, результат бота) уходит несколькими сообщениями.
+export async function sendTelegramText(botToken, chatId, text) {
+  for (const chunk of splitIntoChunks(text, TELEGRAM_MESSAGE_LIMIT)) {
+    await sendTelegramMessage(botToken, chatId, chunk);
+  }
+}
+
+/**
+ * Скачивание присланного боту файла (US-14.1): getFile выдаёт путь, сам файл
+ * отдаётся с file-эндпоинта. Bot API отдаёт ботам файлы только до ~20 МБ —
+ * это тот самый «лимит Telegram» из критерия приёмки.
+ */
+export async function downloadTelegramFile(botToken, fileId) {
+  const file = await callTelegram(botToken, 'getFile', { file_id: fileId });
+  const filePath = file?.file_path;
+
+  if (!filePath) {
+    throw new Error('Telegram getFile вернул ответ без file_path');
+  }
+
+  const response = await fetch(`${TELEGRAM_API_URL}/file/bot${botToken}/${filePath}`);
+
+  if (!response.ok) {
+    throw new Error(`Telegram file download failed with ${response.status}`);
+  }
+
+  return { buffer: Buffer.from(await response.arrayBuffer()), filePath };
 }
 
 // Short "your recording is ready/failed" notification, distinct from
@@ -147,7 +176,8 @@ export function getTelegramUpdates(botToken, offset) {
   return callTelegram(botToken, 'getUpdates', {
     offset,
     timeout: 0,
-    allowed_updates: ['callback_query'],
+    // callback_query — кнопки задач (US-11.3), message — standalone-бот (US-14.1).
+    allowed_updates: ['callback_query', 'message'],
   });
 }
 

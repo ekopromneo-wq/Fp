@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { query } from './db.js';
 import { TASK_CALLBACK_PATTERN, answerTelegramCallback, clearTelegramMessageButtons, getTelegramUpdates } from './telegram.js';
+import { handleBotMessage } from './telegramIntake.js';
 
 // Разрешённые переходы по кнопкам (US-11.3): «Взять в работу» не воскрешает
 // выполненную или скрытую задачу, «Выполнено» не трогает скрытую.
@@ -126,6 +127,12 @@ export async function pollTelegramCallbacks() {
           } catch (error) {
             console.warn(`Telegram callback ${callback.id} failed: ${error.message}`);
           }
+        }
+
+        // US-14.1: тот же поллер обслуживает standalone-бота — голосовые,
+        // файлы и ссылки в личных чатах. Ошибки приёма гасятся внутри.
+        if (update.message) {
+          await handleBotMessage(token, update.message);
         }
       }
 

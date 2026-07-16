@@ -444,6 +444,32 @@ const migrations = [
         foreign key (owner_id) references app_users(id) on delete cascade;
     `,
   },
+  {
+    id: '024_telegram_standalone_bot',
+    sql: `
+      -- US-14.1: привязка личного чата Telegram к аккаунту. Код выдаёт
+      -- приложение (авторизованному пользователю), пользователь шлёт его боту —
+      -- так чат доказывает, что за ним стоит владелец аккаунта.
+      create table if not exists telegram_link_codes (
+        code text primary key,
+        user_id uuid not null references app_users(id) on delete cascade,
+        expires_at timestamptz not null,
+        created_at timestamptz not null default now()
+      );
+
+      -- Привязанные чаты: ключ — бот+чат (у одного бота чат принадлежит одному
+      -- аккаунту; один аккаунт может привязать несколько чатов/ботов).
+      create table if not exists telegram_chat_links (
+        bot_key text not null,
+        chat_id text not null,
+        user_id uuid not null references app_users(id) on delete cascade,
+        created_at timestamptz not null default now(),
+        primary key (bot_key, chat_id)
+      );
+
+      create index if not exists telegram_chat_links_user_id_idx on telegram_chat_links(user_id);
+    `,
+  },
 ];
 
 export async function runMigrations() {

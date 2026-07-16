@@ -2,6 +2,7 @@ import { query } from './db.js';
 import { requireAuth, getAuthUser } from './auth.js';
 import { sendNotificationEmail } from './email.js';
 import { sendNotificationTelegram } from './telegram.js';
+import { notifyTelegramBotResult } from './telegramIntake.js';
 
 const NOTIFICATION_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -101,11 +102,21 @@ export async function notifyRecordingEvent(recordingId, ownerId, type) {
     return;
   }
 
-  const recordingResult = await query('select title from recordings where id = $1', [recordingId]);
+  const recordingResult = await query('select title, source from recordings where id = $1', [recordingId]);
   const recordingTitle = recordingResult.rows[0]?.title || 'запись';
   const { title, message } = template(recordingTitle);
 
   await deliverNotification(ownerId, recordingId, type, title, message);
+
+  // US-14.1: запись пришла через standalone-бота — результат (или сообщение о
+  // сбое) возвращается в тот же чат, помимо обычных каналов уведомлений.
+  if (recordingResult.rows[0]?.source === 'telegram_bot' && (type === 'done' || type === 'failed')) {
+    try {
+      await notifyTelegramBotResult(recordingId, ownerId, type);
+    } catch (error) {
+      console.warn(`Telegram bot result delivery failed for recording ${recordingId}: ${error.message}`);
+    }
+  }
 }
 
 // US-9.3: "Просроченная дата → уведомление". Separate from

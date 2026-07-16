@@ -14,6 +14,7 @@ import {
   suggestRecipients,
 } from './sending.js';
 import { sendRecordingTelegram } from './telegram.js';
+import { createTelegramLinkCode } from './telegramIntake.js';
 
 function normalizePayloadKind(value) {
   return PAYLOAD_KINDS.includes(value) ? value : 'protocol';
@@ -166,6 +167,23 @@ export function registerSendingRoutes(app) {
     }
 
     return c.json({ deliveries: await listDeliveries(recording.id, user.id) });
+  });
+
+  /**
+   * US-14.1: код привязки личного чата к аккаунту. Пользователь шлёт его своему
+   * боту — поллер воркера связывает чат с аккаунтом, дальше бот принимает
+   * голосовые/файлы/ссылки и возвращает протокол с задачами.
+   */
+  app.post('/api/telegram/link-code', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const { code, expiresAt } = await createTelegramLinkCode(user.id);
+    const telegramConfig = await getUserTelegramConfig(user.id);
+
+    return c.json({
+      code,
+      expiresAt,
+      botConfigured: Boolean(telegramConfig?.botToken || process.env.TELEGRAM_BOT_TOKEN),
+    });
   });
 
   app.get('/api/recipient-suggestions', requireAuth, async (c) => {
