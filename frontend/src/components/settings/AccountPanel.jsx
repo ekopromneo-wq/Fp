@@ -17,6 +17,7 @@ function deviceLabel(userAgent) {
  */
 export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
   const [sessions, setSessions] = useState([]);
+  const [showAllSessions, setShowAllSessions] = useState(false);
   const [account, setAccount] = useState({ defaultMeetingType: 'meeting', recordingConsentWarning: true });
   const [isSavingAccount, setIsSavingAccount] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
@@ -146,7 +147,7 @@ export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
           ) : null}
         </div>
         <ul className="session-list">
-          {sessions.map((session) => (
+          {(showAllSessions ? sessions : sessions.slice(0, 5)).map((session) => (
             <li key={session.id} className="session-row">
               <div>
                 <strong>{deviceLabel(session.userAgent)}</strong>
@@ -163,6 +164,11 @@ export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
             </li>
           ))}
         </ul>
+        {sessions.length > 5 ? (
+          <button className="link-button" type="button" onClick={() => setShowAllSessions((value) => !value)}>
+            {showAllSessions ? 'Свернуть' : `Показать все (${sessions.length})`}
+          </button>
+        ) : null}
       </div>
 
       <div className="account-block account-danger">

@@ -659,6 +659,44 @@ h3 {
   margin-top: 18px;
 }
 
+/* Вкладки настроек вместо одного длинного скролла. */
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  position: sticky;
+  top: 8px;
+  z-index: 10;
+}
+
+.settings-tab {
+  flex: 1 1 auto;
+  min-height: 40px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.settings-tab.is-active {
+  background: var(--accent-primary);
+  color: var(--bg-base);
+}
+
+.settings-tab:not(.is-active):hover {
+  color: var(--text-primary);
+  background: var(--bg-base);
+}
+
 .settings-panel {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-card);
