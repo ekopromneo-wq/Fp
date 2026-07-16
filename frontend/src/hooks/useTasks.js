@@ -23,6 +23,10 @@ export default function useTasks({ selectedRecording, setSelectedRecording, setS
   const [isBulkUpdatingTasks, setIsBulkUpdatingTasks] = useState(false);
   const [newTaskDraft, setNewTaskDraft] = useState({ assignee: '', dueText: '', description: '' });
   const [isSendingBitrixTaskId, setIsSendingBitrixTaskId] = useState(null);
+  const [bitrixPanelTaskId, setBitrixPanelTaskId] = useState(null);
+  const [bitrixDirectory, setBitrixDirectory] = useState({ loaded: false, isLoading: false, employees: [], groups: [], matches: {}, error: null });
+  const [bitrixDrafts, setBitrixDrafts] = useState({});
+  const [bitrixDuplicates, setBitrixDuplicates] = useState(null);
 
   function getTaskDraft(task) {
     return (
@@ -336,33 +340,108 @@ export default function useTasks({ selectedRecording, setSelectedRecording, setS
     }
   }
 
-  async function handleSendTaskToBitrix(task) {
+  /**
+   * US-11.4: отправка в Б24 идёт через раскрываемую панель у задачи — сотрудника
+   * и группу проекта выбирает пользователь, а не настройки по умолчанию.
+   * Справочники (сотрудники, группы, сопоставления исполнителей) грузятся один
+   * раз при первом открытии панели: они требуют настроенного вебхука и трёх
+   * походов в Б24, вешать их на открытие записи незачем.
+   */
+  async function handleToggleBitrixPanel(task) {
+    if (bitrixPanelTaskId === task.id) {
+      setBitrixPanelTaskId(null);
+      setBitrixDuplicates(null);
+      return;
+    }
+
+    setBitrixPanelTaskId(task.id);
+    setBitrixDuplicates(null);
+
+    let directory = bitrixDirectory;
+
+    if (!directory.loaded && !directory.isLoading) {
+      setBitrixDirectory({ ...directory, isLoading: true });
+
+      try {
+        const [employeesRes, groupsRes, matchesRes] = await Promise.all([
+          apiFetch('/api/bitrix/employees'),
+          apiFetch('/api/bitrix/groups'),
+          apiFetch(`/api/recordings/${selectedRecording.id}/bitrix-task-matches`),
+        ]);
+        const employees = await employeesRes.json();
+        const groups = await groupsRes.json();
+        const matches = await matchesRes.json();
+
+        if (!employeesRes.ok) {
+          throw new Error(employees.error || 'Не удалось получить сотрудников Битрикс24');
+        }
+
+        directory = {
+          loaded: true,
+          isLoading: false,
+          employees: employees.employees || [],
+          // Группы и сопоставления — необязательные: без scope «Соцсеть» групп
+          // не будет, но отправить сотруднику всё равно можно.
+          groups: groupsRes.ok ? groups.groups || [] : [],
+          matches: matchesRes.ok
+            ? Object.fromEntries((matches.matches || []).map((match) => [match.taskId, match]))
+            : {},
+          error: null,
+        };
+      } catch (error) {
+        directory = { loaded: true, isLoading: false, employees: [], groups: [], matches: {}, error: error.message };
+      }
+
+      setBitrixDirectory(directory);
+    }
+
+    // Черновик панели: предзаполняем однозначным совпадением исполнителя.
+    const match = directory.matches?.[task.id];
+    setBitrixDrafts((current) => ({
+      ...current,
+      [task.id]: current[task.id] || { responsibleId: match?.autoMatch?.id ? String(match.autoMatch.id) : '', groupId: '' },
+    }));
+  }
+
+  function updateBitrixDraft(task, field, value) {
+    setBitrixDrafts((current) => ({
+      ...current,
+      [task.id]: { ...(current[task.id] || { responsibleId: '', groupId: '' }), [field]: value },
+    }));
+    setBitrixDuplicates(null);
+  }
+
+  async function handleSendTaskToBitrix(task, { confirmDuplicate = false } = {}) {
     if (!selectedRecording) {
       return;
     }
 
+    const draft = bitrixDrafts[task.id] || { responsibleId: '', groupId: '' };
     setIsSendingBitrixTaskId(task.id);
-    setStatus(`Отправляем задачу в Битрикс24...`);
+    setStatus('Отправляем задачу в Битрикс24...');
 
     try {
-      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/bitrix`, {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/tasks/${task.id}/send-bitrix`, {
         method: 'POST',
-        body: JSON.stringify({ taskIds: [task.id] }),
+        body: JSON.stringify({ ...draft, confirmDuplicate }),
       });
       const data = await response.json();
+
+      // Дубль — не ошибка, а вопрос к пользователю (US-11.4).
+      if (response.status === 409) {
+        setBitrixDuplicates({ taskId: task.id, items: data.duplicates || [] });
+        setStatus(data.error || 'В Битрикс24 уже есть такая задача');
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(data.error || 'Не удалось отправить задачу в Битрикс24');
       }
 
-      const result = data.results?.[0];
-
-      if (result && !result.ok) {
-        throw new Error(result.error || 'Битрикс24 отклонил задачу');
-      }
-
-      await loadRecordingDetail(selectedRecording.id, { quiet: true });
-      setStatus('Задача отправлена в Битрикс24');
+      applyTaskUpdate(data.task);
+      setBitrixPanelTaskId(null);
+      setBitrixDuplicates(null);
+      setStatus('Задача создана в Битрикс24');
     } catch (error) {
       setStatus(error.message || 'Ошибка отправки в Битрикс24');
     } finally {
@@ -460,6 +539,12 @@ export default function useTasks({ selectedRecording, setSelectedRecording, setS
     isBulkUpdatingTasks,
     newTaskDraft,
     isSendingBitrixTaskId,
+    bitrixPanelTaskId,
+    bitrixDirectory,
+    bitrixDrafts,
+    bitrixDuplicates,
+    handleToggleBitrixPanel,
+    updateBitrixDraft,
     getTaskDraft,
     updateTaskDraft,
     updateNewTaskDraft,

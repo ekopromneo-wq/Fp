@@ -2616,3 +2616,59 @@ audio {
   align-self: center;
   font-size: 0.78rem;
 }
+
+/* US-11.4: панель отправки задачи в Битрикс24 (сотрудник + группа + дубли). */
+.bitrix-send-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.bitrix-send-panel label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.bitrix-send-panel select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  padding: 0 10px;
+  text-transform: none;
+  font-weight: 400;
+}
+
+.task-bitrix-error {
+  color: var(--accent-danger);
+  font-size: 0.82rem;
+}
+
+.task-bitrix-duplicate {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-warning);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.task-bitrix-duplicate ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+a.bitrix-sent-badge {
+  text-decoration: none;
+}

@@ -429,6 +429,13 @@ function RecordingDetail({
                   onDismiss={tasks.handleDismissTask}
                   onDelete={tasks.handleDeleteTask}
                   onSendToBitrix={tasks.handleSendTaskToBitrix}
+                  onToggleBitrixPanel={tasks.handleToggleBitrixPanel}
+                  onBitrixDraftChange={tasks.updateBitrixDraft}
+                  isBitrixPanelOpen={tasks.bitrixPanelTaskId === task.id}
+                  bitrixDirectory={tasks.bitrixDirectory}
+                  bitrixDraft={tasks.bitrixDrafts[task.id] || { responsibleId: '', groupId: '' }}
+                  bitrixMatch={tasks.bitrixDirectory.matches?.[task.id]}
+                  bitrixDuplicates={tasks.bitrixDuplicates?.taskId === task.id ? tasks.bitrixDuplicates : null}
                   onSendEmail={tasks.handleSendTaskEmail}
                   onSendTelegram={tasks.handleSendTaskTelegram}
                   onApplyAssigneeCandidate={tasks.applyTaskAssigneeCandidate}

@@ -12,7 +12,15 @@ import { query, transaction } from './db.js';
 import { sendRecordingEmail, sendTaskEmail } from './email.js';
 import { sendRecordingTelegram, sendTaskTelegram } from './telegram.js';
 import { recordDelivery, sendWithRetry } from './sending.js';
-import { sendTasksToBitrix, matchRecordingSpeakersToBitrix } from './bitrix.js';
+import {
+  fetchBitrixGroups,
+  fetchBitrixUsers,
+  findBitrixTaskDuplicates,
+  matchRecordingSpeakersToBitrix,
+  matchRecordingTasksToBitrix,
+  sendTaskToBitrix,
+  sendTasksToBitrix,
+} from './bitrix.js';
 import { matchRecordingSpeakersToContacts, matchRecordingTasksToContacts, isAssigneeExternal, listContacts } from './contacts.js';
 import {
   MEETING_TYPES,
@@ -2592,6 +2600,141 @@ export function registerRecordingRoutes(app) {
       return c.json({ results });
     } catch (error) {
       return c.json({ error: error.message || 'Failed to send tasks to Bitrix24' }, 400);
+    }
+  });
+
+  // Справочники Б24 для формы отправки (US-11.4): сотрудники и группы проекта.
+  app.get('/api/bitrix/employees', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+
+    try {
+      const users = await fetchBitrixUsers((await getUserBitrixConfig(user.id)) || {});
+      return c.json({
+        employees: users.map((item) => ({
+          id: String(item.id),
+          name: [item.lastName, item.firstName, item.secondName].filter(Boolean).join(' '),
+          email: item.email,
+        })),
+      });
+    } catch (error) {
+      return c.json({ error: error.message || 'Не удалось получить сотрудников Битрикс24' }, 400);
+    }
+  });
+
+  app.get('/api/bitrix/groups', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+
+    try {
+      return c.json({ groups: await fetchBitrixGroups((await getUserBitrixConfig(user.id)) || {}) });
+    } catch (error) {
+      return c.json({ error: error.message || 'Не удалось получить группы Битрикс24' }, 400);
+    }
+  });
+
+  app.get('/api/recordings/:recordingId/bitrix-task-matches', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const recording = await getRecording(c.req.param('recordingId'), user.id);
+
+    if (!recording) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    try {
+      const matches = await matchRecordingTasksToBitrix(recording.tasks || [], (await getUserBitrixConfig(user.id)) || {});
+      return c.json({ matches });
+    } catch (error) {
+      return c.json({ error: error.message || 'Не удалось сопоставить исполнителей с Битрикс24' }, 400);
+    }
+  });
+
+  /**
+   * US-11.4: отправка одной задачи с явным сотрудником и группой. Дубли — по
+   * точному названию в Б24: без confirmDuplicate отправка останавливается и
+   * решает пользователь. После отправки источник истины — Б24: задача в
+   * VoxMate не меняется (кроме отметки «отправлена» и ссылки), обратной
+   * синхронизации нет.
+   */
+  app.post('/api/recordings/:recordingId/tasks/:taskId/send-bitrix', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const recordingId = c.req.param('recordingId');
+    const taskId = c.req.param('taskId');
+    const recording = await getRecording(recordingId, user.id);
+    const task = recording?.tasks?.find((item) => item.id === taskId);
+
+    if (!recording || !task) {
+      return c.json({ error: 'Task not found' }, 404);
+    }
+
+    if (!String(body.responsibleId || '').trim()) {
+      // Спека: «если не найден — сообщение, задачу не отправляем».
+      return c.json({ error: 'Сотрудник Битрикс24 не выбран — задача не отправлена' }, 400);
+    }
+
+    const bitrixConfig = (await getUserBitrixConfig(user.id)) || {};
+
+    try {
+      if (!body.confirmDuplicate) {
+        const duplicates = await findBitrixTaskDuplicates(bitrixConfig, task.description);
+
+        if (duplicates.length) {
+          return c.json(
+            {
+              error: 'В Битрикс24 уже есть задача с таким названием',
+              duplicates,
+            },
+            409,
+          );
+        }
+      }
+
+      const { result, attempts } = await sendWithRetry(() =>
+        sendTaskToBitrix(bitrixConfig, recording, task, {
+          responsibleId: String(body.responsibleId).trim(),
+          groupId: String(body.groupId || '').trim() || null,
+        }),
+      );
+
+      await recordDelivery({
+        ownerId: user.id,
+        recordingId,
+        channel: 'bitrix',
+        payloadKind: 'tasks',
+        recipients: [result.responsibleId],
+        status: 'sent',
+        attempts,
+        externalRefs: result,
+      });
+
+      const updated = await query(
+        `
+          update recording_tasks
+          set
+            status = case when status in ('extracted', 'confirmed') then 'sent' else status end,
+            external_refs = external_refs || jsonb_build_object('bitrix24', jsonb_build_object(
+              'taskId', $2::text, 'url', $3::text, 'responsibleId', $4::text, 'groupId', $5::text, 'sentAt', now())),
+            updated_at = now()
+          where id = $1
+          returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, due_date,
+            assignee_external, status, external_refs, created_at, updated_at
+        `,
+        [taskId, String(result.bitrixTaskId), result.url, result.responsibleId, result.groupId],
+      );
+
+      return c.json({ result, task: mapTask(updated.rows[0]) });
+    } catch (error) {
+      await recordDelivery({
+        ownerId: user.id,
+        recordingId,
+        channel: 'bitrix',
+        payloadKind: 'tasks',
+        recipients: [String(body.responsibleId || '')].filter(Boolean),
+        status: 'failed',
+        attempts: error.attempts || 1,
+        lastError: error.message,
+      });
+
+      return c.json({ error: error.message || 'Не удалось отправить задачу в Битрикс24' }, 400);
     }
   });
 

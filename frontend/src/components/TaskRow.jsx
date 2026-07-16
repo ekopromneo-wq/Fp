@@ -19,6 +19,13 @@ export default function TaskRow({
   onDismiss,
   onDelete,
   onSendToBitrix,
+  onToggleBitrixPanel,
+  onBitrixDraftChange,
+  isBitrixPanelOpen,
+  bitrixDirectory,
+  bitrixDraft,
+  bitrixMatch,
+  bitrixDuplicates,
   onSendEmail,
   onSendTelegram,
   onApplyAssigneeCandidate,
@@ -101,15 +108,21 @@ export default function TaskRow({
           {isDeleting ? 'Удаляем...' : 'Удалить'}
         </button>
         {task.externalRefs?.bitrix24 ? (
-          <span className="bitrix-sent-badge">В Б24 #{task.externalRefs.bitrix24.taskId}</span>
+          task.externalRefs.bitrix24.url ? (
+            <a className="bitrix-sent-badge" href={task.externalRefs.bitrix24.url} target="_blank" rel="noreferrer">
+              В Б24 #{task.externalRefs.bitrix24.taskId} →
+            </a>
+          ) : (
+            <span className="bitrix-sent-badge">В Б24 #{task.externalRefs.bitrix24.taskId}</span>
+          )
         ) : (
           <button
             className="button button-secondary"
             type="button"
-            onClick={() => onSendToBitrix(task)}
-            disabled={isSaving || isSendingBitrix}
+            onClick={() => onToggleBitrixPanel(task)}
+            disabled={isSaving}
           >
-            {isSendingBitrix ? 'Отправляем...' : 'В Битрикс24'}
+            {isBitrixPanelOpen ? 'Свернуть Битрикс24' : 'В Битрикс24'}
           </button>
         )}
         {/* US-11.3: личный чат исполнителю. Кнопка есть только когда исполнитель
@@ -131,6 +144,92 @@ export default function TaskRow({
           </span>
         ) : null}
       </div>
+
+      {/* US-11.4: сотрудника и группу проекта выбирает пользователь. */}
+      {isBitrixPanelOpen ? (
+        <div className="bitrix-send-panel">
+          {bitrixDirectory.isLoading ? <p className="muted-text">Получаем сотрудников и группы из Битрикс24...</p> : null}
+          {bitrixDirectory.error ? <p className="task-bitrix-error">{bitrixDirectory.error}</p> : null}
+
+          {bitrixDirectory.loaded && !bitrixDirectory.error ? (
+            <>
+              <label>
+                Сотрудник Битрикс24
+                <select
+                  value={bitrixDraft.responsibleId}
+                  onChange={(event) => onBitrixDraftChange(task, 'responsibleId', event.target.value)}
+                >
+                  <option value="">Не выбран</option>
+                  {bitrixDirectory.employees.map((employee) => (
+                    <option key={employee.id} value={employee.id}>
+                      {employee.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {!bitrixDraft.responsibleId ? (
+                <p className="muted-text">
+                  {bitrixMatch?.candidates?.length
+                    ? 'Есть похожие сотрудники — выберите из списка.'
+                    : 'Сотрудник не найден в Битрикс24 — без выбора задача не отправится.'}
+                </p>
+              ) : null}
+
+              <label>
+                Группа проекта
+                <select
+                  value={bitrixDraft.groupId}
+                  onChange={(event) => onBitrixDraftChange(task, 'groupId', event.target.value)}
+                >
+                  <option value="">Без группы</option>
+                  {bitrixDirectory.groups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {bitrixDuplicates ? (
+                <div className="task-bitrix-duplicate" role="alert">
+                  <strong>В Битрикс24 уже есть задача с таким названием:</strong>
+                  <ul>
+                    {bitrixDuplicates.items.map((duplicate) => (
+                      <li key={duplicate.id}>
+                        {duplicate.url ? (
+                          <a href={duplicate.url} target="_blank" rel="noreferrer">
+                            #{duplicate.id} {duplicate.title}
+                          </a>
+                        ) : (
+                          `#${duplicate.id} ${duplicate.title}`
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    onClick={() => onSendToBitrix(task, { confirmDuplicate: true })}
+                    disabled={isSendingBitrix}
+                  >
+                    {isSendingBitrix ? 'Отправляем...' : 'Всё равно создать'}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="button button-primary"
+                  type="button"
+                  onClick={() => onSendToBitrix(task)}
+                  disabled={isSendingBitrix || !bitrixDraft.responsibleId}
+                >
+                  {isSendingBitrix ? 'Отправляем...' : 'Создать задачу в Битрикс24'}
+                </button>
+              )}
+            </>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

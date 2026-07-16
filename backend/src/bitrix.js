@@ -24,39 +24,136 @@ function buildTaskDescription(recording, task) {
   ].join('\n');
 }
 
-async function createBitrixTask(config, recording, task) {
-  if (!config.defaultResponsibleId) {
-    throw new Error('Bitrix24 responsible user id is not configured');
+async function callBitrix(config, method, payload) {
+  const response = await fetch(`${config.webhookUrl}/${method}.json`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok || body?.error) {
+    const message = body?.error_description || body?.error || `Bitrix24 ${method} failed with ${response.status}`;
+
+    // 4xx с текстом ошибки — вебхук отозван, права не выданы, поля не приняты:
+    // повторять бессмысленно. 5xx — временное.
+    if (response.status < 500) {
+      throw new PermanentSendError(message);
+    }
+
+    throw new Error(message);
+  }
+
+  return body;
+}
+
+/**
+ * Ссылка на созданную задачу (US-11.4: «сохраняем ссылку»). Портал берётся из
+ * вебхука (https://portal.bitrix24.ru/rest/1/токен/ → https://portal.bitrix24.ru);
+ * путь /company/personal/user/<ответственный>/tasks/task/view/<id>/ — штатный
+ * адрес карточки задачи, Битрикс сам перенаправит, если задача в группе.
+ */
+export function buildBitrixTaskUrl(webhookUrl, responsibleId, taskId) {
+  try {
+    const origin = new URL(webhookUrl).origin;
+    return `${origin}/company/personal/user/${responsibleId}/tasks/task/view/${taskId}/`;
+  } catch {
+    return null;
+  }
+}
+
+async function createBitrixTask(config, recording, task, { responsibleId, groupId } = {}) {
+  const resolvedResponsibleId = responsibleId || config.defaultResponsibleId;
+
+  if (!resolvedResponsibleId) {
+    throw new PermanentSendError('Сотрудник Битрикс24 не выбран — задача не отправлена');
   }
 
   const fields = {
     TITLE: task.description.slice(0, 250),
     DESCRIPTION: buildTaskDescription(recording, task),
-    RESPONSIBLE_ID: config.defaultResponsibleId,
+    RESPONSIBLE_ID: resolvedResponsibleId,
   };
+  const resolvedGroupId = groupId ?? config.defaultGroupId;
 
-  if (config.defaultGroupId) {
-    fields.GROUP_ID = config.defaultGroupId;
+  if (resolvedGroupId) {
+    fields.GROUP_ID = resolvedGroupId;
   }
 
-  const response = await fetch(`${config.webhookUrl}/tasks.task.add.json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fields }),
-  });
-  const body = await response.json().catch(() => null);
-
-  if (!response.ok || body?.error) {
-    throw new Error(body?.error_description || body?.error || `Bitrix24 task.add failed with ${response.status}`);
+  // US-9.3/11.4: срок уезжает в Б24, когда он распознан в дату.
+  if (task.dueDate) {
+    fields.DEADLINE = new Date(task.dueDate).toISOString();
   }
 
+  const body = await callBitrix(config, 'tasks.task.add', { fields });
   const taskId = body?.result?.task?.id;
 
   if (!taskId) {
-    throw new Error('Bitrix24 response is missing the created task id');
+    throw new PermanentSendError('Bitrix24 response is missing the created task id');
   }
 
-  return taskId;
+  return {
+    bitrixTaskId: taskId,
+    url: buildBitrixTaskUrl(config.webhookUrl, resolvedResponsibleId, taskId),
+    responsibleId: String(resolvedResponsibleId),
+    groupId: resolvedGroupId ? String(resolvedGroupId) : null,
+  };
+}
+
+/**
+ * Дубли (US-11.4: «Дубли → сообщение, решает пользователь»): ищем в Б24 живые
+ * задачи с тем же названием. Точное совпадение TITLE — осознанно узкое
+ * определение дубля: перефразированную задачу не поймает, зато не шумит на
+ * каждой отправке.
+ */
+export async function findBitrixTaskDuplicates(bitrixConfig, title) {
+  const config = getBitrixConfig(bitrixConfig);
+  const body = await callBitrix(config, 'tasks.task.list', {
+    filter: { TITLE: title.slice(0, 250) },
+    select: ['ID', 'TITLE', 'STATUS', 'RESPONSIBLE_ID'],
+  });
+  const tasks = Array.isArray(body?.result?.tasks) ? body.result.tasks : [];
+
+  return tasks.map((task) => ({
+    id: String(task.id ?? task.ID),
+    title: task.title ?? task.TITLE,
+    url: buildBitrixTaskUrl(config.webhookUrl, task.responsibleId ?? task.RESPONSIBLE_ID ?? 0, task.id ?? task.ID),
+  }));
+}
+
+/**
+ * Группы (проекты) Битрикса — «Группу проекта выбирает пользователь» (US-11.4).
+ * Требует у вебхука scope «Соцсеть» (sonet_group); без него честно бросаем
+ * ошибку, UI покажет её и оставит ручной ввод id группы.
+ */
+export async function fetchBitrixGroups(bitrixConfig = {}) {
+  const config = getBitrixConfig(bitrixConfig);
+  const groups = [];
+
+  for (let page = 0; page < MAX_USER_PAGES; page += 1) {
+    const body = await callBitrix(config, 'sonet_group.get', { start: page * USER_PAGE_SIZE });
+    const pageGroups = Array.isArray(body?.result) ? body.result : [];
+
+    for (const group of pageGroups) {
+      groups.push({ id: String(group.ID), name: group.NAME });
+    }
+
+    if (!body?.next || pageGroups.length < USER_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return groups;
+}
+
+/**
+ * Отправка одной задачи с явным выбором сотрудника и группы (US-11.4).
+ * Проверка дублей — до создания; пользователь подтверждает отправку дубля
+ * флагом confirmDuplicate.
+ */
+export async function sendTaskToBitrix(bitrixConfig, recording, task, { responsibleId, groupId } = {}) {
+  const config = getBitrixConfig(bitrixConfig);
+  return createBitrixTask(config, recording, task, { responsibleId, groupId });
 }
 
 /**
@@ -70,8 +167,8 @@ export async function sendTasksToBitrix(recording, tasks, bitrixConfig = {}) {
 
   for (const task of tasks) {
     try {
-      const bitrixTaskId = await createBitrixTask(config, recording, task);
-      results.push({ taskId: task.id, ok: true, bitrixTaskId });
+      const created = await createBitrixTask(config, recording, task);
+      results.push({ taskId: task.id, ok: true, bitrixTaskId: created.bitrixTaskId, url: created.url });
     } catch (error) {
       results.push({ taskId: task.id, ok: false, error: error.message });
     }
@@ -178,6 +275,25 @@ export async function matchRecordingSpeakersToBitrix(speakers, bitrixConfig = {}
 
     return {
       label: speaker.label,
+      candidates,
+      autoMatch: candidates.length === 1 ? candidates[0] : null,
+    };
+  });
+}
+
+/**
+ * US-11.4: «Сопоставление сотрудника Б24 — предлагается пользователю».
+ * Кандидаты по исполнителю каждой задачи — тем же именным сопоставлением, что
+ * у спикеров (совпадение минимум двух из трёх полей ФИО).
+ */
+export async function matchRecordingTasksToBitrix(tasks, bitrixConfig = {}) {
+  const users = await fetchBitrixUsers(bitrixConfig);
+
+  return tasks.map((task) => {
+    const candidates = matchSpeakerToBitrixUsers(task.assignee, users);
+
+    return {
+      taskId: task.id,
       candidates,
       autoMatch: candidates.length === 1 ? candidates[0] : null,
     };
