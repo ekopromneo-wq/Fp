@@ -223,6 +223,30 @@ export default function useMicRecorder(uploadRecordingFile, setStatus, micDevice
       return;
     }
 
+    // US-17.1: заблаговременное предупреждение о нехватке места (если свободного
+    // хватит меньше чем на ~15 минут записи). Оценка грубая — по typical-битрейту
+    // ~1 МБ/мин; StorageManager есть не везде, поэтому проверка мягкая.
+    try {
+      if (navigator.storage?.estimate) {
+        const { quota = 0, usage = 0 } = await navigator.storage.estimate();
+        const freeBytes = Math.max(0, quota - usage);
+        const minutesLeft = freeBytes / (1024 * 1024);
+
+        if (quota > 0 && minutesLeft < 15) {
+          const proceed = window.confirm(
+            `На устройстве мало места — его хватит примерно на ${Math.max(1, Math.round(minutesLeft))} мин записи. Освободите место или продолжите на свой риск. Начать запись?`,
+          );
+
+          if (!proceed) {
+            setStatus('Запись отменена — мало места на устройстве');
+            return;
+          }
+        }
+      }
+    } catch {
+      // Оценка места не критична — если недоступна, просто пишем без предупреждения.
+    }
+
     try {
       let stream;
       try {

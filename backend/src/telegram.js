@@ -53,15 +53,20 @@ async function callTelegram(botToken, method, payload) {
   const body = await response.json().catch(() => null);
 
   if (!response.ok || !body?.ok) {
-    const message = body?.description || `Telegram ${method} failed with ${response.status}`;
+    const description = body?.description || `Telegram ${method} failed with ${response.status}`;
 
     // 400/403 — чат не найден, бот заблокирован, текст не принят: повтор ничего
     // не изменит. 429/5xx — временное, их повторяем (US-11.1).
     if (response.status === 400 || response.status === 403) {
-      throw new PermanentSendError(message);
+      // US-17.1: бот заблокирован получателем — подсказываем обратиться к
+      // администратору, а не просто показываем телеграмный текст.
+      const blocked = /bot was blocked|user is deactivated|bot can't initiate/i.test(description);
+      throw new PermanentSendError(
+        blocked ? 'Получатель заблокировал бота — обратитесь к администратору или попросите его запустить бота.' : description,
+      );
     }
 
-    throw new Error(message);
+    throw new Error(description);
   }
 
   return body.result;

@@ -2924,3 +2924,8 @@ a.bitrix-sent-badge {
   display: flex;
   gap: 8px;
 }
+
+/* US-17.1: сообщение «задачи извлечь не удалось». */
+.tasks-empty-note {
+  padding: 8px 0;
+}

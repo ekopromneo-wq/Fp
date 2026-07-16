@@ -405,6 +405,11 @@ function RecordingDetail({
           </button>
         </form>
 
+        {/* US-17.1: протокол готов, но задач нет — «задачи извлечь не удалось». */}
+        {!recording.tasks?.length && recording.summary ? (
+          <p className="muted-text tasks-empty-note">Задачи извлечь не удалось — добавьте вручную выше.</p>
+        ) : null}
+
         {recording.tasks?.length ? (
           <>
             <div className="task-bulk-toolbar">
