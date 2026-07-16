@@ -416,6 +416,34 @@ const migrations = [
       );
     `,
   },
+  {
+    id: '023_close_ownerless_access',
+    sql: `
+      -- Дыра аудита 09.07: строки с owner_id IS NULL были видны каждому
+      -- пользователю («or owner_id is null» в выборках), а удаление аккаунта
+      -- осиротляло его записи (on delete set null) вместо удаления. С эпиком 13
+      -- сироты вылезли прямо на главный экран. Сироты вычищаются, владелец
+      -- становится обязательным, удаление аккаунта каскадит.
+      delete from recordings where owner_id is null;
+      delete from projects where owner_id is null;
+      delete from upload_sessions where owner_id is null;
+
+      alter table recordings alter column owner_id set not null;
+      alter table recordings drop constraint recordings_owner_id_fkey;
+      alter table recordings add constraint recordings_owner_id_fkey
+        foreign key (owner_id) references app_users(id) on delete cascade;
+
+      alter table projects alter column owner_id set not null;
+      alter table projects drop constraint projects_owner_id_fkey;
+      alter table projects add constraint projects_owner_id_fkey
+        foreign key (owner_id) references app_users(id) on delete cascade;
+
+      alter table upload_sessions alter column owner_id set not null;
+      alter table upload_sessions drop constraint upload_sessions_owner_id_fkey;
+      alter table upload_sessions add constraint upload_sessions_owner_id_fkey
+        foreign key (owner_id) references app_users(id) on delete cascade;
+    `,
+  },
 ];
 
 export async function runMigrations() {

@@ -40,7 +40,7 @@ async function findSessionRow(recordingId) {
 }
 
 async function assertOwnedRecording(recordingId, ownerId) {
-  const result = await query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
+  const result = await query('select id from recordings where id = $1 and owner_id = $2', [
     recordingId,
     ownerId,
   ]);

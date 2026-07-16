@@ -561,7 +561,7 @@ export async function listProjects(ownerId) {
   const result = await query(
     `
       ${PROJECT_SELECT}
-      where owner_id = $1 or owner_id is null
+      where owner_id = $1
       order by name asc
     `,
     [ownerId],
@@ -574,7 +574,7 @@ export async function getProject(projectId, ownerId) {
   const result = await query(
     `
       ${PROJECT_SELECT}
-      where projects.id = $1 and (owner_id = $2 or owner_id is null)
+      where projects.id = $1 and owner_id = $2
     `,
     [projectId, ownerId],
   );
@@ -669,7 +669,7 @@ export async function updateProject(projectId, ownerId, input = {}) {
             else null
           end,
           updated_at = now()
-        where projects.id = $1 and (projects.owner_id = $2 or projects.owner_id is null)
+        where projects.id = $1 and projects.owner_id = $2
         returning id
       `,
       [projectId, ownerId, hasName, name, hasColor, color, hasDescription, description, hasArchived, Boolean(data.archived)],
@@ -694,7 +694,7 @@ export async function updateProject(projectId, ownerId, input = {}) {
 // проекта". The legacy recordings.project_id FK is on delete set null,
 // covering pre-migration rows too.
 export async function deleteProject(projectId, ownerId) {
-  const result = await query('delete from projects where id = $1 and (owner_id = $2 or owner_id is null) returning id', [
+  const result = await query('delete from projects where id = $1 and owner_id = $2 returning id', [
     projectId,
     ownerId,
   ]);
@@ -722,7 +722,7 @@ export async function getProjectSummary(projectId, ownerId) {
         from recording_tasks t
         join recordings r on r.id = t.recording_id
         join recording_projects rp on rp.recording_id = t.recording_id and rp.project_id = $1
-        where (r.owner_id = $2 or r.owner_id is null)
+        where r.owner_id = $2
           and t.status in ('extracted', 'confirmed', 'sent')
         order by t.due_date asc nulls last, t.created_at desc
       `,
@@ -735,7 +735,7 @@ export async function getProjectSummary(projectId, ownerId) {
         join recording_projects rp on rp.recording_id = r.id and rp.project_id = $1
         join recording_summaries s on s.recording_id = r.id
         cross join lateral jsonb_array_elements(s.protocol->'decisions') as d(value)
-        where (r.owner_id = $2 or r.owner_id is null)
+        where r.owner_id = $2
           and jsonb_typeof(s.protocol->'decisions') = 'array'
         order by r.created_at desc
       `,
@@ -747,7 +747,7 @@ export async function getProjectSummary(projectId, ownerId) {
         from recording_tasks t
         join recordings r on r.id = t.recording_id
         join recording_projects rp on rp.recording_id = t.recording_id and rp.project_id = $1
-        where (r.owner_id = $2 or r.owner_id is null) and t.status = 'done'
+        where r.owner_id = $2 and t.status = 'done'
       `,
       [projectId, ownerId],
     ),
@@ -794,7 +794,7 @@ function cleanFilterDate(value) {
 
 export async function listRecordings(ownerId, filters = {}) {
   const params = [ownerId];
-  const conditions = ['(recordings.owner_id = $1 or recordings.owner_id is null)'];
+  const conditions = ['recordings.owner_id = $1'];
   const bind = (value) => {
     params.push(value);
     return `$${params.length}`;
@@ -898,7 +898,7 @@ export async function listRecordings(ownerId, filters = {}) {
 // owning recording's title so results can link back to the meeting.
 export async function searchTasks(ownerId, filters = {}) {
   const params = [ownerId];
-  const conditions = [`(r.owner_id = $1 or r.owner_id is null)`, `t.status <> 'dismissed'`];
+  const conditions = [`r.owner_id = $1`, `t.status <> 'dismissed'`];
   const bind = (value) => {
     params.push(value);
     return `$${params.length}`;
@@ -1041,7 +1041,7 @@ export async function createMeetingBotRecording(input, ownerId) {
 
 export async function stopMeetingBotRecording(recordingId, ownerId) {
   const result = await query(
-    'select meeting_bot_task_id from recordings where id = $1 and (owner_id = $2 or owner_id is null)',
+    'select meeting_bot_task_id from recordings where id = $1 and owner_id = $2',
     [recordingId, ownerId],
   );
   const taskId = result.rows[0]?.meeting_bot_task_id;
@@ -1132,7 +1132,7 @@ export async function createSelfHostedMeetingRecording(input, ownerId) {
 
 export async function stopSelfHostedMeetingRecording(recordingId, ownerId) {
   const result = await query(
-    'select meeting_bot_task_id from recordings where id = $1 and (owner_id = $2 or owner_id is null) and recorder_engine = $3',
+    'select meeting_bot_task_id from recordings where id = $1 and owner_id = $2 and recorder_engine = $3',
     [recordingId, ownerId, 'self_hosted'],
   );
   const jobId = result.rows[0]?.meeting_bot_task_id;
@@ -1210,7 +1210,7 @@ export async function getRecording(id, ownerId) {
         recorder_engine, failure_count, meeting_type,
         ${RECORDING_PROJECTS_SELECT}
       from recordings
-      where id = $1 and (owner_id = $2 or owner_id is null)
+      where id = $1 and owner_id = $2
     `,
     [id, ownerId],
   );
@@ -1410,7 +1410,7 @@ export async function updateRecordingMetadata(recordingId, ownerId, input) {
           meeting_type = case when $5 then $6 else recordings.meeting_type end,
           updated_at = now()
         where recordings.id = $1
-          and (recordings.owner_id = $2 or recordings.owner_id is null)
+          and recordings.owner_id = $2
         returning recordings.id
       `,
       [recordingId, ownerId, hasTitle, title, hasMeetingType, meetingType],
@@ -1425,7 +1425,7 @@ export async function updateRecordingMetadata(recordingId, ownerId, input) {
       // matches the old single-project behavior, where a foreign projectId
       // simply didn't pass the ownership guard.
       const owned = projectIds.length
-        ? await client.query(`select id from projects where id = any($1::uuid[]) and (owner_id = $2 or owner_id is null)`, [
+        ? await client.query(`select id from projects where id = any($1::uuid[]) and owner_id = $2`, [
             projectIds,
             ownerId,
           ])
@@ -1456,7 +1456,7 @@ export async function updateTranscript(recordingId, ownerId, input = {}) {
   const hasSegments = Object.prototype.hasOwnProperty.call(data, 'segments');
   const hasLocked = Object.prototype.hasOwnProperty.call(data, 'locked');
 
-  const recording = await query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
+  const recording = await query('select id from recordings where id = $1 and owner_id = $2', [
     recordingId,
     ownerId,
   ]);
@@ -1511,7 +1511,7 @@ export async function updateRecordingSummary(recordingId, ownerId, input = {}) {
   const hasLocked = Object.prototype.hasOwnProperty.call(data, 'locked');
   const isContentEdit = hasSummary || hasExecutiveSummary || hasProtocol || hasTopics;
 
-  const recording = await query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
+  const recording = await query('select id from recordings where id = $1 and owner_id = $2', [
     recordingId,
     ownerId,
   ]);
@@ -1582,7 +1582,7 @@ export async function mergeRecordingSpeakers(recordingId, ownerId, sourceLabel, 
     throw new Error('Two different speaker labels are required');
   }
 
-  const recording = await query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
+  const recording = await query('select id from recordings where id = $1 and owner_id = $2', [
     recordingId,
     ownerId,
   ]);
@@ -1641,7 +1641,7 @@ export async function generateRecordingTitle(recordingId, ownerId) {
       update recordings
       set title = $3, auto_named = true, updated_at = now()
       where recordings.id = $1
-        and (recordings.owner_id = $2 or recordings.owner_id is null)
+        and recordings.owner_id = $2
       returning
         recordings.id, recordings.owner_id, recordings.title, recordings.status,
         recordings.source, recordings.duration_seconds, recordings.storage_key, recordings.created_at,
@@ -1694,7 +1694,7 @@ export async function createRecordingTask(recordingId, ownerId, input) {
         'confirmed'
       from recordings recording
       where recording.id = $1
-        and (recording.owner_id = $2 or recording.owner_id is null)
+        and recording.owner_id = $2
       returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, due_date,
         assignee_external, status, external_refs, created_at, updated_at
     `,
@@ -1729,7 +1729,7 @@ export async function updateRecordingTask(recordingId, taskId, ownerId, input) {
       select task.assignee
       from recording_tasks task
       join recordings recording on recording.id = task.recording_id
-      where task.id = $1 and task.recording_id = $2 and (recording.owner_id = $3 or recording.owner_id is null)
+      where task.id = $1 and task.recording_id = $2 and recording.owner_id = $3
     `,
     [taskId, recordingId, ownerId],
   );
@@ -1771,7 +1771,7 @@ export async function updateRecordingTask(recordingId, taskId, ownerId, input) {
       where task.id = $1
         and task.recording_id = $2
         and recording.id = task.recording_id
-        and (recording.owner_id = $3 or recording.owner_id is null)
+        and recording.owner_id = $3
       returning task.id, task.recording_id, task.summary_id, task.transcript_id,
         task.assignee, task.description, task.due_text, task.due_date, task.assignee_external,
         task.status, task.external_refs, task.created_at, task.updated_at
@@ -1804,7 +1804,7 @@ export async function deleteRecordingTask(recordingId, taskId, ownerId) {
       where task.id = $1
         and task.recording_id = $2
         and recording.id = task.recording_id
-        and (recording.owner_id = $3 or recording.owner_id is null)
+        and recording.owner_id = $3
       returning task.id
     `,
     [taskId, recordingId, ownerId],
@@ -1863,7 +1863,7 @@ export async function updateRecordingSpeaker(recordingId, label, ownerId, input)
       select recording.id, $2, $4, $5, $6, $7
       from recordings recording
       where recording.id = $1
-        and (recording.owner_id = $3 or recording.owner_id is null)
+        and recording.owner_id = $3
       on conflict (recording_id, label)
       do update set
         display_name = excluded.display_name,
@@ -1889,7 +1889,7 @@ export async function getRecordingAudioMeta(id, ownerId) {
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at,
         original_filename, mime_type, file_size_bytes
       from recordings
-      where id = $1 and (owner_id = $2 or owner_id is null)
+      where id = $1 and owner_id = $2
     `,
     [id, ownerId],
   );
@@ -1928,7 +1928,7 @@ export async function getRecordingAudio(id, ownerId, range = null) {
  */
 export async function enqueueRecording(recordingId, ownerId, { retranscribe = false } = {}) {
   const job = await transaction(async (client) => {
-    const recording = await client.query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
+    const recording = await client.query('select id from recordings where id = $1 and owner_id = $2', [
       recordingId,
       ownerId,
     ]);
@@ -1997,7 +1997,7 @@ export async function enqueueRecording(recordingId, ownerId, { retranscribe = fa
 // stage boundaries (see worker.js's checkCancelled) and stops there, rather
 // than aborting an in-flight external HTTP call.
 export async function cancelRecordingProcessing(recordingId, ownerId) {
-  const recording = await query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
+  const recording = await query('select id from recordings where id = $1 and owner_id = $2', [
     recordingId,
     ownerId,
   ]);
@@ -2054,7 +2054,7 @@ export async function cancelRecordingProcessing(recordingId, ownerId) {
 }
 
 export async function attachRecordingAudio(recordingId, file, ownerId) {
-  const recording = await query('select id from recordings where id = $1 and (owner_id = $2 or owner_id is null)', [
+  const recording = await query('select id from recordings where id = $1 and owner_id = $2', [
     recordingId,
     ownerId,
   ]);
@@ -2096,7 +2096,7 @@ export async function attachRecordingAudio(recordingId, file, ownerId) {
 }
 
 export async function deleteRecording(id, ownerId) {
-  const result = await query('delete from recordings where id = $1 and (owner_id = $2 or owner_id is null) returning storage_key', [
+  const result = await query('delete from recordings where id = $1 and owner_id = $2 returning storage_key', [
     id,
     ownerId,
   ]);
