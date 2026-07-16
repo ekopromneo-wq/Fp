@@ -6,6 +6,15 @@ import { query } from './db.js';
 import { notifyNewLogin } from './notifications.js';
 import { MEETING_TYPES } from './protocolTemplates.js';
 import { deleteRecordingAudio } from './storage.js';
+import {
+  buildAuthorizeUrl,
+  createPkce,
+  createState,
+  enabledProviders,
+  exchangeCodeForProfile,
+  isProviderEnabled,
+  redirectUri,
+} from './oauth.js';
 
 const SESSION_COOKIE = 'voxmate_session';
 const SESSION_TTL_DAYS = 30;
@@ -279,6 +288,52 @@ function publicSendConfig(config = {}) {
   return normalizeSendConfig(config, config);
 }
 
+/**
+ * Находит или создаёт аккаунт по внешней личности (US-16.1). Порядок:
+ * 1) уже связанная личность → её аккаунт; 2) совпадение по e-mail (провайдер
+ * его подтвердил) → связываем с существующим аккаунтом; 3) иначе новый аккаунт.
+ * Так «Совпадение email → тот же аккаунт» из спеки выполняется автоматически.
+ */
+async function findOrCreateOauthUser(provider, profile) {
+  const existing = await query(
+    `select u.id, u.display_name, u.email, u.created_at, u.updated_at
+     from oauth_identities i join app_users u on u.id = i.user_id
+     where i.provider = $1 and i.provider_user_id = $2`,
+    [provider, profile.id],
+  );
+
+  if (existing.rowCount) {
+    return mapUser(existing.rows[0]);
+  }
+
+  const email = profile.email ? normalizeEmail(profile.email) : null;
+  let user = null;
+
+  if (email) {
+    const byEmail = await query('select id, display_name, email, created_at, updated_at from app_users where email = $1', [email]);
+    if (byEmail.rowCount) {
+      user = mapUser(byEmail.rows[0]);
+    }
+  }
+
+  if (!user) {
+    const created = await query(
+      'insert into app_users (display_name, email) values ($1, $2) returning id, display_name, email, created_at, updated_at',
+      [profile.name || email || `Пользователь ${provider}`, email],
+    );
+    user = mapUser(created.rows[0]);
+  }
+
+  await query(
+    `insert into oauth_identities (provider, provider_user_id, user_id, email)
+     values ($1, $2, $3, $4)
+     on conflict (provider, provider_user_id) do update set user_id = excluded.user_id`,
+    [provider, profile.id, user.id, email],
+  );
+
+  return user;
+}
+
 async function createSession(userId, context = {}) {
   const token = randomBytes(32).toString('base64url');
   const tokenHash = hashToken(token);
@@ -409,7 +464,61 @@ export async function getUserSendConfig(userId) {
 export function registerAuthRoutes(app) {
   app.get('/api/auth/me', async (c) => {
     const user = await getCurrentUser(c);
-    return c.json({ user, registrationEnabled: REGISTRATION_ENABLED });
+    return c.json({ user, registrationEnabled: REGISTRATION_ENABLED, oauthProviders: enabledProviders() });
+  });
+
+  // US-16.1 (ADR-027): вход через внешних провайдеров. Провайдер включается,
+  // только если заданы его client_id/secret в окружении.
+  app.get('/api/auth/oauth/:provider/start', async (c) => {
+    const provider = c.req.param('provider');
+
+    if (!isProviderEnabled(provider)) {
+      return c.json({ error: 'Провайдер не настроен' }, 404);
+    }
+
+    const { verifier, challenge } = createPkce();
+    const state = createState();
+    await query('delete from oauth_states where created_at < now() - interval \'15 minutes\'', []);
+    await query('insert into oauth_states (state, provider, code_verifier) values ($1, $2, $3)', [state, provider, verifier]);
+
+    const uri = redirectUri(provider, c.req.url);
+    return c.redirect(buildAuthorizeUrl(provider, { state, challenge, redirectUri: uri }));
+  });
+
+  app.get('/api/auth/oauth/:provider/callback', async (c) => {
+    const provider = c.req.param('provider');
+    const code = c.req.query('code');
+    const state = c.req.query('state');
+    const appUrl = (process.env.PUBLIC_APP_URL || new URL(c.req.url).origin).replace(/\/+$/, '');
+
+    // Ошибки провайдера и подделки state ведут обратно на экран входа с пометкой.
+    const fail = (reason) => c.redirect(`${appUrl}/?auth_error=${encodeURIComponent(reason)}`);
+
+    if (!isProviderEnabled(provider) || !code || !state) {
+      return fail('Не удалось войти — повторите попытку');
+    }
+
+    const stored = await query('delete from oauth_states where state = $1 and provider = $2 returning code_verifier', [
+      state,
+      provider,
+    ]);
+
+    if (!stored.rowCount) {
+      return fail('Сессия входа устарела — повторите попытку');
+    }
+
+    try {
+      const uri = redirectUri(provider, c.req.url);
+      const profile = await exchangeCodeForProfile(provider, { code, codeVerifier: stored.rows[0].code_verifier, redirectUri: uri });
+      const user = await findOrCreateOauthUser(provider, profile);
+      const session = await createSession(user.id, { userAgent: c.req.header('User-Agent') || '', ip: clientIp(c) });
+
+      c.header('Set-Cookie', session.cookie);
+      return c.redirect(`${appUrl}/`);
+    } catch (error) {
+      console.warn(`OAuth ${provider} callback failed: ${error.message}`);
+      return fail('Не удалось войти через провайдера');
+    }
   });
 
   app.get('/api/settings/smtp', requireAuth, async (c) => {

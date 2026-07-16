@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { demoEmail, demoPassword } from '../lib/api.js';
+import { apiBaseUrl, demoEmail, demoPassword } from '../lib/api.js';
 import InstallButton from './InstallButton.jsx';
 
-function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage, registrationOpen = true }) {
+function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage, registrationOpen = true, oauthProviders = [] }) {
   const [email, setEmail] = useState(demoEmail);
   const [password, setPassword] = useState(demoPassword);
   const [displayName, setDisplayName] = useState('Demo User');
@@ -54,6 +54,23 @@ function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage
             {isSubmitting ? 'Проверяем...' : isRegister ? 'Зарегистрироваться' : 'Войти'}
           </button>
         </form>
+
+        {/* US-16.1 (ADR-027): вход через провайдеров — показываем только
+            настроенные на сервере. Ведём на бэкенд-роут (полный редирект). */}
+        {oauthProviders.length ? (
+          <div className="oauth-buttons">
+            <div className="oauth-divider"><span>или</span></div>
+            {oauthProviders.map((item) => (
+              <a
+                key={item.provider}
+                className="button button-secondary oauth-button"
+                href={`${apiBaseUrl}/api/auth/oauth/${item.provider}/start`}
+              >
+                Войти через {item.label}
+              </a>
+            ))}
+          </div>
+        ) : null}
 
         {registrationOpen ? (
           <button className="link-button" type="button" onClick={() => setAuthMode(isRegister ? 'login' : 'register')}>

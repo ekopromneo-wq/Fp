@@ -521,6 +521,35 @@ const migrations = [
       create index if not exists feedback_owner_id_idx on feedback(owner_id, created_at desc);
     `,
   },
+  {
+    id: '028_oauth_login',
+    sql: `
+      -- US-16.1 (ADR-027): вход через внешних провайдеров. Пароль становится
+      -- необязательным — аккаунт может быть только на OAuth.
+      alter table app_users alter column password_hash drop not null;
+
+      -- Связка внешней личности с аккаунтом (один аккаунт — несколько
+      -- провайдеров; у провайдера один subject → один аккаунт).
+      create table if not exists oauth_identities (
+        provider text not null,
+        provider_user_id text not null,
+        user_id uuid not null references app_users(id) on delete cascade,
+        email text,
+        created_at timestamptz not null default now(),
+        primary key (provider, provider_user_id)
+      );
+      create index if not exists oauth_identities_user_id_idx on oauth_identities(user_id);
+
+      -- Короткоживущее состояние потока (state + PKCE verifier), чтобы callback
+      -- проверил, что запрос начал тот же браузер, и не хранить это в куке.
+      create table if not exists oauth_states (
+        state text primary key,
+        provider text not null,
+        code_verifier text not null,
+        created_at timestamptz not null default now()
+      );
+    `,
+  },
 ];
 
 export async function runMigrations() {

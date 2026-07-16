@@ -50,8 +50,17 @@ function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [registrationEnabled, setRegistrationEnabled] = useState(true);
+  const [oauthProviders, setOauthProviders] = useState([]);
   const [authMode, setAuthMode] = useState('login');
-  const [authMessage, setAuthMessage] = useState('');
+  // Ошибка OAuth приходит редиректом ?auth_error=... — показываем на экране входа
+  // и чистим адрес.
+  const [authMessage, setAuthMessage] = useState(() => {
+    const error = new URLSearchParams(window.location.search).get('auth_error');
+    if (error) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    return error || '';
+  });
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [recordings, setRecordings] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -178,6 +187,7 @@ function App() {
       const data = await response.json();
       setCurrentUser(data.user || null);
       setRegistrationEnabled(data.registrationEnabled !== false);
+      setOauthProviders(data.oauthProviders || []);
 
       if (data.user) {
         putCachedCurrentUser(data.user);
@@ -1155,6 +1165,7 @@ function App() {
         isSubmitting={isAuthSubmitting}
         authMessage={authMessage}
         registrationOpen={registrationEnabled}
+        oauthProviders={oauthProviders}
       />
     );
   }

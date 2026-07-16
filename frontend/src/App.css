@@ -3301,3 +3301,32 @@ a.bitrix-sent-badge {
 .feedback-consent {
   font-size: 0.82rem;
 }
+
+/* US-16.1: кнопки входа через провайдеров. */
+.oauth-buttons {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.oauth-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  margin: 4px 0;
+}
+
+.oauth-divider::before,
+.oauth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.oauth-button {
+  width: 100%;
+  text-decoration: none;
+}
