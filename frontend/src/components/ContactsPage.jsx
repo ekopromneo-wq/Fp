@@ -25,6 +25,15 @@ function ContactRow({ contact, draft, isSaving, isDeleting, onDraftChange, onSav
         Телефон
         <input value={draft.phone} onChange={(event) => onDraftChange(contact, 'phone', event.target.value)} placeholder="+7..." />
       </label>
+      <label>
+        Telegram chat ID
+        <input
+          value={draft.telegramChatId}
+          onChange={(event) => onDraftChange(contact, 'telegramChatId', event.target.value)}
+          placeholder="Например: 123456789"
+          title="Контакт должен запустить вашего бота; его chat id покажет, например, @userinfobot"
+        />
+      </label>
       <div className="contact-row-actions">
         <span className="contact-source-badge">{contact.source}</span>
         <button className="button button-secondary" type="button" onClick={() => onSave(contact)} disabled={isSaving}>
@@ -103,6 +112,15 @@ export default function ContactsPage({
               value={contactDraft.phone}
               onChange={(event) => setContactDraft((current) => ({ ...current, phone: event.target.value }))}
               placeholder="+7..."
+            />
+          </label>
+          <label>
+            Telegram chat ID
+            <input
+              value={contactDraft.telegramChatId}
+              onChange={(event) => setContactDraft((current) => ({ ...current, telegramChatId: event.target.value }))}
+              placeholder="Например: 123456789"
+              title="Контакт должен запустить вашего бота; его chat id покажет, например, @userinfobot"
             />
           </label>
           <button className="button button-primary" type="submit" disabled={isCreatingContact}>

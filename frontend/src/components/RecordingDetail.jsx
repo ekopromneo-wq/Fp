@@ -420,6 +420,7 @@ function RecordingDetail({
                   isDeleting={tasks.deletingTaskId === task.id}
                   isSendingBitrix={tasks.isSendingBitrixTaskId === task.id}
                   isSendingEmail={tasks.sendingTaskEmailId === task.id}
+                  isSendingTelegram={tasks.sendingTaskTelegramId === task.id}
                   isSelected={tasks.selectedTaskIds.has(task.id)}
                   assigneeMatch={tasks.taskAssigneeMatches[task.id]}
                   onFieldChange={tasks.updateTaskDraft}
@@ -429,6 +430,7 @@ function RecordingDetail({
                   onDelete={tasks.handleDeleteTask}
                   onSendToBitrix={tasks.handleSendTaskToBitrix}
                   onSendEmail={tasks.handleSendTaskEmail}
+                  onSendTelegram={tasks.handleSendTaskTelegram}
                   onApplyAssigneeCandidate={tasks.applyTaskAssigneeCandidate}
                   onToggleSelect={tasks.toggleTaskSelection}
                 />

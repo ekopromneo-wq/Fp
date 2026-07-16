@@ -10,7 +10,8 @@ import {
 } from './auth.js';
 import { query, transaction } from './db.js';
 import { sendRecordingEmail, sendTaskEmail } from './email.js';
-import { sendRecordingTelegram } from './telegram.js';
+import { sendRecordingTelegram, sendTaskTelegram } from './telegram.js';
+import { recordDelivery, sendWithRetry } from './sending.js';
 import { sendTasksToBitrix, matchRecordingSpeakersToBitrix } from './bitrix.js';
 import { matchRecordingSpeakersToContacts, matchRecordingTasksToContacts, isAssigneeExternal, listContacts } from './contacts.js';
 import {
@@ -2722,6 +2723,72 @@ export function registerRecordingRoutes(app) {
       return c.json({ delivery, task: mapTask(updated.rows[0]) });
     } catch (error) {
       return c.json({ error: error.message || 'Failed to send task email' }, 400);
+    }
+  });
+
+  /**
+   * US-11.3: задача уходит в личный чат исполнителю. chatId приходит из
+   * контакта с привязанным Telegram (UI подставляет его из сопоставления
+   * исполнителя); отправка идёт через автоповторы US-11.1 и пишется в журнал
+   * доставки, статус нажатий кнопок обновляет поллер в worker.js.
+   */
+  app.post('/api/recordings/:recordingId/tasks/:taskId/send-telegram', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const recordingId = c.req.param('recordingId');
+    const taskId = c.req.param('taskId');
+    const recording = await getRecording(recordingId, user.id);
+    const task = recording?.tasks?.find((item) => item.id === taskId);
+
+    if (!recording || !task) {
+      return c.json({ error: 'Task not found' }, 404);
+    }
+
+    const telegramConfig = (await getUserTelegramConfig(user.id)) || {};
+
+    try {
+      const { result, attempts } = await sendWithRetry(() => sendTaskTelegram(telegramConfig, body.chatId, recording, task));
+
+      await recordDelivery({
+        ownerId: user.id,
+        recordingId,
+        channel: 'telegram',
+        payloadKind: 'tasks',
+        recipients: [result.chatId],
+        status: 'sent',
+        attempts,
+        externalRefs: result,
+      });
+
+      const updated = await query(
+        `
+          update recording_tasks
+          set
+            status = case when status in ('extracted', 'confirmed') then 'sent' else status end,
+            external_refs = external_refs || jsonb_build_object('telegram', jsonb_build_object(
+              'chatId', $2::text, 'messageId', $3::bigint, 'sentAt', now())),
+            updated_at = now()
+          where id = $1
+          returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, due_date,
+            assignee_external, status, external_refs, created_at, updated_at
+        `,
+        [taskId, result.chatId, result.messageId],
+      );
+
+      return c.json({ delivery: result, task: mapTask(updated.rows[0]) });
+    } catch (error) {
+      await recordDelivery({
+        ownerId: user.id,
+        recordingId,
+        channel: 'telegram',
+        payloadKind: 'tasks',
+        recipients: [String(body.chatId || '')].filter(Boolean),
+        status: 'failed',
+        attempts: error.attempts || 1,
+        lastError: error.message,
+      });
+
+      return c.json({ error: error.message || 'Не удалось отправить задачу в Telegram' }, 400);
     }
   });
 

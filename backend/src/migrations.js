@@ -393,6 +393,29 @@ const migrations = [
       alter table app_users add column if not exists send_config jsonb;
     `,
   },
+  {
+    id: '022_telegram_tasks',
+    sql: `
+      -- US-11.3: получатели задач — контакты с привязанным Telegram. Боту нужен
+      -- chat id (username недостаточно: Bot API не шлёт по имени), и контакт
+      -- должен сам запустить бота — это ограничение Telegram, не наше.
+      alter table contacts add column if not exists telegram_chat_id text;
+
+      -- «Взять в работу» с inline-кнопки (US-11.3).
+      alter table recording_tasks drop constraint recording_tasks_status_check;
+      alter table recording_tasks add constraint recording_tasks_status_check
+        check (status in ('extracted', 'confirmed', 'sent', 'in_progress', 'done', 'dismissed'));
+
+      -- Курсор getUpdates на каждого бота (ключ — хеш токена, сам токен в
+      -- таблице не живёт): без него перезапуск воркера обрабатывал бы старые
+      -- нажатия кнопок заново.
+      create table if not exists telegram_bot_cursors (
+        bot_key text primary key,
+        last_update_id bigint not null default 0,
+        updated_at timestamptz not null default now()
+      );
+    `,
+  },
 ];
 
 export async function runMigrations() {

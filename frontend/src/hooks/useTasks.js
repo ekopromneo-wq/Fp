@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { apiFetch } from '../lib/api.js';
 
 /**
@@ -17,6 +17,7 @@ export default function useTasks({ selectedRecording, setSelectedRecording, setS
   const [taskAssigneeMatches, setTaskAssigneeMatches] = useState({});
   const [isLoadingTaskAssigneeMatches, setIsLoadingTaskAssigneeMatches] = useState(false);
   const [sendingTaskEmailId, setSendingTaskEmailId] = useState(null);
+  const [sendingTaskTelegramId, setSendingTaskTelegramId] = useState(null);
   const [bulkAssigneeDraft, setBulkAssigneeDraft] = useState('');
   const [bulkDueTextDraft, setBulkDueTextDraft] = useState('');
   const [isBulkUpdatingTasks, setIsBulkUpdatingTasks] = useState(false);
@@ -203,6 +204,38 @@ export default function useTasks({ selectedRecording, setSelectedRecording, setS
     }
   }
 
+  // Кнопка «В Telegram: <контакт>» (US-11.3) зависит от сопоставления
+  // исполнителей, поэтому оно подгружается тихо при открытии записи, а не
+  // только по ручной кнопке «Подобрать исполнителей» (она остаётся для
+  // повторного прогона после правки контактов).
+  useEffect(() => {
+    setTaskAssigneeMatches({});
+
+    if (!selectedRecording?.id || !selectedRecording?.tasks?.length) {
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const response = await apiFetch(`/api/recordings/${selectedRecording.id}/task-assignee-matches`);
+        const data = await response.json();
+
+        if (!cancelled && response.ok) {
+          setTaskAssigneeMatches(Object.fromEntries((data.matches || []).map((match) => [match.taskId, match])));
+        }
+      } catch {
+        // Тихая фоновая загрузка: без сопоставления задачи просто останутся без
+        // кнопки Telegram, ручная кнопка подбора никуда не девается.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRecording?.id, selectedRecording?.tasks?.length]);
+
   async function handleMatchTaskAssignees() {
     if (!selectedRecording) {
       return;
@@ -272,6 +305,34 @@ export default function useTasks({ selectedRecording, setSelectedRecording, setS
       setStatus(error.message || 'Ошибка отправки задачи на email');
     } finally {
       setSendingTaskEmailId(null);
+    }
+  }
+
+  async function handleSendTaskTelegram(task, chatId) {
+    if (!selectedRecording || !chatId) {
+      return;
+    }
+
+    setSendingTaskTelegramId(task.id);
+    setStatus('Отправляем задачу в Telegram...');
+
+    try {
+      const response = await apiFetch(`/api/recordings/${selectedRecording.id}/tasks/${task.id}/send-telegram`, {
+        method: 'POST',
+        body: JSON.stringify({ chatId }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось отправить задачу в Telegram');
+      }
+
+      applyTaskUpdate(data.task);
+      setStatus('Задача отправлена в Telegram');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка отправки задачи в Telegram');
+    } finally {
+      setSendingTaskTelegramId(null);
     }
   }
 
@@ -390,6 +451,8 @@ export default function useTasks({ selectedRecording, setSelectedRecording, setS
     taskAssigneeMatches,
     isLoadingTaskAssigneeMatches,
     sendingTaskEmailId,
+    sendingTaskTelegramId,
+    handleSendTaskTelegram,
     bulkAssigneeDraft,
     setBulkAssigneeDraft,
     bulkDueTextDraft,

@@ -21,6 +21,7 @@ export const TASK_STATUS_LABELS = {
   extracted: 'Извлечена',
   confirmed: 'Подтверждена',
   sent: 'Отправлена',
+  in_progress: 'В работе',
   done: 'Готова',
   dismissed: 'Скрыта',
 };

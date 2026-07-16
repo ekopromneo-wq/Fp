@@ -10,6 +10,7 @@ export default function TaskRow({
   isDeleting,
   isSendingBitrix,
   isSendingEmail,
+  isSendingTelegram,
   isSelected,
   assigneeMatch,
   onFieldChange,
@@ -19,6 +20,7 @@ export default function TaskRow({
   onDelete,
   onSendToBitrix,
   onSendEmail,
+  onSendTelegram,
   onApplyAssigneeCandidate,
   onToggleSelect,
 }) {
@@ -110,6 +112,24 @@ export default function TaskRow({
             {isSendingBitrix ? 'Отправляем...' : 'В Битрикс24'}
           </button>
         )}
+        {/* US-11.3: личный чат исполнителю. Кнопка есть только когда исполнитель
+            однозначно сопоставлен с контактом, у которого привязан Telegram. */}
+        {task.externalRefs?.telegram ? (
+          <span className="bitrix-sent-badge">В Telegram ✓</span>
+        ) : assigneeMatch?.autoMatch?.telegramChatId ? (
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={() => onSendTelegram(task, assigneeMatch.autoMatch.telegramChatId)}
+            disabled={isSaving || isSendingTelegram}
+          >
+            {isSendingTelegram ? 'Отправляем...' : `В Telegram: ${assigneeMatch.autoMatch.name}`}
+          </button>
+        ) : assigneeMatch?.autoMatch ? (
+          <span className="muted-text task-telegram-hint">
+            У «{assigneeMatch.autoMatch.name}» не привязан Telegram — задача остаётся в VoxMate.
+          </span>
+        ) : null}
       </div>
     </div>
   );

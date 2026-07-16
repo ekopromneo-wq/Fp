@@ -50,6 +50,8 @@ services:
       - SMTP_PASS=${SMTP_PASS:-}
       - SMTP_FROM=${SMTP_FROM:-}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      # Переопределяется в тестах (боевой Bot API не проверить без живого бота).
+      - TELEGRAM_API_URL=${TELEGRAM_API_URL:-https://api.telegram.org}
       - TELEGRAM_DEFAULT_CHAT_ID=${TELEGRAM_DEFAULT_CHAT_ID:-}
       - BITRIX_WEBHOOK_URL=${BITRIX_WEBHOOK_URL:-}
       - BITRIX_DEFAULT_RESPONSIBLE_ID=${BITRIX_DEFAULT_RESPONSIBLE_ID:-}
@@ -105,6 +107,8 @@ services:
       - SMTP_PASS=${SMTP_PASS:-}
       - SMTP_FROM=${SMTP_FROM:-}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      # Переопределяется в тестах (боевой Bot API не проверить без живого бота).
+      - TELEGRAM_API_URL=${TELEGRAM_API_URL:-https://api.telegram.org}
       - TELEGRAM_DEFAULT_CHAT_ID=${TELEGRAM_DEFAULT_CHAT_ID:-}
     depends_on:
       db:

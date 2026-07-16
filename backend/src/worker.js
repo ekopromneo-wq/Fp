@@ -16,6 +16,7 @@ import { transcribeWithSpeech2Text, checkSpeech2TextStatus, fetchSpeech2TextResu
 import { getUserDiarizationConfig } from './auth.js';
 import { summarizeRecording } from './recordings.js';
 import { notifyRecordingEvent, notifyTaskOverdue } from './notifications.js';
+import { pollTelegramCallbacks } from './telegramCallbacks.js';
 
 dotenv.config();
 
@@ -379,6 +380,8 @@ async function pollMeetingBotRecordings() {
 }
 
 const OVERDUE_TASK_POLL_INTERVAL_MS = Number(process.env.OVERDUE_TASK_POLL_INTERVAL_MS || 30 * 60 * 1000);
+// Нажатие кнопки в Telegram должно отражаться на задаче за секунды, не минуты.
+const TELEGRAM_CALLBACK_POLL_INTERVAL_MS = Number(process.env.TELEGRAM_CALLBACK_POLL_INTERVAL_MS || 10000);
 
 /**
  * US-9.3: "Просроченная дата → уведомление". Runs independently of the
@@ -422,6 +425,11 @@ async function main() {
   setInterval(() => {
     pollOverdueTasks().catch((error) => console.warn('Overdue task poll loop error:', error.message));
   }, OVERDUE_TASK_POLL_INTERVAL_MS);
+
+  // US-11.3: нажатия inline-кнопок в Telegram («Взять в работу»/«Выполнено»).
+  setInterval(() => {
+    pollTelegramCallbacks().catch((error) => console.warn('Telegram callback poll loop error:', error.message));
+  }, TELEGRAM_CALLBACK_POLL_INTERVAL_MS);
 
   const worker = new Worker(
     RECORDING_QUEUE_NAME,

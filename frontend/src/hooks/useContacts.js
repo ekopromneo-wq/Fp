@@ -9,7 +9,7 @@ import { apiFetch } from '../lib/api.js';
 export default function useContacts(setStatus) {
   const [contacts, setContacts] = useState([]);
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
-  const [contactDraft, setContactDraft] = useState({ name: '', organization: '', position: '', email: '', phone: '' });
+  const [contactDraft, setContactDraft] = useState({ name: '', organization: '', position: '', email: '', phone: '', telegramChatId: '' });
   const [isCreatingContact, setIsCreatingContact] = useState(false);
   const [contactDuplicate, setContactDuplicate] = useState(null);
   const [contactEditDrafts, setContactEditDrafts] = useState({});
@@ -72,7 +72,7 @@ export default function useContacts(setStatus) {
       }
 
       setContacts((current) => [...current, data.contact].sort((a, b) => a.name.localeCompare(b.name)));
-      setContactDraft({ name: '', organization: '', position: '', email: '', phone: '' });
+      setContactDraft({ name: '', organization: '', position: '', email: '', phone: '', telegramChatId: '' });
       setContactDuplicate(null);
       setStatus('Контакт добавлен');
     } catch (error) {
@@ -104,7 +104,7 @@ export default function useContacts(setStatus) {
         setContacts((current) => [...current, data.contact].sort((a, b) => a.name.localeCompare(b.name)));
       }
 
-      setContactDraft({ name: '', organization: '', position: '', email: '', phone: '' });
+      setContactDraft({ name: '', organization: '', position: '', email: '', phone: '', telegramChatId: '' });
       setContactDuplicate(null);
       setStatus(mergeIntoId ? 'Контакт объединён' : 'Контакт добавлен');
     } catch (error) {
@@ -122,6 +122,7 @@ export default function useContacts(setStatus) {
         position: contact.position || '',
         email: contact.email || '',
         phone: contact.phone || '',
+        telegramChatId: contact.telegramChatId || '',
       }
     );
   }

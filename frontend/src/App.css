@@ -2610,3 +2610,9 @@ audio {
 .balance-link:hover {
   text-decoration: underline;
 }
+
+/* US-11.3: подсказка «у контакта не привязан Telegram» в ряду действий задачи. */
+.task-telegram-hint {
+  align-self: center;
+  font-size: 0.78rem;
+}

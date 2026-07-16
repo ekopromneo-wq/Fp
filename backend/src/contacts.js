@@ -11,6 +11,7 @@ function mapContact(row) {
     position: row.position,
     email: row.email,
     phone: row.phone,
+    telegramChatId: row.telegram_chat_id,
     source: row.source,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -52,17 +53,18 @@ export async function createContact(ownerId, input = {}) {
   const organization = typeof input.organization === 'string' && input.organization.trim() ? input.organization.trim() : null;
   const position = typeof input.position === 'string' && input.position.trim() ? input.position.trim() : null;
   const phone = typeof input.phone === 'string' && input.phone.trim() ? input.phone.trim() : null;
+  const telegramChatId = typeof input.telegramChatId === 'string' && input.telegramChatId.trim() ? input.telegramChatId.trim() : null;
   const source = typeof input.source === 'string' && input.source ? input.source : 'manual';
 
   if (input.mergeIntoId) {
     const result = await query(
       `
         update contacts
-        set name = $3, organization = $4, position = $5, email = $6, phone = $7, updated_at = now()
+        set name = $3, organization = $4, position = $5, email = $6, phone = $7, telegram_chat_id = $8, updated_at = now()
         where id = $1 and owner_id = $2
         returning *
       `,
-      [input.mergeIntoId, ownerId, name, organization, position, email, phone],
+      [input.mergeIntoId, ownerId, name, organization, position, email, phone, telegramChatId],
     );
 
     return result.rowCount ? { contact: mapContact(result.rows[0]), duplicate: null } : { contact: null, duplicate: null };
@@ -78,11 +80,11 @@ export async function createContact(ownerId, input = {}) {
 
   const result = await query(
     `
-      insert into contacts (owner_id, name, organization, position, email, phone, source)
-      values ($1, $2, $3, $4, $5, $6, $7)
+      insert into contacts (owner_id, name, organization, position, email, phone, telegram_chat_id, source)
+      values ($1, $2, $3, $4, $5, $6, $7, $8)
       returning *
     `,
-    [ownerId, name, organization, position, email, phone, source],
+    [ownerId, name, organization, position, email, phone, telegramChatId, source],
   );
 
   return { contact: mapContact(result.rows[0]), duplicate: null };
@@ -95,6 +97,7 @@ export async function updateContact(id, ownerId, input = {}) {
   const hasPosition = Object.prototype.hasOwnProperty.call(data, 'position');
   const hasEmail = Object.prototype.hasOwnProperty.call(data, 'email');
   const hasPhone = Object.prototype.hasOwnProperty.call(data, 'phone');
+  const hasTelegram = Object.prototype.hasOwnProperty.call(data, 'telegramChatId');
 
   const existing = await query('select * from contacts where id = $1 and owner_id = $2', [id, ownerId]);
 
@@ -108,15 +111,18 @@ export async function updateContact(id, ownerId, input = {}) {
   const position = hasPosition ? (typeof data.position === 'string' && data.position.trim() ? data.position.trim() : null) : current.position;
   const email = hasEmail ? (typeof data.email === 'string' && data.email.trim() ? data.email.trim() : null) : current.email;
   const phone = hasPhone ? (typeof data.phone === 'string' && data.phone.trim() ? data.phone.trim() : null) : current.phone;
+  const telegramChatId = hasTelegram
+    ? (typeof data.telegramChatId === 'string' && data.telegramChatId.trim() ? data.telegramChatId.trim() : null)
+    : current.telegram_chat_id;
 
   const result = await query(
     `
       update contacts
-      set name = $3, organization = $4, position = $5, email = $6, phone = $7, updated_at = now()
+      set name = $3, organization = $4, position = $5, email = $6, phone = $7, telegram_chat_id = $8, updated_at = now()
       where id = $1 and owner_id = $2
       returning *
     `,
-    [id, ownerId, name, organization, position, email, phone],
+    [id, ownerId, name, organization, position, email, phone, telegramChatId],
   );
 
   return mapContact(result.rows[0]);
@@ -385,7 +391,7 @@ export function matchSpeakerToContacts(speakerName, contacts) {
     const matchedWordCount = contactWords.filter((word) => speakerWords.has(word)).length;
 
     if (matchedWordCount >= 2) {
-      candidates.push({ id: contact.id, name: contact.name, email: contact.email, matchedWordCount });
+      candidates.push({ id: contact.id, name: contact.name, email: contact.email, telegramChatId: contact.telegramChatId || null, matchedWordCount });
     }
   }
 
