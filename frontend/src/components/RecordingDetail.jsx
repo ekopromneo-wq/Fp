@@ -370,7 +370,7 @@ function RecordingDetail({
             <strong>Новая задача</strong>
           </div>
 
-          <TaskForm draft={tasks.newTaskDraft} onFieldChange={tasks.updateNewTaskDraft} />
+          <TaskForm draft={tasks.newTaskDraft} onFieldChange={tasks.updateNewTaskDraft} onDictate={onDictate} setStatus={setStatus} />
 
           <button className="button button-primary" type="submit" disabled={tasks.isAddingTask}>
             {tasks.isAddingTask ? 'Добавляем...' : 'Добавить задачу'}

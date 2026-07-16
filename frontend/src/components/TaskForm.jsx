@@ -1,6 +1,7 @@
 import { formatDate } from '../lib/format.js';
+import VoiceInputButton from './VoiceInputButton.jsx';
 
-export default function TaskForm({ draft, onFieldChange, dueDate }) {
+export default function TaskForm({ draft, onFieldChange, dueDate, onDictate, setStatus }) {
   return (
     <>
       <label>
@@ -24,12 +25,23 @@ export default function TaskForm({ draft, onFieldChange, dueDate }) {
 
       <label>
         Что сделать
-        <textarea
-          value={draft.description}
-          onChange={(event) => onFieldChange('description', event.target.value)}
-          rows={3}
-          placeholder="Описание задачи"
-        />
+        <div className="task-description-with-dictate">
+          <textarea
+            value={draft.description}
+            onChange={(event) => onFieldChange('description', event.target.value)}
+            rows={3}
+            placeholder="Описание задачи"
+          />
+          {/* US-13.2: создание задачи голосом — надиктовка в описание. */}
+          {onDictate ? (
+            <VoiceInputButton
+              onDictate={onDictate}
+              onText={(text) => onFieldChange('description', draft.description ? `${draft.description} ${text}` : text)}
+              setStatus={setStatus}
+              title="Надиктовать задачу"
+            />
+          ) : null}
+        </div>
       </label>
     </>
   );

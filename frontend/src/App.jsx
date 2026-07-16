@@ -3,6 +3,7 @@ import './App.css';
 import Topbar from './components/Topbar.jsx';
 import RecordingCard from './components/RecordingCard.jsx';
 import ContactsPage from './components/ContactsPage.jsx';
+import HomePage from './components/HomePage.jsx';
 import ProjectsPage from './components/ProjectsPage.jsx';
 import TaskSearchPage from './components/TaskSearchPage.jsx';
 import SettingsPage from './components/SettingsPage.jsx';
@@ -55,7 +56,8 @@ function App() {
   // Токен читается один раз при монтировании: смена адреса без роутера всё
   // равно перезагружает страницу.
   const [shareToken] = useState(() => new URLSearchParams(window.location.search).get('share'));
-  const [activePage, setActivePage] = useState('library');
+  // US-13.1: приложение открывается на контекстном главном экране.
+  const [activePage, setActivePage] = useState('home');
   const [selectedRecordingId, setSelectedRecordingId] = useState(null);
   const [selectedRecording, setSelectedRecording] = useState(null);
   const [status, setStatus] = useState('Загружаем записи...');
@@ -111,6 +113,8 @@ function App() {
   });
 
   const micDeviceId = useUiStore((state) => state.micDeviceId);
+  const hiddenHomeBlocks = useUiStore((state) => state.hiddenHomeBlocks);
+  const toggleHomeBlock = useUiStore((state) => state.toggleHomeBlock);
   const setMicDeviceId = useUiStore((state) => state.setMicDeviceId);
 
   const {
@@ -1073,7 +1077,18 @@ function App() {
         status={status}
       />
 
-      {activePage === 'settings' ? (
+      {activePage === 'home' ? (
+        <HomePage
+          recordings={recordings}
+          isLoading={isLoading}
+          isMicRecording={isMicRecording}
+          onStartRecording={handleMicRecordingToggle}
+          onOpenRecording={openRecordingFromAnywhere}
+          setActivePage={setActivePage}
+          hiddenBlocks={hiddenHomeBlocks}
+          onToggleBlock={toggleHomeBlock}
+        />
+      ) : activePage === 'settings' ? (
         <SettingsPage settings={settings} micDeviceId={micDeviceId} setMicDeviceId={setMicDeviceId} status={status} />
       ) : activePage === 'projects' ? (
         <>

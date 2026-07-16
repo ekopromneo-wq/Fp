@@ -14,6 +14,15 @@ function BellIcon() {
   );
 }
 
+function HomeIcon() {
+  return (
+    <svg className="icon-button-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 10.5 12 3l9 7.5" />
+      <path d="M5 9.5V21h14V9.5" />
+    </svg>
+  );
+}
+
 function ProjectsIcon() {
   return (
     <svg className="icon-button-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -135,7 +144,9 @@ export default function Topbar({
       <div>
         <p className="eyebrow">VoxMate</p>
         <h1 id="page-title">
-          {activePage === 'settings'
+          {activePage === 'home'
+            ? 'Главная'
+            : activePage === 'settings'
             ? 'Настройки'
             : activePage === 'contacts'
               ? 'Контакты'
@@ -253,6 +264,16 @@ export default function Topbar({
             title={theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему'}
           >
             <ThemeIcon theme={theme} />
+          </button>
+
+          <button
+            className={`button icon-button ${activePage === 'home' ? 'button-primary' : 'button-secondary'}`}
+            type="button"
+            onClick={() => setActivePage('home')}
+            aria-label="Главная"
+            title="Главная"
+          >
+            <HomeIcon />
           </button>
 
           <button
