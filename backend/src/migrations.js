@@ -470,6 +470,24 @@ const migrations = [
       create index if not exists telegram_chat_links_user_id_idx on telegram_chat_links(user_id);
     `,
   },
+  {
+    id: '025_account_sessions_and_settings',
+    sql: `
+      -- US-16.1: список устройств и уведомление о новом входе. Пишем, с чего и
+      -- откуда вошли, чтобы показать сессии и заметить чужой вход.
+      alter table auth_sessions add column if not exists user_agent text;
+      alter table auth_sessions add column if not exists ip text;
+      alter table auth_sessions add column if not exists last_ip text;
+
+      -- US-16.2: шаблон протокола по умолчанию + место под сброс персонализации.
+      alter table app_users add column if not exists account_config jsonb;
+
+      -- US-16.1: уведомление о новом входе — ещё один тип уведомления (без записи).
+      alter table notifications drop constraint notifications_type_check;
+      alter table notifications add constraint notifications_type_check
+        check (type in ('done', 'failed', 'task_overdue', 'new_login'));
+    `,
+  },
 ];
 
 export async function runMigrations() {

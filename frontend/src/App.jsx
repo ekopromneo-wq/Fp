@@ -85,6 +85,7 @@ function App() {
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [summaryLength, setSummaryLength] = useState('medium');
   const [sendConfig, setSendConfig] = useState(null);
+  const [accountConfig, setAccountConfig] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -134,7 +135,23 @@ function App() {
   const closeVoicePanel = useUiStore((state) => state.closeVoicePanel);
   const theme = useUiStore((state) => state.theme);
   const toggleTheme = useUiStore((state) => state.toggleTheme);
-  const handleMicButtonClick = isMobile ? openVoicePanel : handleMicRecordingToggle;
+  // US-16.3: предупреждение о согласии участников перед КАЖДОЙ записью
+  // (152-ФЗ). Только при старте (не остановке) и если настройка включена.
+  function startRecordingWithConsent() {
+    if (!isMicRecording && accountConfig?.recordingConsentWarning !== false) {
+      const agreed = window.confirm(
+        'Запись встречи затрагивает персональные данные участников (152-ФЗ). Убедитесь, что участники предупреждены о записи и согласны. Начать запись?',
+      );
+
+      if (!agreed) {
+        return;
+      }
+    }
+
+    handleMicRecordingToggle();
+  }
+
+  const handleMicButtonClick = isMobile ? openVoicePanel : startRecordingWithConsent;
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -203,6 +220,18 @@ function App() {
     } finally {
       setIsAuthSubmitting(false);
     }
+  }
+
+  function handleLoggedOut() {
+    // Аккаунт удалён на сервере — просто сбрасываем клиент, без /logout.
+    clearOfflineCache().catch(() => null);
+    setCurrentUser(null);
+    setRecordings([]);
+    setProjects([]);
+    setActivePage('home');
+    setSelectedRecordingId(null);
+    setSelectedRecording(null);
+    setStatus('Аккаунт удалён');
   }
 
   async function handleLogout() {
@@ -506,6 +535,17 @@ function App() {
       } catch {
         // Панель отправки переживёт отсутствие настроек: у черновика есть
         // собственные значения по умолчанию.
+      }
+
+      try {
+        const response = await apiFetch('/api/settings/account');
+        const data = await response.json();
+
+        if (response.ok) {
+          setAccountConfig(data.account);
+        }
+      } catch {
+        // Согласие спросим по умолчанию, если настройка не загрузилась.
       }
     })();
   }, [currentUser?.id]);
@@ -1072,7 +1112,7 @@ function App() {
         micDuration={micDuration}
         isMicLevelLow={isMicLevelLow}
         analyserRef={micAnalyserRef}
-        onToggleRecording={handleMicRecordingToggle}
+        onToggleRecording={startRecordingWithConsent}
         onTogglePause={handleMicPauseToggle}
         status={status}
       />
@@ -1082,14 +1122,14 @@ function App() {
           recordings={recordings}
           isLoading={isLoading}
           isMicRecording={isMicRecording}
-          onStartRecording={handleMicRecordingToggle}
+          onStartRecording={startRecordingWithConsent}
           onOpenRecording={openRecordingFromAnywhere}
           setActivePage={setActivePage}
           hiddenBlocks={hiddenHomeBlocks}
           onToggleBlock={toggleHomeBlock}
         />
       ) : activePage === 'settings' ? (
-        <SettingsPage settings={settings} micDeviceId={micDeviceId} setMicDeviceId={setMicDeviceId} status={status} />
+        <SettingsPage settings={settings} micDeviceId={micDeviceId} setMicDeviceId={setMicDeviceId} status={status} currentUser={currentUser} onLoggedOut={handleLoggedOut} setStatus={setStatus} />
       ) : activePage === 'projects' ? (
         <>
           <section className="status-line" aria-live="polite">

@@ -1,6 +1,11 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { collectServiceBalances } from './balances.js';
 import { query } from './db.js';
+// Цикл auth ↔ notifications безопасен: notifyNewLogin зовётся в рантайме
+// (обработчик логина), а не при загрузке модуля.
+import { notifyNewLogin } from './notifications.js';
+import { MEETING_TYPES } from './protocolTemplates.js';
+import { deleteRecordingAudio } from './storage.js';
 
 const SESSION_COOKIE = 'voxmate_session';
 const SESSION_TTL_DAYS = 30;
@@ -274,17 +279,19 @@ function publicSendConfig(config = {}) {
   return normalizeSendConfig(config, config);
 }
 
-async function createSession(userId) {
+async function createSession(userId, context = {}) {
   const token = randomBytes(32).toString('base64url');
   const tokenHash = hashToken(token);
   const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);
+  const userAgent = (context.userAgent || '').slice(0, 400) || null;
+  const ip = context.ip || null;
 
   await query(
     `
-      insert into auth_sessions (user_id, token_hash, expires_at)
-      values ($1, $2, $3)
+      insert into auth_sessions (user_id, token_hash, expires_at, user_agent, ip, last_ip)
+      values ($1, $2, $3, $4, $5, $5)
     `,
-    [userId, tokenHash, expiresAt],
+    [userId, tokenHash, expiresAt, userAgent, ip],
   );
 
   return {
@@ -320,7 +327,8 @@ async function getCurrentUser(c) {
     return null;
   }
 
-  await query('update auth_sessions set last_seen_at = now() where token_hash = $1', [tokenHash]);
+  const seenIp = clientIp(c);
+  await query('update auth_sessions set last_seen_at = now(), last_ip = $2 where token_hash = $1', [tokenHash, seenIp === 'local' ? null : seenIp]);
   return mapUser(result.rows[0]);
 }
 
@@ -372,6 +380,25 @@ export async function getUserDiarizationConfig(userId) {
 export async function getUserNotificationConfig(userId) {
   const result = await query('select notification_config from app_users where id = $1', [userId]);
   return result.rows[0]?.notification_config || null;
+}
+
+// US-16.2: настройки уровня аккаунта — шаблон протокола по умолчанию и т.п.
+const DEFAULT_ACCOUNT_CONFIG = { defaultMeetingType: 'meeting', recordingConsentWarning: true };
+
+function normalizeAccountConfig(input = {}, previous = {}) {
+  const base = { ...DEFAULT_ACCOUNT_CONFIG, ...previous };
+  const defaultMeetingType = MEETING_TYPES.has(input.defaultMeetingType)
+    ? input.defaultMeetingType
+    : base.defaultMeetingType;
+  const recordingConsentWarning =
+    typeof input.recordingConsentWarning === 'boolean' ? input.recordingConsentWarning : base.recordingConsentWarning;
+
+  return { defaultMeetingType, recordingConsentWarning };
+}
+
+export async function getUserAccountConfig(userId) {
+  const result = await query('select account_config from app_users where id = $1', [userId]);
+  return { ...DEFAULT_ACCOUNT_CONFIG, ...(result.rows[0]?.account_config || {}) };
 }
 
 export async function getUserSendConfig(userId) {
@@ -561,7 +588,7 @@ export function registerAuthRoutes(app) {
     }
 
     const user = mapUser(inserted.rows[0]);
-    const session = await createSession(user.id);
+    const session = await createSession(user.id, { userAgent: c.req.header('User-Agent') || '', ip: clientIp(c) });
 
     c.header('Set-Cookie', session.cookie);
     return c.json({ user }, 201);
@@ -593,7 +620,21 @@ export function registerAuthRoutes(app) {
     }
 
     const user = mapUser(result.rows[0]);
-    const session = await createSession(user.id);
+    const context = { userAgent: c.req.header('User-Agent') || '', ip: clientIp(c) };
+
+    // US-16.1: уведомление о новом входе. «Новое» — устройство/браузер, с
+    // которого ещё не входили (по user-agent); первый вход аккаунта не тревожим.
+    const known = await query(
+      'select 1 from auth_sessions where user_id = $1 and user_agent is not distinct from $2 limit 1',
+      [user.id, context.userAgent.slice(0, 400) || null],
+    );
+    const priorSessions = await query('select count(*)::int as n from auth_sessions where user_id = $1', [user.id]);
+
+    if (known.rowCount === 0 && priorSessions.rows[0].n > 0) {
+      await notifyNewLogin(user.id, context);
+    }
+
+    const session = await createSession(user.id, context);
 
     c.header('Set-Cookie', session.cookie);
     return c.json({ user });
@@ -614,6 +655,108 @@ export function registerAuthRoutes(app) {
         expires: new Date(0),
       }),
     );
+    return c.json({ ok: true });
+  });
+
+  // US-16.1: список устройств/сессий с пометкой текущей.
+  app.get('/api/auth/sessions', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const cookies = parseCookies(c.req.header('Cookie'));
+    const currentHash = cookies[SESSION_COOKIE] ? hashToken(cookies[SESSION_COOKIE]) : null;
+
+    const result = await query(
+      `select id, token_hash, user_agent, coalesce(last_ip, ip) as ip, created_at, last_seen_at
+       from auth_sessions where user_id = $1 and expires_at > now() order by last_seen_at desc`,
+      [user.id],
+    );
+
+    return c.json({
+      sessions: result.rows.map((row) => ({
+        id: row.id,
+        userAgent: row.user_agent,
+        ip: row.ip,
+        createdAt: row.created_at,
+        lastSeenAt: row.last_seen_at,
+        current: row.token_hash === currentHash,
+      })),
+    });
+  });
+
+  // Завершить чужую сессию (US-16.1). Текущую завершают через /logout.
+  app.delete('/api/auth/sessions/:id', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const result = await query('delete from auth_sessions where id = $1 and user_id = $2 returning id', [
+      c.req.param('id'),
+      user.id,
+    ]);
+
+    return result.rowCount ? c.json({ ok: true }) : c.json({ error: 'Сессия не найдена' }, 404);
+  });
+
+  // Завершить все сессии, кроме текущей.
+  app.post('/api/auth/sessions/revoke-others', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const cookies = parseCookies(c.req.header('Cookie'));
+    const currentHash = cookies[SESSION_COOKIE] ? hashToken(cookies[SESSION_COOKIE]) : '';
+
+    const result = await query('delete from auth_sessions where user_id = $1 and token_hash <> $2 returning id', [
+      user.id,
+      currentHash,
+    ]);
+
+    return c.json({ revoked: result.rowCount });
+  });
+
+  app.get('/api/settings/account', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    return c.json({ account: await getUserAccountConfig(user.id) });
+  });
+
+  app.patch('/api/settings/account', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const previous = await getUserAccountConfig(user.id);
+    const config = normalizeAccountConfig(body, previous);
+
+    await query('update app_users set account_config = $1::jsonb, updated_at = now() where id = $2', [
+      JSON.stringify(config),
+      user.id,
+    ]);
+
+    return c.json({ account: config });
+  });
+
+  /**
+   * US-16.1/16.4: удаление аккаунта. Требует пароль — необратимо: каскад (после
+   * миграции 023) сносит записи, проекты, контакты, задачи, привязки. Аудио в
+   * объектном хранилище удаляем отдельно — на него каскад БД не распространяется.
+   */
+  app.post('/api/auth/delete-account', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+
+    const result = await query('select password_hash from app_users where id = $1', [user.id]);
+
+    if (!result.rowCount || !verifyPassword(String(body.password || ''), result.rows[0].password_hash)) {
+      return c.json({ error: 'Неверный пароль' }, 403);
+    }
+
+    // Ключи аудио собираем до удаления строк — потом их взять будет неоткуда.
+    const audio = await query('select storage_key from recordings where owner_id = $1 and storage_key is not null', [
+      user.id,
+    ]);
+
+    await query('delete from app_users where id = $1', [user.id]);
+
+    for (const row of audio.rows) {
+      try {
+        await deleteRecordingAudio(row.storage_key);
+      } catch (error) {
+        console.warn(`Failed to delete audio ${row.storage_key} on account removal: ${error.message}`);
+      }
+    }
+
+    c.header('Set-Cookie', serializeCookie(SESSION_COOKIE, '', { maxAge: 0, expires: new Date(0) }));
     return c.json({ ok: true });
   });
 }

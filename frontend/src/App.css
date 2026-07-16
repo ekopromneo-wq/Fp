@@ -2809,3 +2809,75 @@ a.bitrix-sent-badge {
   font-variant-numeric: tabular-nums;
   color: var(--accent-primary);
 }
+
+/* ===== Эпик 16: аккаунт ===== */
+.account-block {
+  display: grid;
+  gap: 10px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.account-block:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.account-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.account-inline select,
+.account-inline input {
+  min-height: 40px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  padding: 0 10px;
+}
+
+.session-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.session-row > div {
+  display: grid;
+  gap: 2px;
+}
+
+.session-current {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-success);
+  color: var(--bg-base);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.account-danger {
+  border: 1px solid var(--accent-danger);
+  border-radius: 10px;
+  padding: 14px;
+  margin-top: 8px;
+}

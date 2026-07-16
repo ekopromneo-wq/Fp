@@ -132,6 +132,16 @@ export async function notifyTaskOverdue(ownerId, recordingId, task) {
   await deliverNotification(ownerId, recordingId, 'task_overdue', title, message);
 }
 
+// US-16.1: «уведомление о новом входе». Отдельно от notifyRecordingEvent —
+// записи здесь нет, а сообщение говорит про устройство и адрес.
+export async function notifyNewLogin(userId, context = {}) {
+  const device = context.userAgent ? context.userAgent.slice(0, 120) : 'неизвестное устройство';
+  const from = context.ip && context.ip !== 'local' ? ` (адрес ${context.ip})` : '';
+  const message = `Новый вход в аккаунт с устройства: ${device}${from}. Если это не вы — смените пароль и завершите чужие сессии в настройках.`;
+
+  await deliverNotification(userId, null, 'new_login', 'Новый вход в аккаунт', message);
+}
+
 export async function cleanupOldNotifications() {
   const cutoff = new Date(Date.now() - NOTIFICATION_RETENTION_MS);
   const result = await query('delete from notifications where created_at < $1', [cutoff]);

@@ -5,11 +5,14 @@ import BitrixSettingsPanel from './settings/BitrixSettingsPanel.jsx';
 import NotificationSettingsPanel from './settings/NotificationSettingsPanel.jsx';
 import SendSettingsPanel from './settings/SendSettingsPanel.jsx';
 import BalancesPanel from './settings/BalancesPanel.jsx';
+import AccountPanel from './settings/AccountPanel.jsx';
 import MicrophoneSettingsPanel from './settings/MicrophoneSettingsPanel.jsx';
 
-function SettingsPage({ settings, micDeviceId, setMicDeviceId, status }) {
+function SettingsPage({ settings, micDeviceId, setMicDeviceId, status, currentUser, onLoggedOut, setStatus }) {
   return (
     <section className="settings-page" aria-label="Настройки SMTP">
+      <AccountPanel currentUser={currentUser} onLoggedOut={onLoggedOut} setStatus={setStatus} />
+
       {/* Рядом с выбором метода диаризации: метод и его баланс — один вопрос. */}
       <BalancesPanel
         balances={settings.balances}

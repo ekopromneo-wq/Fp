@@ -2,6 +2,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { createRecordingQueue } from './queue.js';
 import {
   getAuthUser,
+  getUserAccountConfig,
   getUserBitrixConfig,
   getUserDiarizationConfig,
   getUserSmtpConfig,
@@ -954,7 +955,14 @@ export async function searchTasks(ownerId, filters = {}) {
 export async function createRecording(input, ownerId) {
   const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : 'Untitled recording';
   const source = typeof input.source === 'string' && input.source.trim() ? input.source.trim() : 'manual';
-  const meetingType = MEETING_TYPES.has(input.meetingType) ? input.meetingType : 'meeting';
+  // US-16.2: тип встречи (шаблон протокола) по умолчанию — из настроек аккаунта,
+  // если не задан явно.
+  const accountConfig = ownerId ? await getUserAccountConfig(ownerId) : null;
+  const meetingType = MEETING_TYPES.has(input.meetingType)
+    ? input.meetingType
+    : accountConfig?.defaultMeetingType && MEETING_TYPES.has(accountConfig.defaultMeetingType)
+      ? accountConfig.defaultMeetingType
+      : 'meeting';
 
   const result = await query(
     `
