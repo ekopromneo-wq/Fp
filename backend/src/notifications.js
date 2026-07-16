@@ -134,6 +134,19 @@ export async function notifyTaskOverdue(ownerId, recordingId, task) {
 
 // US-16.1: «уведомление о новом входе». Отдельно от notifyRecordingEvent —
 // записи здесь нет, а сообщение говорит про устройство и адрес.
+// US-16.5: напоминание о встрече за 15 минут — отдельный тип уведомления,
+// открывается на главном экране, где кнопка записи.
+export async function notifyMeetingReminder(userId, reminder) {
+  const time = new Date(reminder.starts_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  await deliverNotification(
+    userId,
+    null,
+    'meeting_reminder',
+    'Скоро встреча',
+    `«${reminder.title}» начинается в ${time}. Откройте приложение, чтобы начать запись.`,
+  );
+}
+
 export async function notifyNewLogin(userId, context = {}) {
   const device = context.userAgent ? context.userAgent.slice(0, 120) : 'неизвестное устройство';
   const from = context.ip && context.ip !== 'local' ? ` (адрес ${context.ip})` : '';

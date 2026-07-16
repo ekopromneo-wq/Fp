@@ -4,12 +4,12 @@ import { formatDate } from '../lib/format.js';
 import { getStatusLabel, getTaskStatusLabel } from '../lib/statusLabels.js';
 
 // Приоритет блоков по US-13.1: текущая обработка → готовые протоколы → задачи →
-// ошибки. «Предстоящие встречи» появятся вместе с календарём (US-16.5) — блока
-// пока нет вовсе, а не пустует.
+// предстоящие встречи → ошибки.
 const BLOCKS = [
   { key: 'processing', label: 'Сейчас обрабатывается' },
   { key: 'ready', label: 'Готовые протоколы' },
   { key: 'tasks', label: 'Задачи' },
+  { key: 'upcoming', label: 'Предстоящие встречи' },
   { key: 'failed', label: 'Ошибки' },
 ];
 
@@ -39,6 +39,7 @@ export default function HomePage({
   onToggleBlock,
 }) {
   const [tasks, setTasks] = useState(null); // null = ещё грузятся
+  const [upcoming, setUpcoming] = useState([]);
   const [isConfiguring, setIsConfiguring] = useState(false);
 
   // Задачи по всем встречам — тем же поиском, что и страница «Поиск задач»;
@@ -59,6 +60,28 @@ export default function HomePage({
         if (!cancelled) {
           setTasks([]);
         }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // US-16.5: предстоящие встречи из подключённого календаря. Пусто (нет
+  // календаря/подключения) — блок не показывается.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const response = await apiFetch('/api/calendar/upcoming');
+        const data = await response.json();
+        if (!cancelled && response.ok) {
+          setUpcoming(data.upcoming || []);
+        }
+      } catch {
+        // блок встреч необязателен
       }
     })();
 
@@ -174,6 +197,22 @@ export default function HomePage({
           ) : (
             <p className="muted-text">{tasks === null ? 'Загружаем...' : 'Открытых задач нет.'}</p>
           )}
+        </section>
+      ) : null}
+
+      {!isHidden('upcoming') && upcoming.length ? (
+        <section className="home-block" aria-label="Предстоящие встречи">
+          <h3>Предстоящие встречи</h3>
+          <div className="home-cards">
+            {upcoming.map((meeting) => (
+              <div key={meeting.eventId} className="home-card home-card-static">
+                <strong>{meeting.title}</strong>
+                <span className="muted-text">
+                  {new Date(meeting.startsAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+            ))}
+          </div>
         </section>
       ) : null}
 

@@ -169,6 +169,18 @@ function App() {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
+  // US-16.5: результат подключения календаря приходит редиректом.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('calendar') === 'connected') {
+      setStatus('Календарь подключён — напомним перед встречей');
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.get('calendar_error')) {
+      setStatus(params.get('calendar_error'));
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
   const hasRecordings = recordings.length > 0;
   const sortedRecordings = useMemo(() => recordings, [recordings]);
   const canProcessSelected =

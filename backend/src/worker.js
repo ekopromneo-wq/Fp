@@ -15,7 +15,8 @@ import { transcribeWithAccuratePipeline } from './pipelineDiarizer.js';
 import { transcribeWithSpeech2Text, checkSpeech2TextStatus, fetchSpeech2TextResult, parseSpeech2TextResult } from './speech2textDiarizer.js';
 import { getUserDiarizationConfig } from './auth.js';
 import { summarizeRecording, purgeExpiredTrash } from './recordings.js';
-import { notifyRecordingEvent, notifyTaskOverdue } from './notifications.js';
+import { notifyRecordingEvent, notifyTaskOverdue, notifyMeetingReminder } from './notifications.js';
+import { pollCalendars } from './calendar.js';
 import { pollTelegramCallbacks } from './telegramCallbacks.js';
 
 dotenv.config();
@@ -382,6 +383,9 @@ async function pollMeetingBotRecordings() {
 const OVERDUE_TASK_POLL_INTERVAL_MS = Number(process.env.OVERDUE_TASK_POLL_INTERVAL_MS || 30 * 60 * 1000);
 // US-16.4: раз в час чистим корзину (старше недели) и аудио старше года.
 const RETENTION_POLL_INTERVAL_MS = Number(process.env.RETENTION_POLL_INTERVAL_MS || 60 * 60 * 1000);
+// US-16.5: опрос календарей и рассылка напоминаний — раз в минуту, чтобы
+// напоминание за 15 минут приходило вовремя.
+const CALENDAR_POLL_INTERVAL_MS = Number(process.env.CALENDAR_POLL_INTERVAL_MS || 60 * 1000);
 // Нажатие кнопки в Telegram должно отражаться на задаче за секунды, не минуты.
 const TELEGRAM_CALLBACK_POLL_INTERVAL_MS = Number(process.env.TELEGRAM_CALLBACK_POLL_INTERVAL_MS || 10000);
 
@@ -434,6 +438,12 @@ async function main() {
   setInterval(() => {
     purgeExpiredTrash().catch((error) => console.warn('Retention purge loop error:', error.message));
   }, RETENTION_POLL_INTERVAL_MS);
+
+  setInterval(() => {
+    pollCalendars((reminder) => notifyMeetingReminder(reminder.user_id, reminder)).catch((error) =>
+      console.warn('Calendar poll loop error:', error.message),
+    );
+  }, CALENDAR_POLL_INTERVAL_MS);
 
   // US-11.3: нажатия inline-кнопок в Telegram («Взять в работу»/«Выполнено»).
   setInterval(() => {

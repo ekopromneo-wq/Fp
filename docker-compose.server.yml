@@ -48,6 +48,14 @@ services:
       - OAUTH_VK_CLIENT_SECRET=${OAUTH_VK_CLIENT_SECRET:-}
       - OAUTH_SBER_CLIENT_ID=${OAUTH_SBER_CLIENT_ID:-}
       - OAUTH_SBER_CLIENT_SECRET=${OAUTH_SBER_CLIENT_SECRET:-}
+      # US-16.5 (ADR-028): календарь Outlook/Microsoft 365. Включается, только если
+      # заданы MS_OAUTH_CLIENT_ID/SECRET.
+      - MS_OAUTH_CLIENT_ID=${MS_OAUTH_CLIENT_ID:-}
+      - MS_OAUTH_CLIENT_SECRET=${MS_OAUTH_CLIENT_SECRET:-}
+      - MS_OAUTH_TENANT=${MS_OAUTH_TENANT:-common}
+      - MS_OAUTH_AUTH_URL=${MS_OAUTH_AUTH_URL:-}
+      - MS_OAUTH_TOKEN_URL=${MS_OAUTH_TOKEN_URL:-}
+      - MS_GRAPH_BASE=${MS_GRAPH_BASE:-}
       # Закрытая регистрация: аккаунты только у администратора, вход по паролю
       # аккаунта служит защитой всего PWA (вместо Basic Auth на оболочке).
       - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
@@ -137,6 +145,11 @@ services:
       # Переопределяется в тестах (боевой Bot API не проверить без живого бота).
       - TELEGRAM_API_URL=${TELEGRAM_API_URL:-https://api.telegram.org}
       - TELEGRAM_DEFAULT_CHAT_ID=${TELEGRAM_DEFAULT_CHAT_ID:-}
+      - MS_OAUTH_CLIENT_ID=${MS_OAUTH_CLIENT_ID:-}
+      - MS_OAUTH_CLIENT_SECRET=${MS_OAUTH_CLIENT_SECRET:-}
+      - MS_OAUTH_TENANT=${MS_OAUTH_TENANT:-common}
+      - MS_OAUTH_TOKEN_URL=${MS_OAUTH_TOKEN_URL:-}
+      - MS_GRAPH_BASE=${MS_GRAPH_BASE:-}
     depends_on:
       db:
         condition: service_healthy

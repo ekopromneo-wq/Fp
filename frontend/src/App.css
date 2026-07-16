@@ -3330,3 +3330,12 @@ a.bitrix-sent-badge {
   width: 100%;
   text-decoration: none;
 }
+
+/* US-16.5: статус подключения календаря. */
+.calendar-status {
+  font-size: 0.88rem;
+}
+.calendar-connected { color: var(--accent-success); }
+.calendar-reconnect { color: var(--accent-warning); }
+.home-card-static { cursor: default; }
+.home-card-static:hover { transform: none; border-color: var(--border-subtle); }

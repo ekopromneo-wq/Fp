@@ -46,6 +46,14 @@ services:
       - OAUTH_VK_CLIENT_SECRET=${OAUTH_VK_CLIENT_SECRET:-}
       - OAUTH_SBER_CLIENT_ID=${OAUTH_SBER_CLIENT_ID:-}
       - OAUTH_SBER_CLIENT_SECRET=${OAUTH_SBER_CLIENT_SECRET:-}
+      # US-16.5 (ADR-028): календарь Outlook/Microsoft 365. Включается, только если
+      # заданы MS_OAUTH_CLIENT_ID/SECRET.
+      - MS_OAUTH_CLIENT_ID=${MS_OAUTH_CLIENT_ID:-}
+      - MS_OAUTH_CLIENT_SECRET=${MS_OAUTH_CLIENT_SECRET:-}
+      - MS_OAUTH_TENANT=${MS_OAUTH_TENANT:-common}
+      - MS_OAUTH_AUTH_URL=${MS_OAUTH_AUTH_URL:-}
+      - MS_OAUTH_TOKEN_URL=${MS_OAUTH_TOKEN_URL:-}
+      - MS_GRAPH_BASE=${MS_GRAPH_BASE:-}
       - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:password@db:5432/voxmate}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - S3_ENDPOINT=${S3_ENDPOINT:-http://minio:9000}
@@ -125,6 +133,11 @@ services:
       # Переопределяется в тестах (боевой Bot API не проверить без живого бота).
       - TELEGRAM_API_URL=${TELEGRAM_API_URL:-https://api.telegram.org}
       - TELEGRAM_DEFAULT_CHAT_ID=${TELEGRAM_DEFAULT_CHAT_ID:-}
+      - MS_OAUTH_CLIENT_ID=${MS_OAUTH_CLIENT_ID:-}
+      - MS_OAUTH_CLIENT_SECRET=${MS_OAUTH_CLIENT_SECRET:-}
+      - MS_OAUTH_TENANT=${MS_OAUTH_TENANT:-common}
+      - MS_OAUTH_TOKEN_URL=${MS_OAUTH_TOKEN_URL:-}
+      - MS_GRAPH_BASE=${MS_GRAPH_BASE:-}
     depends_on:
       db:
         condition: service_healthy

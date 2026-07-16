@@ -7,6 +7,7 @@ import NotificationSettingsPanel from './settings/NotificationSettingsPanel.jsx'
 import SendSettingsPanel from './settings/SendSettingsPanel.jsx';
 import BalancesPanel from './settings/BalancesPanel.jsx';
 import AccountPanel from './settings/AccountPanel.jsx';
+import CalendarPanel from './settings/CalendarPanel.jsx';
 import MicrophoneSettingsPanel from './settings/MicrophoneSettingsPanel.jsx';
 
 // Вкладки вместо одного скролла на ~5700px: связанные настройки собраны по
@@ -102,6 +103,8 @@ function SettingsPage({ settings, micDeviceId, setMicDeviceId, status, currentUs
             isSettingsLoading={settings.isSettingsLoading}
             hasWebhook={settings.bitrixHasWebhook}
           />
+
+          <CalendarPanel setStatus={setStatus} />
         </>
       ) : null}
 

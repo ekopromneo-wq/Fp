@@ -550,6 +550,53 @@ const migrations = [
       );
     `,
   },
+  {
+    id: '029_calendar_outlook',
+    sql: `
+      -- US-16.5 (ADR-028): подключение календаря Outlook/Microsoft 365. Токены
+      -- per-user, refresh для фонового опроса. status='connected'|'needs_reconnect'
+      -- (истёкший/отозванный refresh → просим переподключить).
+      create table if not exists calendar_connections (
+        user_id uuid primary key references app_users(id) on delete cascade,
+        provider text not null default 'microsoft',
+        access_token text,
+        refresh_token text not null,
+        expires_at timestamptz,
+        status text not null default 'connected' check (status in ('connected', 'needs_reconnect')),
+        connected_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      );
+
+      -- state потока подключения (кто подключает — по user_id, callback может не
+      -- иметь куки на кросс-доменном редиректе).
+      create table if not exists calendar_oauth_states (
+        state text primary key,
+        user_id uuid not null references app_users(id) on delete cascade,
+        code_verifier text not null,
+        created_at timestamptz not null default now()
+      );
+
+      -- Напоминания о встречах: одна строка на событие календаря, чтобы не
+      -- дублировать при повторном опросе и обновлять при изменении события.
+      create table if not exists calendar_reminders (
+        id uuid primary key default gen_random_uuid(),
+        user_id uuid not null references app_users(id) on delete cascade,
+        event_id text not null,
+        title text not null,
+        starts_at timestamptz not null,
+        remind_at timestamptz not null,
+        notified_at timestamptz,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (user_id, event_id)
+      );
+      create index if not exists calendar_reminders_remind_idx on calendar_reminders(remind_at) where notified_at is null;
+
+      alter table notifications drop constraint notifications_type_check;
+      alter table notifications add constraint notifications_type_check
+        check (type in ('done', 'failed', 'task_overdue', 'new_login', 'meeting_reminder'));
+    `,
+  },
 ];
 
 export async function runMigrations() {
