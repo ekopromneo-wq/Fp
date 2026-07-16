@@ -2881,3 +2881,46 @@ a.bitrix-sent-badge {
   padding: 14px;
   margin-top: 8px;
 }
+
+/* US-16.4: конфиденциальность, запрет скачивания, корзина. */
+.confidential-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-warning);
+  color: var(--bg-base);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.recording-protection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 10px 0;
+}
+
+.download-locked-note {
+  align-self: center;
+  font-size: 0.82rem;
+}
+
+.library-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trash-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+}
+
+.trash-card-actions {
+  display: flex;
+  gap: 8px;
+}

@@ -76,6 +76,7 @@ export default function RecordingCard({ recording, isSelected, onSelect, onDelet
               {recording.status ? (
                 <span className={`status-pill status-${recording.status}`}>{getStatusLabel(recording.status)}</span>
               ) : null}
+              {recording.confidential ? <span className="confidential-badge">🔒 Конфиденциально</span> : null}
               <SyncPill syncState={recording.syncState} syncProgress={recording.syncProgress} syncError={recording.syncError} />
               {(recording.projects?.length ? recording.projects : recording.project ? [recording.project] : []).map((project) => (
                 <span className="project-chip" key={project.id} style={{ '--project-color': project.color }}>

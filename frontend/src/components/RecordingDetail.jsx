@@ -45,6 +45,7 @@ function RecordingDetail({
   sending,
   sendConfig,
   onCopyShareLink,
+  onUpdateProtection,
   onUpdateTranscript,
   onUpdateProtocol,
   onDictate,
@@ -178,23 +179,50 @@ function RecordingDetail({
         >
           Скопировать
         </button>
-        <button
-          className="button button-secondary"
-          type="button"
-          onClick={() => onDownloadExport(recording)}
-          disabled={!canExport}
-        >
-          Скачать .md
-        </button>
-        <button
-          className="button button-secondary"
-          type="button"
-          onClick={() => onDownloadDocxExport(recording)}
-          disabled={!canExport}
-        >
-          Скачать .docx
-        </button>
+        {/* US-16.4: запрет скачивания прячет выгрузку файлов. */}
+        {recording.downloadLocked ? (
+          <span className="muted-text download-locked-note">Скачивание запрещено меткой записи</span>
+        ) : (
+          <>
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={() => onDownloadExport(recording)}
+              disabled={!canExport}
+            >
+              Скачать .md
+            </button>
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={() => onDownloadDocxExport(recording)}
+              disabled={!canExport}
+            >
+              Скачать .docx
+            </button>
+          </>
+        )}
       </div>
+
+      {/* US-16.4: метка «конфиденциально» и запрет скачивания. */}
+      <section className="detail-section recording-protection">
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={Boolean(recording.confidential)}
+            onChange={(event) => onUpdateProtection(recording, { confidential: event.target.checked })}
+          />
+          Конфиденциально
+        </label>
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={Boolean(recording.downloadLocked)}
+            onChange={(event) => onUpdateProtection(recording, { downloadLocked: event.target.checked })}
+          />
+          Запретить скачивание файлов
+        </label>
+      </section>
 
       <section className="recording-edit-panel" aria-label="Редактирование записи">
         <label>

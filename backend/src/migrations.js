@@ -488,6 +488,18 @@ const migrations = [
         check (type in ('done', 'failed', 'task_overdue', 'new_login'));
     `,
   },
+  {
+    id: '026_confidential_and_trash',
+    sql: `
+      -- US-16.4: метка «конфиденциально» и запрет скачивания аудио/экспорта.
+      alter table recordings add column if not exists confidential boolean not null default false;
+      alter table recordings add column if not exists download_locked boolean not null default false;
+
+      -- US-16.4: корзина — мягкое удаление, окончательное через неделю.
+      alter table recordings add column if not exists deleted_at timestamptz;
+      create index if not exists recordings_deleted_at_idx on recordings(deleted_at) where deleted_at is not null;
+    `,
+  },
 ];
 
 export async function runMigrations() {

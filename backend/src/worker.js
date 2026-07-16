@@ -14,7 +14,7 @@ import { transcribeWithKimi } from './kimiDiarizer.js';
 import { transcribeWithAccuratePipeline } from './pipelineDiarizer.js';
 import { transcribeWithSpeech2Text, checkSpeech2TextStatus, fetchSpeech2TextResult, parseSpeech2TextResult } from './speech2textDiarizer.js';
 import { getUserDiarizationConfig } from './auth.js';
-import { summarizeRecording } from './recordings.js';
+import { summarizeRecording, purgeExpiredTrash } from './recordings.js';
 import { notifyRecordingEvent, notifyTaskOverdue } from './notifications.js';
 import { pollTelegramCallbacks } from './telegramCallbacks.js';
 
@@ -380,6 +380,8 @@ async function pollMeetingBotRecordings() {
 }
 
 const OVERDUE_TASK_POLL_INTERVAL_MS = Number(process.env.OVERDUE_TASK_POLL_INTERVAL_MS || 30 * 60 * 1000);
+// US-16.4: раз в час чистим корзину (старше недели) и аудио старше года.
+const RETENTION_POLL_INTERVAL_MS = Number(process.env.RETENTION_POLL_INTERVAL_MS || 60 * 60 * 1000);
 // Нажатие кнопки в Telegram должно отражаться на задаче за секунды, не минуты.
 const TELEGRAM_CALLBACK_POLL_INTERVAL_MS = Number(process.env.TELEGRAM_CALLBACK_POLL_INTERVAL_MS || 10000);
 
@@ -425,6 +427,13 @@ async function main() {
   setInterval(() => {
     pollOverdueTasks().catch((error) => console.warn('Overdue task poll loop error:', error.message));
   }, OVERDUE_TASK_POLL_INTERVAL_MS);
+
+  // US-16.4: сразу при старте + раз в час — окончательное удаление из корзины и
+  // ретеншн аудио.
+  purgeExpiredTrash().catch((error) => console.warn('Retention purge error:', error.message));
+  setInterval(() => {
+    purgeExpiredTrash().catch((error) => console.warn('Retention purge loop error:', error.message));
+  }, RETENTION_POLL_INTERVAL_MS);
 
   // US-11.3: нажатия inline-кнопок в Telegram («Взять в работу»/«Выполнено»).
   setInterval(() => {

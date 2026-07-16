@@ -91,6 +91,9 @@ function mapRecording(row) {
     autoNamed: Boolean(row.auto_named),
     meetingUrl: row.meeting_url || null,
     meetingBotTaskId: row.meeting_bot_task_id || null,
+    confidential: Boolean(row.confidential),
+    downloadLocked: Boolean(row.download_locked),
+    deletedAt: row.deleted_at || null,
     recorderEngine: row.recorder_engine || null,
     failureCount: row.failure_count || 0,
     createdAt: row.created_at,
@@ -795,7 +798,9 @@ function cleanFilterDate(value) {
 
 export async function listRecordings(ownerId, filters = {}) {
   const params = [ownerId];
-  const conditions = ['recordings.owner_id = $1'];
+  // US-16.4: корзина. По умолчанию удалённые скрыты; trash=only показывает
+  // только корзину.
+  const conditions = ['recordings.owner_id = $1', filters.trash === 'only' ? 'recordings.deleted_at is not null' : 'recordings.deleted_at is null'];
   const bind = (value) => {
     params.push(value);
     return `$${params.length}`;
@@ -881,7 +886,7 @@ export async function listRecordings(ownerId, filters = {}) {
         recordings.source, recordings.duration_seconds, recordings.storage_key, recordings.created_at,
         recordings.updated_at, recordings.original_filename, recordings.mime_type, recordings.file_size_bytes,
         recordings.auto_named, recordings.meeting_url, recordings.meeting_bot_task_id, recordings.failure_count,
-        recordings.meeting_type,
+        recordings.meeting_type, recordings.confidential, recordings.download_locked, recordings.deleted_at,
         ${RECORDING_PROJECTS_SELECT}
       from recordings
       where ${conditions.join('\n        and ')}
@@ -1215,7 +1220,7 @@ export async function getRecording(id, ownerId) {
     `
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
       , original_filename, mime_type, file_size_bytes, auto_named, meeting_url, meeting_bot_task_id,
-        recorder_engine, failure_count, meeting_type,
+        recorder_engine, failure_count, meeting_type, confidential, download_locked, deleted_at,
         ${RECORDING_PROJECTS_SELECT}
       from recordings
       where id = $1 and owner_id = $2
@@ -2103,11 +2108,32 @@ export async function attachRecordingAudio(recordingId, file, ownerId) {
   return mapRecording(result.rows[0]);
 }
 
+// US-16.4: удаление кладёт запись в корзину (мягко), а не сносит сразу —
+// окончательное удаление через неделю (purgeExpiredTrash) или вручную.
 export async function deleteRecording(id, ownerId) {
-  const result = await query('delete from recordings where id = $1 and owner_id = $2 returning storage_key', [
-    id,
-    ownerId,
-  ]);
+  const result = await query(
+    'update recordings set deleted_at = now(), updated_at = now() where id = $1 and owner_id = $2 and deleted_at is null returning id',
+    [id, ownerId],
+  );
+
+  return result.rowCount ? { id } : null;
+}
+
+export async function restoreRecording(id, ownerId) {
+  const result = await query(
+    'update recordings set deleted_at = null, updated_at = now() where id = $1 and owner_id = $2 and deleted_at is not null returning id',
+    [id, ownerId],
+  );
+
+  return result.rowCount ? { id } : null;
+}
+
+// Окончательное удаление одной записи из корзины (пользователь или ретеншн).
+export async function purgeRecording(id, ownerId) {
+  const result = await query(
+    'delete from recordings where id = $1 and owner_id = $2 and deleted_at is not null returning storage_key',
+    [id, ownerId],
+  );
 
   if (result.rowCount === 0) {
     return null;
@@ -2122,6 +2148,79 @@ export async function deleteRecording(id, ownerId) {
   }
 
   return { id };
+}
+
+const TRASH_RETENTION_DAYS = Number(process.env.TRASH_RETENTION_DAYS || 7);
+const AUDIO_RETENTION_DAYS = Number(process.env.AUDIO_RETENTION_DAYS || 365);
+
+/**
+ * US-16.4: окончательное удаление из корзины через неделю + отчёт об удалении.
+ * Плюс ретеншн аудио: записи старше года теряют аудиофайл (протокол/задачи
+ * остаются — «протоколы/задачи без ограничения; аудио максимум 1 год»).
+ * Возвращает отчёт, что именно удалено.
+ */
+export async function purgeExpiredTrash() {
+  const expired = await query(
+    `delete from recordings
+     where deleted_at is not null and deleted_at < now() - ($1 || ' days')::interval
+     returning id, owner_id, title, storage_key`,
+    [String(TRASH_RETENTION_DAYS)],
+  );
+
+  for (const row of expired.rows) {
+    if (row.storage_key) {
+      await deleteRecordingAudio(row.storage_key).catch((error) =>
+        console.error(`Failed to delete audio ${row.storage_key} on trash purge`, error),
+      );
+    }
+  }
+
+  // Ретеншн аудио: у живых записей старше года убираем только аудио.
+  const staleAudio = await query(
+    `select id, owner_id, storage_key from recordings
+     where deleted_at is null and storage_key is not null
+       and created_at < now() - ($1 || ' days')::interval`,
+    [String(AUDIO_RETENTION_DAYS)],
+  );
+
+  for (const row of staleAudio.rows) {
+    await deleteRecordingAudio(row.storage_key).catch((error) =>
+      console.error(`Failed to delete aged audio ${row.storage_key}`, error),
+    );
+    await query('update recordings set storage_key = null, updated_at = now() where id = $1', [row.id]);
+  }
+
+  const report = {
+    purgedFromTrash: expired.rows.map((row) => ({ id: row.id, ownerId: row.owner_id, title: row.title })),
+    audioRetentionCleared: staleAudio.rows.map((row) => ({ id: row.id, ownerId: row.owner_id })),
+  };
+
+  if (report.purgedFromTrash.length || report.audioRetentionCleared.length) {
+    console.log(
+      `Retention: purged ${report.purgedFromTrash.length} from trash, cleared audio on ${report.audioRetentionCleared.length} aged recordings`,
+    );
+  }
+
+  return report;
+}
+
+// US-16.4: метка «конфиденциально» и запрет скачивания.
+export async function updateRecordingProtection(id, ownerId, input = {}) {
+  const has = (key) => Object.prototype.hasOwnProperty.call(input, key);
+  const result = await query(
+    `update recordings set
+       confidential = case when $3::bool is null then confidential else $3 end,
+       download_locked = case when $4::bool is null then download_locked else $4 end,
+       updated_at = now()
+     where id = $1 and owner_id = $2 and deleted_at is null
+     returning id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at,
+       original_filename, mime_type, file_size_bytes, auto_named, meeting_url, meeting_bot_task_id,
+       recorder_engine, failure_count, meeting_type, confidential, download_locked, deleted_at,
+       ${RECORDING_PROJECTS_SELECT}`,
+    [id, ownerId, has('confidential') ? Boolean(input.confidential) : null, has('downloadLocked') ? Boolean(input.downloadLocked) : null],
+  );
+
+  return result.rowCount ? mapRecording(result.rows[0]) : null;
 }
 
 export function registerRecordingRoutes(app) {
@@ -2199,6 +2298,7 @@ export function registerRecordingRoutes(app) {
         meetingType: c.req.query('meetingType') || '',
         participant: c.req.query('participant') || '',
         hasTasks: c.req.query('hasTasks') || '',
+        trash: c.req.query('trash') || '',
       }),
     });
   });
@@ -2977,6 +3077,20 @@ export function registerRecordingRoutes(app) {
     }
   });
 
+  // US-16.4: метка «конфиденциально» и запрет скачивания.
+  app.patch('/api/recordings/:id/protection', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const recording = await updateRecordingProtection(c.req.param('id'), user.id, body);
+
+    if (!recording) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    return c.json({ recording });
+  });
+
+  // US-16.4: удаление кладёт в корзину (мягко), не сносит сразу.
   app.delete('/api/recordings/:id', requireAuth, async (c) => {
     const user = getAuthUser(c);
     const deleted = await deleteRecording(c.req.param('id'), user.id);
@@ -2986,5 +3100,28 @@ export function registerRecordingRoutes(app) {
     }
 
     return c.json({ recording: deleted });
+  });
+
+  app.post('/api/recordings/:id/restore', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const restored = await restoreRecording(c.req.param('id'), user.id);
+
+    if (!restored) {
+      return c.json({ error: 'Запись не найдена в корзине' }, 404);
+    }
+
+    return c.json({ recording: restored });
+  });
+
+  // Окончательное удаление из корзины (минуя недельный срок).
+  app.delete('/api/recordings/:id/purge', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const purged = await purgeRecording(c.req.param('id'), user.id);
+
+    if (!purged) {
+      return c.json({ error: 'Запись не найдена в корзине' }, 404);
+    }
+
+    return c.json({ recording: purged });
   });
 }

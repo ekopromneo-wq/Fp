@@ -23,6 +23,7 @@ import useTasks from './hooks/useTasks.js';
 import useSpeakers from './hooks/useSpeakers.js';
 import useSending from './hooks/useSending.js';
 import { apiFetch, isProcessingStatus } from './lib/api.js';
+import { formatDate } from './lib/format.js';
 import {
   buildRecordingExport,
   buildProtocolDocxBlob,
@@ -58,6 +59,7 @@ function App() {
   const [shareToken] = useState(() => new URLSearchParams(window.location.search).get('share'));
   // US-13.1: приложение открывается на контекстном главном экране.
   const [activePage, setActivePage] = useState('home');
+  const [trashMode, setTrashMode] = useState(false);
   const [selectedRecordingId, setSelectedRecordingId] = useState(null);
   const [selectedRecording, setSelectedRecording] = useState(null);
   const [status, setStatus] = useState('Загружаем записи...');
@@ -320,6 +322,10 @@ function App() {
         }
       });
 
+      if (trashMode) {
+        params.set('trash', 'only');
+      }
+
       const response = await apiFetch(`/api/recordings${params.toString() ? `?${params.toString()}` : ''}`);
 
       if (response.status === 401) {
@@ -503,7 +509,7 @@ function App() {
       loadProjects();
       loadRecordings();
     }
-  }, [currentUser?.id, searchQuery, projectFilter, JSON.stringify(libraryFilters)]);
+  }, [currentUser?.id, searchQuery, projectFilter, JSON.stringify(libraryFilters), trashMode]);
 
   useEffect(() => {
     if (currentUser) {
@@ -1007,6 +1013,49 @@ function App() {
     }
   }
 
+  async function handleRestore(recording) {
+    try {
+      const response = await apiFetch(`/api/recordings/${recording.id}/restore`, { method: 'POST' });
+      if (!response.ok) throw new Error((await response.json()).error || 'Не удалось восстановить');
+      await loadRecordings();
+      setStatus(`Запись "${recording.title}" восстановлена`);
+    } catch (error) {
+      setStatus(error.message || 'Ошибка восстановления');
+    }
+  }
+
+  async function handlePurge(recording) {
+    if (!window.confirm(`Удалить "${recording.title}" навсегда? Восстановить будет нельзя.`)) return;
+    try {
+      const response = await apiFetch(`/api/recordings/${recording.id}/purge`, { method: 'DELETE' });
+      if (!response.ok) throw new Error((await response.json()).error || 'Не удалось удалить');
+      await loadRecordings();
+      setStatus('Запись удалена навсегда');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка удаления');
+    }
+  }
+
+  async function handleUpdateProtection(recording, patch) {
+    try {
+      const response = await apiFetch(`/api/recordings/${recording.id}/protection`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось изменить защиту записи');
+      }
+
+      setSelectedRecording((current) => (current?.id === recording.id ? { ...current, ...data.recording } : current));
+      setRecordings((current) => current.map((item) => (item.id === recording.id ? { ...item, ...data.recording } : item)));
+      setStatus(patch.confidential !== undefined ? 'Метка конфиденциальности обновлена' : 'Настройка скачивания обновлена');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка изменения защиты');
+    }
+  }
+
   async function handleCopyShareLink(url) {
     const copied = await copyText(url);
     setStatus(copied ? 'Ссылка скопирована' : 'Не удалось скопировать ссылку');
@@ -1190,8 +1239,19 @@ function App() {
             onJoinMeeting={handleJoinMeeting}
           />
 
-          <section className="status-line" aria-live="polite">
-            {status || (hasRecordings ? `${recordings.length} записей в библиотеке` : 'Записей пока нет')}
+          <section className="status-line library-status" aria-live="polite">
+            <span>{status || (hasRecordings ? `${recordings.length} записей${trashMode ? ' в корзине' : ' в библиотеке'}` : trashMode ? 'Корзина пуста' : 'Записей пока нет')}</span>
+            {/* US-16.4: корзина — удалённое хранится неделю, потом удаляется навсегда. */}
+            <button
+              className="link-button"
+              type="button"
+              onClick={() => {
+                setSelectedRecordingId(null);
+                setTrashMode((v) => !v);
+              }}
+            >
+              {trashMode ? '← В библиотеку' : 'Корзина'}
+            </button>
           </section>
 
           <section className="workspace" aria-label="Рабочая область записей">
@@ -1200,12 +1260,32 @@ function App() {
 
               {!isLoading && !hasRecordings ? (
                 <div className="empty-state">
-                  <h2>Нет загруженных записей</h2>
-                  <p>Добавь первый аудиофайл через кнопку загрузки.</p>
+                  {trashMode ? <h2>Корзина пуста</h2> : <><h2>Нет загруженных записей</h2><p>Добавь первый аудиофайл через кнопку загрузки.</p></>}
                 </div>
               ) : null}
 
-              {hasRecordings ? (
+              {hasRecordings && trashMode ? (
+                <div className="recording-cards trash-list">
+                  {sortedRecordings.map((recording) => (
+                    <article className="recording-card trash-card" key={recording.id}>
+                      <div className="recording-card-main">
+                        <strong className="recording-card-title">{recording.title || recording.originalFilename}</strong>
+                        <span className="muted-text">удалено {formatDate(recording.deletedAt)} · будет стёрто через неделю</span>
+                      </div>
+                      <div className="trash-card-actions">
+                        <button className="button button-secondary" type="button" onClick={() => handleRestore(recording)}>
+                          Восстановить
+                        </button>
+                        <button className="button button-danger" type="button" onClick={() => handlePurge(recording)}>
+                          Удалить навсегда
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+
+              {hasRecordings && !trashMode ? (
                 <div className="recording-cards">
                   {sortedRecordings.map((recording) => (
                     <RecordingCard
@@ -1258,6 +1338,7 @@ function App() {
                   sending={sending}
                   sendConfig={sendConfig}
                   onCopyShareLink={handleCopyShareLink}
+                  onUpdateProtection={handleUpdateProtection}
                   onUpdateTranscript={handleUpdateTranscript}
                   onUpdateProtocol={handleUpdateProtocol}
                   onDictate={handleDictateVoiceNote}
