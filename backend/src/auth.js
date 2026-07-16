@@ -1,4 +1,5 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { collectServiceBalances } from './balances.js';
 import { query } from './db.js';
 
 const SESSION_COOKIE = 'voxmate_session';
@@ -487,6 +488,15 @@ export function registerAuthRoutes(app) {
     ]);
 
     return c.json({ notifications: publicNotificationConfig(config) });
+  });
+
+  // Баланс облачных сервисов: живая проверка по запросу, без кеша — цифра
+  // нужна как раз в тот момент, когда на неё смотрят.
+  app.get('/api/settings/balances', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const diarizationConfig = (await getUserDiarizationConfig(user.id)) || {};
+
+    return c.json({ balances: await collectServiceBalances(diarizationConfig) });
   });
 
   app.get('/api/settings/send', requireAuth, async (c) => {
