@@ -223,6 +223,197 @@ h3 {
   gap: 10px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ===== Нижняя навигация (Bottom-Heavy / FABar) ===== */
+.app-shell {
+  /* место под фиксированную нижнюю навигацию */
+  padding-bottom: 96px;
+}
+
+.bottom-nav {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 40;
+  width: min(560px, calc(100% - 24px));
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 20px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-card);
+}
+
+.bottom-nav-item {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 6px 2px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  min-height: 48px;
+}
+
+.bottom-nav-item.is-active {
+  color: var(--accent-primary);
+}
+
+.bottom-nav-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.bottom-nav-fab-slot {
+  position: relative;
+  display: grid;
+  justify-items: center;
+}
+
+.bottom-nav-fab {
+  width: 58px;
+  height: 58px;
+  margin-top: -26px;
+  border: 4px solid var(--bg-base);
+  border-radius: 50%;
+  background: var(--accent-primary);
+  color: var(--bg-base);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(129, 216, 208, 0.35);
+  transition: transform 160ms ease;
+}
+
+.bottom-nav-fab:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+
+.bottom-nav-fab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bottom-nav-fab svg {
+  width: 26px;
+  height: 26px;
+}
+
+.bottom-nav-fab.is-recording {
+  color: var(--bg-base);
+  animation: fab-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes fab-pulse {
+  0%, 100% { box-shadow: 0 6px 20px rgba(251, 146, 60, 0.4); }
+  50% { box-shadow: 0 6px 30px rgba(251, 146, 60, 0.7); }
+}
+
+.bottom-nav-fab-rec {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+}
+
+.bottom-nav-fab-square {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--bg-base);
+}
+
+.bottom-nav-fab-time {
+  font-size: 0.6rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.bottom-nav-pause {
+  position: absolute;
+  top: -30px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+
+.bottom-nav-low {
+  position: absolute;
+  top: -6px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  color: var(--accent-warning);
+}
+
+/* Лист «Ещё» */
+.bottom-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: var(--bg-overlay);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.bottom-sheet {
+  width: min(560px, 100%);
+  margin-bottom: 92px;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px 18px 0 0;
+  background: var(--bg-elevated);
+}
+
+.bottom-sheet-handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-control);
+  margin: 2px auto 8px;
+}
+
+.bottom-sheet-item {
+  padding: 12px 14px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bottom-sheet-item.is-active {
+  color: var(--accent-primary);
+  background: var(--bg-base);
+}
+
+.bottom-sheet-item.is-danger {
+  color: var(--accent-danger);
+}
+
 .user-chip {
   display: grid;
   justify-items: end;
@@ -1980,37 +2171,13 @@ audio {
 @media (max-width: 680px) {
   .app-shell {
     width: min(100% - 24px, 1120px);
-    padding: 20px 0;
+    padding: 20px 0 96px;
   }
 
+  /* Топбар на мобильном: заголовок слева, компактные действия справа. */
   .topbar {
-    display: grid;
-    align-items: stretch;
-    grid-template-columns: 1fr;
-  }
-
-  .topbar-right,
-  .user-chip {
-    justify-items: stretch;
-  }
-
-  /* Растягиваем только текстовые кнопки: у кнопки-иконки ширина фиксированная
-     (40px), и растяжение ломало и топбар, и любой ряд, где иконка стоит рядом
-     с полем ввода (надиктовка, голосовой поиск). */
-  .actions,
-  .button:not(.icon-button) {
-    width: 100%;
-  }
-
-  .actions {
-    justify-content: flex-start;
-  }
-
-  /* Кнопки в одном ряду с заголовком/полем — по содержимому, иначе выезжают
-     за пределы контейнера. */
-  .jobs-header .button,
-  .speaker-section-header .button {
-    width: auto;
+    align-items: center;
+    gap: 12px;
   }
 
   .library-controls,

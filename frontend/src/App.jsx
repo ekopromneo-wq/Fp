@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import Topbar from './components/Topbar.jsx';
+import BottomNav from './components/BottomNav.jsx';
 import RecordingCard from './components/RecordingCard.jsx';
 import ContactsPage from './components/ContactsPage.jsx';
 import HomePage from './components/HomePage.jsx';
@@ -1167,24 +1168,10 @@ function App() {
       ) : null}
       <Topbar
         activePage={activePage}
-        setActivePage={setActivePage}
-        currentUser={currentUser}
         isOnline={isOnline}
         isUploading={isUploading}
         isMicRecording={isMicRecording}
-        isMicPaused={isMicPaused}
-        canPauseMicRecording={canPauseMicRecording}
-        micLevel={micLevel}
-        micDuration={micDuration}
-        isMicLevelLow={isMicLevelLow}
         handleFileChange={handleFileChange}
-        handleMicPauseToggle={handleMicPauseToggle}
-        handleMicRecordingToggle={handleMicButtonClick}
-        loadRecordings={loadRecordings}
-        isLoading={isLoading}
-        handleLogout={handleLogout}
-        theme={theme}
-        onToggleTheme={toggleTheme}
         notifications={notifications}
         unreadNotificationCount={unreadNotificationCount}
         isNotificationsOpen={isNotificationsOpen}
@@ -1393,6 +1380,23 @@ function App() {
           </section>
         </>
       )}
+
+      <BottomNav
+        activePage={activePage}
+        setActivePage={setActivePage}
+        onRecordToggle={handleMicButtonClick}
+        onPauseToggle={handleMicPauseToggle}
+        isMicRecording={isMicRecording}
+        isMicPaused={isMicPaused}
+        canPauseMicRecording={canPauseMicRecording}
+        micLevel={micLevel}
+        micDuration={micDuration}
+        isMicLevelLow={isMicLevelLow}
+        isUploading={isUploading}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onLogout={handleLogout}
+      />
     </main>
   );
 }
