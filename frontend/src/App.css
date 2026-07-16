@@ -2860,17 +2860,33 @@ a.bitrix-sent-badge {
   background: var(--bg-elevated);
 }
 
+.home-hero-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 1 1 260px;
+}
+
+.home-hero-config {
+  flex: 0 0 auto;
+}
+
 .home-hero-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: stretch;
   gap: 10px;
 }
 
-.home-record-button {
+/* Обе CTA одинаковой высоты, текст переносится внутри без раздувания. */
+.home-record-button,
+.home-upload-button {
   min-height: 48px;
-  padding: 0 22px;
-  font-size: 1.05rem;
+  padding: 6px 20px;
+  font-size: 1rem;
+  line-height: 1.2;
+  text-align: center;
 }
 
 .home-config {
@@ -2947,8 +2963,16 @@ a.bitrix-sent-badge {
     align-items: stretch;
   }
 
-  .home-hero-actions .button:not(.icon-button) {
-    flex: 1;
+  /* В колонке flex-basis 260px из десктопного ряда применился бы к высоте и
+     раздувал карточку — сбрасываем. */
+  .home-hero-head {
+    flex: 0 0 auto;
+  }
+
+  /* На мобильном обе CTA — в ряд, равной ширины и высоты. */
+  .home-hero-actions .home-record-button,
+  .home-hero-actions .home-upload-button {
+    flex: 1 1 0;
   }
 }
 

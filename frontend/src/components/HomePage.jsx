@@ -76,25 +76,27 @@ export default function HomePage({
   return (
     <section className="home-page" aria-label="Главный экран">
       <div className="home-hero">
-        <div>
-          <p className="eyebrow">{todayLine()}</p>
-          <h2>{isMicRecording ? 'Идёт запись' : 'Записать встречу'}</h2>
-        </div>
-        <div className="home-hero-actions">
-          <button className="button button-primary home-record-button" type="button" onClick={onStartRecording}>
-            {isMicRecording ? '■ Остановить запись' : '● Записать'}
-          </button>
-          <button className="button button-secondary" type="button" onClick={() => setActivePage('library')}>
-            Загрузить файл или пригласить бота
-          </button>
+        <div className="home-hero-head">
+          <div>
+            <p className="eyebrow">{todayLine()}</p>
+            <h2>{isMicRecording ? 'Идёт запись' : 'Записать встречу'}</h2>
+          </div>
           <button
-            className="button button-secondary icon-button"
+            className="button button-secondary icon-button home-hero-config"
             type="button"
             onClick={() => setIsConfiguring((current) => !current)}
             aria-label="Настроить главный экран"
             title="Настроить главный экран"
           >
             ⚙
+          </button>
+        </div>
+        <div className="home-hero-actions">
+          <button className="button button-primary home-record-button" type="button" onClick={onStartRecording}>
+            {isMicRecording ? '■ Остановить запись' : '● Записать'}
+          </button>
+          <button className="button button-secondary home-upload-button" type="button" onClick={() => setActivePage('library')}>
+            Загрузить или пригласить бота
           </button>
         </div>
       </div>
