@@ -61,6 +61,9 @@ services:
       - BITRIX_DEFAULT_RESPONSIBLE_ID=${BITRIX_DEFAULT_RESPONSIBLE_ID:-}
       - BITRIX_DEFAULT_GROUP_ID=${BITRIX_DEFAULT_GROUP_ID:-}
       - SPEECH2TEXT_API_KEY=${SPEECH2TEXT_API_KEY:-}
+      # Расшифровку ведёт воркер, но API проверяет баланс сервисов на странице
+      # настроек — ключ нужен и здесь.
+      - SHOPOT_API_KEY=${SHOPOT_API_KEY:-}
       - RECORDER_BOT_URL=${RECORDER_BOT_URL:-http://recorder-bot:8100}
       - RECORDER_BOT_INTERNAL_SECRET=${RECORDER_BOT_INTERNAL_SECRET:-}
     volumes:

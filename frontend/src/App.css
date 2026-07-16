@@ -2510,3 +2510,103 @@ audio {
     grid-template-columns: 1fr;
   }
 }
+
+/* ===== Баланс облачных сервисов ===== */
+
+.balance-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.balance-card {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--border-control);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+}
+
+.balance-card.balance-ok {
+  border-left-color: var(--accent-success);
+}
+
+.balance-card.balance-low {
+  border-left-color: var(--accent-warning);
+}
+
+.balance-card.balance-bad {
+  border-left-color: var(--accent-danger);
+}
+
+.balance-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.balance-status {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  background: var(--bg-base);
+  color: var(--text-secondary);
+}
+
+.balance-status-ok {
+  background: var(--accent-success);
+  color: var(--bg-base);
+}
+
+.balance-status-low {
+  background: var(--accent-warning);
+  color: var(--bg-base);
+}
+
+.balance-status-bad {
+  background: var(--accent-danger);
+  color: var(--bg-base);
+}
+
+.balance-amount {
+  display: grid;
+  gap: 2px;
+}
+
+.balance-remaining {
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.balance-message {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+}
+
+.balance-note {
+  font-size: 0.76rem;
+}
+
+.balance-link {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+  text-decoration: none;
+}
+
+.balance-link:hover {
+  text-decoration: underline;
+}

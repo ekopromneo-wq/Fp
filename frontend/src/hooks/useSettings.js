@@ -32,6 +32,8 @@ export default function useSettings(setStatus, onSendConfigSaved) {
   const [isSavingNotificationSettings, setIsSavingNotificationSettings] = useState(false);
   const [sendSettingsDraft, setSendSettingsDraft] = useState({ preview: true, defaultChannel: 'email', attachDocx: true });
   const [isSavingSendSettings, setIsSavingSendSettings] = useState(false);
+  const [balances, setBalances] = useState([]);
+  const [isLoadingBalances, setIsLoadingBalances] = useState(false);
   const [isSettingsLoading, setIsSettingsLoading] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
 
@@ -337,6 +339,27 @@ export default function useSettings(setStatus, onSendConfigSaved) {
     }
   }
 
+  // Отдельно от остальных настроек: балансы — это три похода во внешние
+  // сервисы, и вешать их на общую загрузку страницы незачем.
+  async function loadBalances() {
+    setIsLoadingBalances(true);
+
+    try {
+      const response = await apiFetch('/api/settings/balances');
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось проверить балансы');
+      }
+
+      setBalances(data.balances || []);
+    } catch (error) {
+      setStatus(error.message || 'Ошибка проверки балансов');
+    } finally {
+      setIsLoadingBalances(false);
+    }
+  }
+
   function loadAllSettings() {
     loadSmtpSettings();
     loadTelegramSettings();
@@ -344,6 +367,7 @@ export default function useSettings(setStatus, onSendConfigSaved) {
     loadDiarizationSettings();
     loadNotificationSettings();
     loadSendSettings();
+    loadBalances();
   }
 
   return {
@@ -369,6 +393,9 @@ export default function useSettings(setStatus, onSendConfigSaved) {
     sendSettingsDraft,
     setSendSettingsDraft,
     isSavingSendSettings,
+    balances,
+    isLoadingBalances,
+    loadBalances,
     isSettingsLoading,
     isSavingSettings,
     loadAllSettings,

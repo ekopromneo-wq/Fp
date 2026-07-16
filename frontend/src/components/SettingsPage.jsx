@@ -4,11 +4,20 @@ import TelegramSettingsPanel from './settings/TelegramSettingsPanel.jsx';
 import BitrixSettingsPanel from './settings/BitrixSettingsPanel.jsx';
 import NotificationSettingsPanel from './settings/NotificationSettingsPanel.jsx';
 import SendSettingsPanel from './settings/SendSettingsPanel.jsx';
+import BalancesPanel from './settings/BalancesPanel.jsx';
 import MicrophoneSettingsPanel from './settings/MicrophoneSettingsPanel.jsx';
 
 function SettingsPage({ settings, micDeviceId, setMicDeviceId, status }) {
   return (
     <section className="settings-page" aria-label="Настройки SMTP">
+      {/* Рядом с выбором метода диаризации: метод и его баланс — один вопрос. */}
+      <BalancesPanel
+        balances={settings.balances}
+        isLoading={settings.isLoadingBalances}
+        onRefresh={settings.loadBalances}
+        checkedAt={settings.balances?.[0]?.checkedAt}
+      />
+
       <MicrophoneSettingsPanel micDeviceId={micDeviceId} setMicDeviceId={setMicDeviceId} />
 
       <DiarizationSettingsPanel
