@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import JobsList from './JobsList.jsx';
 import FeedbackWidget from './FeedbackWidget.jsx';
 import SpeakerRow from './SpeakerRow.jsx';
@@ -56,6 +57,8 @@ function RecordingDetail({
   isJobsCollapsed,
   onToggleJobsCollapsed,
 }) {
+  const [isExportOpen, setIsExportOpen] = useState(false);
+
   return (
     <>
       <div className="detail-header">
@@ -109,121 +112,108 @@ function RecordingDetail({
         </section>
       ) : null}
 
+      {/* Действия сгруппированы: обработка, протокол, экспорт — вместо стены
+          кнопок в один ряд. */}
       <div className="detail-actions">
-        <button
-          className="button button-primary"
-          type="button"
-          onClick={() => onProcess(recording)}
-          disabled={!canProcess}
-        >
-          {processingId === recording.id
-            ? 'Запускаем...'
-            : recording.status === 'failed'
-              ? 'Перезапустить обработку'
-              : 'Запустить обработку'}
-        </button>
-        {/* Обычная обработка переиспользует готовую стенограмму (пересобирает
-            только протокол). Чтобы применить другой метод диаризации или
-            переделать неудачную расшифровку, нужен явный запуск с нуля. */}
-        {recording.transcript && !isProcessingStatus(recording.status) ? (
+        <div className="detail-action-group">
+          <button
+            className="button button-primary"
+            type="button"
+            onClick={() => onProcess(recording)}
+            disabled={!canProcess}
+          >
+            {processingId === recording.id
+              ? 'Запускаем...'
+              : recording.status === 'failed'
+                ? 'Перезапустить обработку'
+                : 'Запустить обработку'}
+          </button>
+          {/* Обычная обработка переиспользует готовую стенограмму. Чтобы сменить
+              метод диаризации или переделать неудачную расшифровку — запуск с нуля. */}
+          {recording.transcript && !isProcessingStatus(recording.status) ? (
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={() => onProcess(recording, { retranscribe: true })}
+              disabled={!canProcess}
+              title="Расшифровать заново текущим методом диаризации — стенограмма будет перезаписана"
+            >
+              Расшифровать заново
+            </button>
+          ) : null}
+          {isProcessingStatus(recording.status) ? (
+            <button
+              className="button button-danger"
+              type="button"
+              onClick={() => onCancelProcessing(recording)}
+              disabled={cancellingId === recording.id}
+            >
+              {cancellingId === recording.id ? 'Отменяем...' : 'Отменить'}
+            </button>
+          ) : null}
+        </div>
+
+        <div className="detail-action-group">
+          <div className="summary-length-toggle" role="group" aria-label="Длина резюме">
+            {[
+              { value: 'brief', label: 'Кратко' },
+              { value: 'medium', label: 'Средне' },
+              { value: 'long', label: 'Подробно' },
+            ].map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`summary-length-option${summaryLength === option.value ? ' active' : ''}`}
+                onClick={() => setSummaryLength(option.value)}
+                disabled={isSummarizing}
+                aria-pressed={summaryLength === option.value}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
           <button
             className="button button-secondary"
             type="button"
-            onClick={() => onProcess(recording, { retranscribe: true })}
-            disabled={!canProcess}
-            title="Расшифровать заново текущим методом диаризации — стенограмма будет перезаписана"
+            onClick={() => onSummarize(recording)}
+            disabled={!recording.transcript || isSummarizing}
           >
-            Расшифровать заново
+            {isSummarizing ? 'Готовим...' : 'Сделать протокол'}
           </button>
-        ) : null}
-        {isProcessingStatus(recording.status) ? (
-          <button
-            className="button button-danger"
-            type="button"
-            onClick={() => onCancelProcessing(recording)}
-            disabled={cancellingId === recording.id}
-          >
-            {cancellingId === recording.id ? 'Отменяем...' : 'Отменить'}
-          </button>
-        ) : null}
-        <div className="summary-length-toggle" role="group" aria-label="Длина резюме">
-          {[
-            { value: 'brief', label: 'Кратко' },
-            { value: 'medium', label: 'Средне' },
-            { value: 'long', label: 'Подробно' },
-          ].map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={`summary-length-option${summaryLength === option.value ? ' active' : ''}`}
-              onClick={() => setSummaryLength(option.value)}
-              disabled={isSummarizing}
-              aria-pressed={summaryLength === option.value}
-            >
-              {option.label}
-            </button>
-          ))}
         </div>
-        <button
-          className="button button-secondary"
-          type="button"
-          onClick={() => onSummarize(recording)}
-          disabled={!recording.transcript || isSummarizing}
-        >
-          {isSummarizing ? 'Готовим...' : 'Сделать протокол'}
-        </button>
-        <button
-          className="button button-secondary"
-          type="button"
-          onClick={() => onCopyExport(recording)}
-          disabled={!canExport}
-        >
-          Скопировать
-        </button>
-        {/* US-16.4: запрет скачивания прячет выгрузку файлов. */}
-        {recording.downloadLocked ? (
-          <span className="muted-text download-locked-note">Скачивание запрещено меткой записи</span>
-        ) : (
-          <>
-            <button
-              className="button button-secondary"
-              type="button"
-              onClick={() => onDownloadExport(recording)}
-              disabled={!canExport}
-            >
-              Скачать .md
-            </button>
-            <button
-              className="button button-secondary"
-              type="button"
-              onClick={() => onDownloadDocxExport(recording)}
-              disabled={!canExport}
-            >
-              Скачать .docx
-            </button>
-          </>
-        )}
-      </div>
 
-      {/* US-16.4: метка «конфиденциально» и запрет скачивания. */}
-      <section className="detail-section recording-protection">
-        <label className="settings-toggle">
-          <input
-            type="checkbox"
-            checked={Boolean(recording.confidential)}
-            onChange={(event) => onUpdateProtection(recording, { confidential: event.target.checked })}
-          />
-          Конфиденциально
-        </label>
-        <label className="settings-toggle">
-          <input
-            type="checkbox"
-            checked={Boolean(recording.downloadLocked)}
-            onChange={(event) => onUpdateProtection(recording, { downloadLocked: event.target.checked })}
-          />
-          Запретить скачивание файлов
-        </label>
-      </section>
+        {/* Экспорт свёрнут в меню, чтобы три кнопки не растягивали ряд. */}
+        <div className="detail-export">
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={() => setIsExportOpen((value) => !value)}
+            disabled={!canExport}
+            aria-expanded={isExportOpen}
+          >
+            Экспорт ▾
+          </button>
+          {isExportOpen ? (
+            <div className="detail-export-menu" role="menu">
+              <button type="button" onClick={() => { onCopyExport(recording); setIsExportOpen(false); }}>
+                Скопировать
+              </button>
+              {recording.downloadLocked ? (
+                <span className="muted-text detail-export-locked">Скачивание запрещено меткой записи</span>
+              ) : (
+                <>
+                  <button type="button" onClick={() => { onDownloadExport(recording); setIsExportOpen(false); }}>
+                    Скачать .md
+                  </button>
+                  <button type="button" onClick={() => { onDownloadDocxExport(recording); setIsExportOpen(false); }}>
+                    Скачать .docx
+                  </button>
+                </>
+              )}
+            </div>
+          ) : null}
+        </div>
+      </div>
 
       <section className="recording-edit-panel" aria-label="Редактирование записи">
         <label>
@@ -274,6 +264,27 @@ function RecordingDetail({
             ))}
           </select>
         </label>
+
+        {/* US-16.4: метка «конфиденциально» и запрет скачивания — рядом с
+            остальными свойствами записи, а не отдельной плавающей рамкой. */}
+        <div className="recording-protection-inline">
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(recording.confidential)}
+              onChange={(event) => onUpdateProtection(recording, { confidential: event.target.checked })}
+            />
+            Конфиденциально
+          </label>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(recording.downloadLocked)}
+              onChange={(event) => onUpdateProtection(recording, { downloadLocked: event.target.checked })}
+            />
+            Запретить скачивание файлов
+          </label>
+        </div>
 
         <div className="recording-edit-actions">
           <button
