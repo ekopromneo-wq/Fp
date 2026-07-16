@@ -2929,3 +2929,93 @@ a.bitrix-sent-badge {
 .tasks-empty-note {
   padding: 8px 0;
 }
+
+/* ===== Эпик 18: доступность и обратная связь ===== */
+
+/* US-18.2: видимый keyboard-focus (quality floor). */
+:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* US-18.2: уважаем prefers-reduced-motion — гасим переходы и анимации. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* US-18.1: оверлей drag-and-drop загрузки на ПК. */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: var(--bg-overlay);
+  backdrop-filter: blur(2px);
+}
+
+.drop-overlay-inner {
+  padding: 28px 40px;
+  border: 2px dashed var(--accent-primary);
+  border-radius: 16px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-weight: 800;
+  font-size: 1.1rem;
+}
+
+/* US-18.3: обратная связь. */
+.feedback-widget {
+  display: grid;
+  gap: 10px;
+}
+
+.feedback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.feedback-form {
+  display: grid;
+  gap: 8px;
+}
+
+.feedback-form select,
+.feedback-form textarea {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 8px 10px;
+}
+
+.feedback-stars {
+  display: flex;
+  gap: 4px;
+}
+
+.feedback-star {
+  border: none;
+  background: transparent;
+  color: var(--border-control);
+  font-size: 1.8rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.feedback-star.is-active {
+  color: var(--accent-warning);
+}
+
+.feedback-consent {
+  font-size: 0.82rem;
+}

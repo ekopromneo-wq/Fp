@@ -500,6 +500,27 @@ const migrations = [
       create index if not exists recordings_deleted_at_idx on recordings(deleted_at) where deleted_at is not null;
     `,
   },
+  {
+    id: '027_feedback',
+    sql: `
+      -- US-18.3: обратная связь — сообщение об ошибке (стенограмма/задача) и
+      -- оценка результата 1-5 + комментарий. recording_id опционален: общий
+      -- отзыв может быть не про конкретную встречу.
+      create table if not exists feedback (
+        id uuid primary key default gen_random_uuid(),
+        owner_id uuid not null references app_users(id) on delete cascade,
+        recording_id uuid references recordings(id) on delete set null,
+        kind text not null check (kind in ('error_report', 'rating')),
+        rating integer check (rating between 1 and 5),
+        target text,
+        comment text,
+        allow_training boolean not null default false,
+        created_at timestamptz not null default now()
+      );
+
+      create index if not exists feedback_owner_id_idx on feedback(owner_id, created_at desc);
+    `,
+  },
 ];
 
 export async function runMigrations() {

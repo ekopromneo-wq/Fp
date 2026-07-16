@@ -1,4 +1,5 @@
 import JobsList from './JobsList.jsx';
+import FeedbackWidget from './FeedbackWidget.jsx';
 import SpeakerRow from './SpeakerRow.jsx';
 import TaskForm from './TaskForm.jsx';
 import TaskRow from './TaskRow.jsx';
@@ -481,6 +482,8 @@ function RecordingDetail({
           <p className="muted-text">Задач пока нет. Они появятся после генерации протокола, если модель найдёт поручения.</p>
         )}
       </section>
+
+      <FeedbackWidget recordingId={recording.id} setStatus={setStatus} />
 
       <JobsList
         jobs={recording.jobs}

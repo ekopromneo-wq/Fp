@@ -807,6 +807,41 @@ function App() {
     await uploadRecordingFile(file);
   }
 
+  // US-18.1: drag-and-drop файлов на ПК. На телефоне не показываем оверлей —
+  // там перетаскивать нечем.
+  const [isDragging, setIsDragging] = useState(false);
+
+  function handleDragOver(event) {
+    if (isMobile || isUploading || isMicRecording) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsDragging(true);
+  }
+
+  function handleDragLeave(event) {
+    // Уходим только когда курсор покинул окно, а не перешёл на дочерний элемент.
+    if (event.relatedTarget === null) {
+      setIsDragging(false);
+    }
+  }
+
+  async function handleDrop(event) {
+    event.preventDefault();
+    setIsDragging(false);
+
+    if (isMobile || isUploading || isMicRecording) {
+      return;
+    }
+
+    const file = event.dataTransfer?.files?.[0];
+
+    if (file) {
+      await uploadRecordingFile(file);
+    }
+  }
+
   async function handleProcess(recording, { retranscribe = false } = {}) {
     if (!recording) {
       return;
@@ -1124,7 +1159,12 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+      {isDragging ? (
+        <div className="drop-overlay" aria-hidden="true">
+          <div className="drop-overlay-inner">Отпустите файл, чтобы загрузить запись</div>
+        </div>
+      ) : null}
       <Topbar
         activePage={activePage}
         setActivePage={setActivePage}
