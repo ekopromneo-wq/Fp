@@ -3339,3 +3339,10 @@ a.bitrix-sent-badge {
 .calendar-reconnect { color: var(--accent-warning); }
 .home-card-static { cursor: default; }
 .home-card-static:hover { transform: none; border-color: var(--border-subtle); }
+
+/* US-16.1: контейнер виджета Telegram-login. */
+.telegram-login {
+  display: flex;
+  justify-content: center;
+  min-height: 40px;
+}

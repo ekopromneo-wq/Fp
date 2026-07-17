@@ -1,8 +1,47 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiBaseUrl, demoEmail, demoPassword } from '../lib/api.js';
 import InstallButton from './InstallButton.jsx';
 
-function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage, registrationOpen = true, oauthProviders = [] }) {
+/**
+ * Кнопка входа через Telegram (US-16.1). Официальный виджет — внешний скрипт с
+ * telegram.org, который рендерит кнопку и по нажатию редиректит на наш callback
+ * с подписанными данными. Показывается, только если бот настроен на сервере.
+ */
+function TelegramLoginButton({ botUsername }) {
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+
+    container.innerHTML = '';
+    const script = document.createElement('script');
+    script.src = 'https://telegram.org/js/telegram-widget.js?22';
+    script.async = true;
+    script.setAttribute('data-telegram-login', botUsername);
+    script.setAttribute('data-size', 'large');
+    script.setAttribute('data-auth-url', `${apiBaseUrl}/api/auth/telegram/callback`);
+    script.setAttribute('data-request-access', 'write');
+    container.appendChild(script);
+
+    return () => {
+      container.innerHTML = '';
+    };
+  }, [botUsername]);
+
+  return <div className="telegram-login" ref={containerRef} />;
+}
+
+function AuthScreen({
+  authMode,
+  setAuthMode,
+  onSubmit,
+  isSubmitting,
+  authMessage,
+  registrationOpen = true,
+  oauthProviders = [],
+  telegramLogin = null,
+}) {
   const [email, setEmail] = useState(demoEmail);
   const [password, setPassword] = useState(demoPassword);
   const [displayName, setDisplayName] = useState('Demo User');
@@ -57,7 +96,7 @@ function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage
 
         {/* US-16.1 (ADR-027): вход через провайдеров — показываем только
             настроенные на сервере. Ведём на бэкенд-роут (полный редирект). */}
-        {oauthProviders.length ? (
+        {oauthProviders.length || telegramLogin ? (
           <div className="oauth-buttons">
             <div className="oauth-divider"><span>или</span></div>
             {oauthProviders.map((item) => (
@@ -69,6 +108,7 @@ function AuthScreen({ authMode, setAuthMode, onSubmit, isSubmitting, authMessage
                 Войти через {item.label}
               </a>
             ))}
+            {telegramLogin?.botUsername ? <TelegramLoginButton botUsername={telegramLogin.botUsername} /> : null}
           </div>
         ) : null}
 

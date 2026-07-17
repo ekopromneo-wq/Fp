@@ -13,7 +13,10 @@ import {
   enabledProviders,
   exchangeCodeForProfile,
   isProviderEnabled,
+  isTelegramLoginEnabled,
   redirectUri,
+  telegramLoginConfig,
+  verifyTelegramLogin,
 } from './oauth.js';
 
 const SESSION_COOKIE = 'voxmate_session';
@@ -464,7 +467,33 @@ export async function getUserSendConfig(userId) {
 export function registerAuthRoutes(app) {
   app.get('/api/auth/me', async (c) => {
     const user = await getCurrentUser(c);
-    return c.json({ user, registrationEnabled: REGISTRATION_ENABLED, oauthProviders: enabledProviders() });
+    return c.json({
+      user,
+      registrationEnabled: REGISTRATION_ENABLED,
+      oauthProviders: enabledProviders(),
+      telegramLogin: isTelegramLoginEnabled() ? telegramLoginConfig() : null,
+    });
+  });
+
+  // US-16.1: Telegram Login Widget шлёт подписанные данные на этот адрес.
+  app.get('/api/auth/telegram/callback', async (c) => {
+    const appUrl = (process.env.PUBLIC_APP_URL || new URL(c.req.url).origin).replace(/\/+$/, '');
+    const params = Object.fromEntries(new URL(c.req.url).searchParams.entries());
+    const profile = verifyTelegramLogin(params);
+
+    if (!profile) {
+      return c.redirect(`${appUrl}/?auth_error=${encodeURIComponent('Не удалось войти через Telegram')}`);
+    }
+
+    try {
+      const user = await findOrCreateOauthUser('telegram', profile);
+      const session = await createSession(user.id, { userAgent: c.req.header('User-Agent') || '', ip: clientIp(c) });
+      c.header('Set-Cookie', session.cookie);
+      return c.redirect(`${appUrl}/`);
+    } catch (error) {
+      console.warn(`Telegram login failed: ${error.message}`);
+      return c.redirect(`${appUrl}/?auth_error=${encodeURIComponent('Не удалось войти через Telegram')}`);
+    }
   });
 
   // US-16.1 (ADR-027): вход через внешних провайдеров. Провайдер включается,

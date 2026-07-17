@@ -51,6 +51,7 @@ function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [registrationEnabled, setRegistrationEnabled] = useState(true);
   const [oauthProviders, setOauthProviders] = useState([]);
+  const [telegramLogin, setTelegramLogin] = useState(null);
   const [authMode, setAuthMode] = useState('login');
   // Ошибка OAuth приходит редиректом ?auth_error=... — показываем на экране входа
   // и чистим адрес.
@@ -200,6 +201,7 @@ function App() {
       setCurrentUser(data.user || null);
       setRegistrationEnabled(data.registrationEnabled !== false);
       setOauthProviders(data.oauthProviders || []);
+      setTelegramLogin(data.telegramLogin || null);
 
       if (data.user) {
         putCachedCurrentUser(data.user);
@@ -1178,6 +1180,7 @@ function App() {
         authMessage={authMessage}
         registrationOpen={registrationEnabled}
         oauthProviders={oauthProviders}
+        telegramLogin={telegramLogin}
       />
     );
   }

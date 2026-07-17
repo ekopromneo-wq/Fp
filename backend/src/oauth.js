@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 
 /**
  * Реестр OAuth-провайдеров (ADR-027). Каждый включается, только если заданы его
@@ -72,6 +72,56 @@ export function enabledProviders() {
   return Object.keys(REGISTRY)
     .filter(isProviderEnabled)
     .map((provider) => ({ provider, label: REGISTRY[provider].label }));
+}
+
+// US-16.1 (ADR-027): Telegram Login Widget — не authorization-code, а
+// подписанные данные. Проверяем HMAC по схеме Telegram: secret = SHA256(токен
+// бота), подпись = HMAC-SHA256(data_check_string, secret). Включается, если
+// заданы токен и username бота.
+export function isTelegramLoginEnabled() {
+  return Boolean(
+    (process.env.TELEGRAM_LOGIN_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN) && process.env.TELEGRAM_LOGIN_BOT_USERNAME,
+  );
+}
+
+export function telegramLoginConfig() {
+  return { botUsername: process.env.TELEGRAM_LOGIN_BOT_USERNAME || '' };
+}
+
+const TELEGRAM_AUTH_MAX_AGE_SECONDS = Number(process.env.TELEGRAM_LOGIN_MAX_AGE_SECONDS || 86400);
+
+export function verifyTelegramLogin(params) {
+  const token = process.env.TELEGRAM_LOGIN_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+
+  if (!token || !params?.hash) {
+    return null;
+  }
+
+  const { hash, ...rest } = params;
+  const dataCheckString = Object.keys(rest)
+    .filter((key) => rest[key] !== undefined && rest[key] !== '')
+    .sort()
+    .map((key) => `${key}=${rest[key]}`)
+    .join('\n');
+
+  const secret = createHash('sha256').update(token).digest();
+  const expected = createHmac('sha256', secret).update(dataCheckString).digest('hex');
+
+  if (expected !== hash) {
+    return null;
+  }
+
+  // Подпись подделать нельзя, но старые данные могли утечь — ограничиваем возраст.
+  const authDate = Number(rest.auth_date || 0);
+  if (!authDate || Date.now() / 1000 - authDate > TELEGRAM_AUTH_MAX_AGE_SECONDS) {
+    return null;
+  }
+
+  return {
+    id: String(rest.id),
+    email: null,
+    name: [rest.first_name, rest.last_name].filter(Boolean).join(' ') || rest.username || `Telegram ${rest.id}`,
+  };
 }
 
 export function createPkce() {

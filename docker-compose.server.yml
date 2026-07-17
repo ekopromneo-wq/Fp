@@ -48,6 +48,9 @@ services:
       - OAUTH_VK_CLIENT_SECRET=${OAUTH_VK_CLIENT_SECRET:-}
       - OAUTH_SBER_CLIENT_ID=${OAUTH_SBER_CLIENT_ID:-}
       - OAUTH_SBER_CLIENT_SECRET=${OAUTH_SBER_CLIENT_SECRET:-}
+      # US-16.1: Telegram-login (виджет). Токен и username бота логина.
+      - TELEGRAM_LOGIN_BOT_TOKEN=${TELEGRAM_LOGIN_BOT_TOKEN:-}
+      - TELEGRAM_LOGIN_BOT_USERNAME=${TELEGRAM_LOGIN_BOT_USERNAME:-}
       # US-16.5 (ADR-028): календарь Outlook/Microsoft 365. Включается, только если
       # заданы MS_OAUTH_CLIENT_ID/SECRET.
       - MS_OAUTH_CLIENT_ID=${MS_OAUTH_CLIENT_ID:-}
