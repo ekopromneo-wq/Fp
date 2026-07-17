@@ -972,3 +972,15 @@ US-18.4 (админ-панель) — «След. релиз», пропущен
 **Деплой:** backend — `git pull` + rebuild api (миграция применилась на старте). Frontend — собран с `VITE_API_BASE_URL=https://vox.ekoprom.org`, развёрнут в `/opt/voxmate/app` (tar по ssh, 21 файл), обновлён `download/voxmate-pwa.zip` (676 КБ). Проверено снаружи: index.html ссылается на новый бандл `index-DfrscZqq.js` (200), бандл содержит `recording-start`.
 
 **Остаётся юристу:** вычитать формулировки в `consentTexts.js` и поднять `CONSENT_TEXT_VERSION`; решить, нужно ли хардгейтить обработку по согласиям и как хранить доказательство уведомления самих участников (не только подтверждение пользователя).
+
+## 2026-07-17 — Ребрендинг VoxMate → Stenogram + новые иконки
+
+Пользователь положил дизайны в `design/` и попросил обновить название и иконки. Название приложения — **Stenogram**, слоган «Мобильный AI-ассистент», бренд-цвет бирюзовый **#2FB3B7** (сэмплирован из `design/0d42ad6b…jpg`), иконка — белый микрофон со строками-транскриптом в скруглённом бирюзовом квадрате.
+
+**Сделано (коммит `18e641e`):**
+- Иконки пересозданы как чистый SVG (микрофон + строки) и растрированы sharp: `pwa-192/512`, `maskable-512` (full-bleed), `apple-touch-icon` (180), `favicon-64` + исходный `public/icons/icon.svg`. Генератор — временный скрипт, sharp ставился `--no-save`.
+- PWA-манифест (vite.config.js): name «Stenogram — мобильный AI-ассистент», short_name «Stenogram», theme_color `#2FB3B7`, background_color `#0F1419`. index.html: title, meta description, apple-title, theme-color.
+- Пользовательские строки: eyebrow-заголовки (Topbar/AuthScreen/SharePage/App), TaskRow, media-session artist, плейсхолдер SMTP; backend — тексты Telegram, промпты LLM, имена ботов (meeting/recorder), X-OpenRouter-Title, текст согласия поддержки, ops-логи, комментарии.
+- Замена только заглавного токена `VoxMate`→`Stenogram`. **Инфраструктура в нижнем регистре не тронута** намеренно: имя cookie `voxmate_session`, БД `voxmate`, бакет `voxmate-audio`, tmpdir-префиксы, демо-почта `demo@voxmate.local`, IndexedDB `voxmate`, ключ persist `voxmate-ui` — их переименование разлогинило бы/осиротило бы данные и сломало прод.
+
+**Деплой:** backend `git pull` + rebuild api+worker; frontend — dist (собран с прод-API) в `/opt/voxmate/app` (22 файла), обновлён `download/voxmate-pwa.zip`. Проверено снаружи: title и манифест обновлены, theme_color `#2FB3B7`, все 5 иконок отдаются (200, размеры совпадают с локальными). Установленные ранее PWA подтянут новый манифест/иконки через autoUpdate SW; OS-иконка на части платформ обновится только при переустановке.
