@@ -69,7 +69,7 @@ async function requestGeminiSegments(mp3Buffer, apiKey, model) {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'http://localhost:4173',
-      'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'VoxMate',
+      'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'Stenogram',
     },
     body: JSON.stringify({
       model,

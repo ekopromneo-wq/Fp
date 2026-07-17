@@ -140,7 +140,7 @@ export default function TaskRow({
           </button>
         ) : assigneeMatch?.autoMatch ? (
           <span className="muted-text task-telegram-hint">
-            У «{assigneeMatch.autoMatch.name}» не привязан Telegram — задача остаётся в VoxMate.
+            У «{assigneeMatch.autoMatch.name}» не привязан Telegram — задача остаётся в Stenogram.
           </span>
         ) : null}
       </div>

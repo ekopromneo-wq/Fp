@@ -80,7 +80,7 @@ async function applyCallback(botToken, callback) {
   }
 
   if (!ALLOWED_TRANSITIONS[action].includes(task.status)) {
-    return { reply: 'Статус задачи уже изменился — обновите её в VoxMate' };
+    return { reply: 'Статус задачи уже изменился — обновите её в Stenogram' };
   }
 
   await query('update recording_tasks set status = $2, updated_at = now() where id = $1', [taskId, ACTION_STATUS[action]]);

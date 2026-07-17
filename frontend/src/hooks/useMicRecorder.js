@@ -174,7 +174,7 @@ export default function useMicRecorder(uploadRecordingFile, setStatus, micDevice
       } else if (typeof MediaMetadata !== 'undefined' && !navigator.mediaSession.metadata) {
         navigator.mediaSession.metadata = new MediaMetadata({
           title: 'Идёт запись встречи',
-          artist: 'VoxMate',
+          artist: 'Stenogram',
         });
       }
 

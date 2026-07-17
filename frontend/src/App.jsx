@@ -1161,7 +1161,7 @@ function App() {
     return (
       <main className="auth-shell">
         <section className="auth-panel">
-          <p className="eyebrow">VoxMate</p>
+          <p className="eyebrow">Stenogram</p>
           <h1>Проверяем вход</h1>
         </section>
       </main>

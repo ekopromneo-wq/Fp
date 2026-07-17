@@ -511,7 +511,7 @@ async function main() {
     }
   });
 
-  console.log(`VoxMate worker listening on ${RECORDING_QUEUE_NAME}`);
+  console.log(`Stenogram worker listening on ${RECORDING_QUEUE_NAME}`);
 }
 
 main().catch((error) => {

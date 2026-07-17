@@ -88,7 +88,7 @@ async function callOpenRouterAsr(payload) {
       Authorization: `Bearer ${payload.apiKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'http://localhost:4173',
-      'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'VoxMate',
+      'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'Stenogram',
     },
     body: JSON.stringify(body),
   });

@@ -115,7 +115,7 @@ export async function checkSpeech2TextStatus(taskId, apiKey) {
 
 /**
  * Converts a completed Speech2Text /result/json payload (chunks + speakers)
- * into VoxMate's internal transcript shape. Returns null when there's no
+ * into Stenogram's internal transcript shape. Returns null when there's no
  * usable speech (e.g. status 204 - "no speech detected").
  */
 export function parseSpeech2TextResult(result) {

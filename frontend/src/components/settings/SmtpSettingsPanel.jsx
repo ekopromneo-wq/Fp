@@ -62,7 +62,7 @@ export default function SmtpSettingsPanel({ draft, setDraft, onSubmit, isSaving,
           <input
             value={draft.from}
             onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))}
-            placeholder="VoxMate <no-reply@example.com>"
+            placeholder="Stenogram <no-reply@example.com>"
           />
         </label>
 

@@ -45,7 +45,7 @@ export async function startRecorderJob(input) {
       meetingUrl: input.meetingUrl,
       title: input.title,
       platform: input.platform,
-      botName: input.botName || 'VoxMate',
+      botName: input.botName || 'Stenogram',
     }),
   });
   const body = await response.json().catch(() => null);

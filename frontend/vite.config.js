@@ -15,13 +15,13 @@ export default defineConfig({
       injectRegister: 'auto',
       includeAssets: ['icons/apple-touch-icon.png', 'icons/favicon-64.png'],
       manifest: {
-        name: 'VoxMate — расшифровка и протоколы встреч',
-        short_name: 'VoxMate',
+        name: 'Stenogram — мобильный AI-ассистент',
+        short_name: 'Stenogram',
         description:
           'Запись встреч, расшифровка по спикерам, протокол и задачи «кто-что-когда». Работает офлайн.',
         lang: 'ru',
-        theme_color: '#1c4c42',
-        background_color: '#0f1a17',
+        theme_color: '#2FB3B7',
+        background_color: '#0F1419',
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',

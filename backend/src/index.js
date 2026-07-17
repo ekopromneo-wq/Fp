@@ -48,7 +48,7 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 
-app.get('/', (c) => c.text('VoxMate backend running'));
+app.get('/', (c) => c.text('Stenogram backend running'));
 
 app.get('/health', (c) => {
   return c.json({
@@ -81,7 +81,7 @@ app.get('/health/ready', async (c) => {
 
 app.get('/api/hello', (c) => {
   return c.json({
-    message: 'Hello from VoxMate backend',
+    message: 'Hello from Stenogram backend',
   });
 });
 
@@ -120,7 +120,7 @@ async function main() {
       port,
     },
     (info) => {
-      console.log(`VoxMate backend listening on http://localhost:${info.port}`);
+      console.log(`Stenogram backend listening on http://localhost:${info.port}`);
     },
   );
 }

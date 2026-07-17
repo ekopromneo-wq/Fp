@@ -421,7 +421,7 @@ async function generateSummaryWithOpenRouter(
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'http://localhost:4173',
-      'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'VoxMate',
+      'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'Stenogram',
     },
     body: JSON.stringify({
       model,
@@ -430,7 +430,7 @@ async function generateSummaryWithOpenRouter(
         {
           role: 'system',
           content:
-            `Ты помощник VoxMate. Верни строго JSON без markdown. Поля: summary:string (полная версия), executiveSummary:string (краткая выжимка сути встречи, 3-5 строк), topics:string[], protocol:{${template.sections.join(',')}}, tasks:{assignee:string|null,description:string,dueText:string|null}[]. ` +
+            `Ты помощник Stenogram. Верни строго JSON без markdown. Поля: summary:string (полная версия), executiveSummary:string (краткая выжимка сути встречи, 3-5 строк), topics:string[], protocol:{${template.sections.join(',')}}, tasks:{assignee:string|null,description:string,dueText:string|null}[]. ` +
             `Разделы protocol (используй только перечисленные ниже, больше никаких других полей в protocol не добавляй):\n${sectionDescriptions}\n\n` +
             'Пиши по-русски, конкретно. Если исполнитель или срок не названы явно, ставь null - не выдумывай. ' +
             'Одна реплика может дать несколько задач. Если два фрагмента речи описывают одно и то же поручение - верни одну задачу, не дублируй. ' +
@@ -499,7 +499,7 @@ async function generateTitleWithOpenRouter(recording) {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'http://localhost:4173',
-      'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'VoxMate',
+      'X-OpenRouter-Title': process.env.OPENROUTER_APP_NAME || 'Stenogram',
     },
     body: JSON.stringify({
       model,
@@ -508,7 +508,7 @@ async function generateTitleWithOpenRouter(recording) {
         {
           role: 'system',
           content:
-            'Ты помощник VoxMate. Верни строго JSON без markdown с полем title:string. Название должно быть по-русски, короткое, 4-9 слов, без кавычек, без даты если дата не дана явно.',
+            'Ты помощник Stenogram. Верни строго JSON без markdown с полем title:string. Название должно быть по-русски, короткое, 4-9 слов, без кавычек, без даты если дата не дана явно.',
         },
         {
           role: 'user',
@@ -2792,7 +2792,7 @@ export function registerRecordingRoutes(app) {
    * US-11.4: отправка одной задачи с явным сотрудником и группой. Дубли — по
    * точному названию в Б24: без confirmDuplicate отправка останавливается и
    * решает пользователь. После отправки источник истины — Б24: задача в
-   * VoxMate не меняется (кроме отметки «отправлена» и ссылки), обратной
+   * Stenogram не меняется (кроме отметки «отправлена» и ссылки), обратной
    * синхронизации нет.
    */
   app.post('/api/recordings/:recordingId/tasks/:taskId/send-bitrix', requireAuth, async (c) => {

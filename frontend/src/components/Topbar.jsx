@@ -70,7 +70,7 @@ export default function Topbar({
   return (
     <section className="topbar" aria-labelledby="page-title">
       <div>
-        <p className="eyebrow">VoxMate</p>
+        <p className="eyebrow">Stenogram</p>
         <h1 id="page-title">
           {activePage === 'home'
             ? 'Главная'

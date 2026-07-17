@@ -60,7 +60,7 @@ function AuthScreen({
   return (
     <main className="auth-shell">
       <section className="auth-panel" aria-labelledby="auth-title">
-        <p className="eyebrow">VoxMate</p>
+        <p className="eyebrow">Stenogram</p>
         <h1 id="auth-title">{isRegister ? 'Создать аккаунт' : 'Вход'}</h1>
         <p className="auth-copy">Рабочая область записей доступна после входа.</p>
 

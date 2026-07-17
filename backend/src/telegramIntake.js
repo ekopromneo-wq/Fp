@@ -219,7 +219,7 @@ export async function handleBotMessage(botToken, message) {
       await sendTelegramMessage(
         botToken,
         chatId,
-        'Чат не привязан к аккаунту VoxMate. Откройте настройки приложения → Telegram → «Привязать чат» и пришлите мне код.',
+        'Чат не привязан к аккаунту Stenogram. Откройте настройки приложения → Telegram → «Привязать чат» и пришлите мне код.',
       );
       return;
     }

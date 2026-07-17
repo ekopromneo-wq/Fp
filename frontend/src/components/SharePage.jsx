@@ -58,7 +58,7 @@ export default function SharePage({ token }) {
   if (state.status === 'error') {
     return (
       <main className="app-shell share-page">
-        <p className="eyebrow">VoxMate</p>
+        <p className="eyebrow">Stenogram</p>
         <h1>Ссылка недоступна</h1>
         <p className="muted-text">{state.message}</p>
       </main>
@@ -71,7 +71,7 @@ export default function SharePage({ token }) {
 
   return (
     <main className="app-shell share-page">
-      <p className="eyebrow">VoxMate</p>
+      <p className="eyebrow">Stenogram</p>
       <h1>{recording.title}</h1>
       <p className="muted-text">
         {formatDate(recording.createdAt)}

@@ -433,7 +433,7 @@ export async function matchRecordingTasksToContacts(ownerId, tasks) {
 }
 
 // A non-empty assignee with zero contact-book matches is "external" - not
-// necessarily a stranger, just not someone VoxMate can already identify.
+// necessarily a stranger, just not someone Stenogram can already identify.
 // An empty assignee is a different case (simply unknown yet), not external.
 export function isAssigneeExternal(assigneeText, contacts) {
   const text = String(assigneeText || '').trim();

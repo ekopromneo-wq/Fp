@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="#2FB3B7"/>
+  
+    <!-- капсула -->
+    <rect x="181" y="104" width="150" height="200" rx="75" fill="#FFFFFF"/>
+    <circle cx="211" cy="155" r="6.5" fill="#2FB3B7"/><rect x="229" y="150" width="74" height="10" rx="5" fill="#2FB3B7"/><circle cx="211" cy="186" r="6.5" fill="#2FB3B7"/><rect x="229" y="181" width="74" height="10" rx="5" fill="#2FB3B7"/><circle cx="211" cy="217" r="6.5" fill="#2FB3B7"/><rect x="229" y="212" width="74" height="10" rx="5" fill="#2FB3B7"/><circle cx="211" cy="248" r="6.5" fill="#2FB3B7"/><rect x="229" y="243" width="74" height="10" rx="5" fill="#2FB3B7"/>
+    <!-- дужка-держатель -->
+    <path d="M140 250 C 140 330, 190 360, 256 360 C 322 360, 372 330, 372 250"
+          fill="none" stroke="#FFFFFF" stroke-width="24" stroke-linecap="round"/>
+    <!-- ножка -->
+    <rect x="246" y="356" width="20" height="50" rx="6" fill="#FFFFFF"/>
+    <!-- основание -->
+    <rect x="208" y="404" width="96" height="20" rx="10" fill="#FFFFFF"/>
+  
+</svg>
