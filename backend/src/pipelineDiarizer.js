@@ -12,12 +12,18 @@ import { trySplitTranscriptBySpeaker } from './speakerSplit.js';
 // its S1/S2/S3 labels are already globally consistent and don't need
 // cross-chunk reconciliation.
 //
-// Расплата за это допущение: на длинной записи модель размечает голосом лишь
-// часть дорожки, а остальное молча доставалось ближайшему интервалу — на
-// 71-минутном совещании 66 минут «наговорил» один спикер. Поэтому покрытие
-// теперь измеряется и проверяется (см. voiceCoverage): разметке, покрывающей
-// меньше MIN_VOICE_COVERAGE речи, доверять нельзя.
+// Было: разметка по голосу видела весь файл одним запросом и на длинной записи
+// накрывала лишь начало — на 71-минутном совещании 66 минут «наговорил» один
+// спикер. Теперь голос тоже режется на перекрывающиеся окна (см.
+// splitOverlappingChunks), каждое размечается отдельно, а метисы сшиваются по
+// зоне перекрытия (stitchChunkIntervals): кто говорит в одни и те же моменты на
+// стыке — тот же человек. Покрытие всё равно проверяется (voiceCoverage): если
+// после сшивки накрыто меньше MIN_VOICE_COVERAGE — уходим на текстовую разметку.
 const CHUNK_SECONDS = Number(process.env.PIPELINE_CHUNK_SECONDS || 480);
+// Окно разметки по голосу и перехлёст между соседними окнами (для сшивки).
+// Записи короче одного окна размечаются одним запросом — сшивать нечего.
+const VOICE_CHUNK_SECONDS = Number(process.env.PIPELINE_VOICE_CHUNK_SECONDS || 600);
+const VOICE_OVERLAP_SECONDS = Number(process.env.PIPELINE_VOICE_OVERLAP_SECONDS || 60);
 const MIN_VOICE_COVERAGE = Number(process.env.PIPELINE_MIN_VOICE_COVERAGE || 0.6);
 // Дальше этого расстояния сегмент считается лежащим вне размеченной области:
 // «ближайший» интервал в минутах от него ничего не говорит о том, кто говорит.
@@ -179,7 +185,123 @@ function parseIntervalsJson(content) {
   }
 }
 
-async function requestVoiceIntervals(normalizedBuffer, apiKey, model) {
+/**
+ * Режет нормализованную дорожку на перекрывающиеся окна для разметки по голосу.
+ * Перехлёст нужен сшивке: в нём соседние окна размечают одних и тех же людей,
+ * и по их совпадению во времени метки склеиваются в сквозные.
+ */
+async function splitOverlappingChunks(workdir, normalizedPath) {
+  const durationSeconds = await getFfprobeDurationSeconds(normalizedPath);
+
+  if (durationSeconds <= VOICE_CHUNK_SECONDS) {
+    return [{ buffer: await readFile(normalizedPath), offsetMs: 0 }];
+  }
+
+  const step = VOICE_CHUNK_SECONDS - VOICE_OVERLAP_SECONDS;
+  const chunks = [];
+
+  for (let start = 0, i = 0; start < durationSeconds; start += step, i += 1) {
+    const clip = Math.min(VOICE_CHUNK_SECONDS, durationSeconds - start);
+    const chunkPath = path.join(workdir, `voice-${i}.mp3`);
+    await runFfmpeg(['-y', '-ss', String(start), '-i', normalizedPath, '-t', String(clip), '-c', 'copy', chunkPath]);
+    chunks.push({ buffer: await readFile(chunkPath), offsetMs: Math.round(start * 1000) });
+
+    if (start + clip >= durationSeconds) {
+      break;
+    }
+  }
+
+  return chunks;
+}
+
+// Суммарное перекрытие двух наборов интервалов во времени — «сколько эти два
+// голоса говорили одновременно» в зоне стыка.
+function overlapMs(aIntervals, bIntervals) {
+  let total = 0;
+  for (const a of aIntervals) {
+    for (const b of bIntervals) {
+      total += Math.max(0, Math.min(a.endMs, b.endMs) - Math.max(a.startMs, b.startMs));
+    }
+  }
+  return total;
+}
+
+/**
+ * Сшивает пометки соседних окон в сквозные (S1 второго окна — не обязательно S1
+ * первого). Для каждого окна, кроме первого, каждую его локальную метку
+ * сопоставляем с уже накопленной сквозной меткой по максимальному совпадению во
+ * времени в зоне перехлёста; не нашли — заводим новую. Чистая функция ради
+ * тестируемости: на вход — интервалы каждого окна с локальными метками и
+ * абсолютным временем.
+ */
+export function stitchChunkIntervals(chunkList) {
+  // Накопленные сквозные интервалы (по глобальным меткам) и их индекс по метке.
+  const globalByLabel = new Map();
+  let nextGlobal = 1;
+
+  const pushGlobal = (label, list) => {
+    if (!globalByLabel.has(label)) {
+      globalByLabel.set(label, []);
+    }
+    globalByLabel.get(label).push(...list);
+  };
+
+  chunkList.forEach((chunk, index) => {
+    // Локальные метки окна → их интервалы.
+    const localGroups = new Map();
+    for (const interval of chunk) {
+      if (!localGroups.has(interval.speaker)) {
+        localGroups.set(interval.speaker, []);
+      }
+      localGroups.get(interval.speaker).push(interval);
+    }
+
+    if (index === 0) {
+      for (const [label, list] of localGroups) {
+        const global = `S${nextGlobal++}`;
+        pushGlobal(global, list.map((item) => ({ startMs: item.startMs, endMs: item.endMs })));
+      }
+      return;
+    }
+
+    // Зона перехлёста с уже накопленным: от начала окна до максимума
+    // накопленных интервалов.
+    const chunkStart = Math.min(...chunk.map((interval) => interval.startMs));
+
+    for (const [localLabel, list] of localGroups) {
+      const inOverlap = list.filter((interval) => interval.startMs < chunkStart + VOICE_OVERLAP_SECONDS * 1000);
+      let bestGlobal = null;
+      let bestOverlap = 0;
+
+      for (const [global, globalIntervals] of globalByLabel) {
+        const score = overlapMs(inOverlap, globalIntervals);
+        if (score > bestOverlap) {
+          bestOverlap = score;
+          bestGlobal = global;
+        }
+      }
+
+      const target = bestOverlap > 0 ? bestGlobal : `S${nextGlobal++}`;
+      // В итог добавляем только часть за пределами перехлёста, чтобы не
+      // задвоить общую с прошлым окном речь.
+      const beyondOverlap = list
+        .filter((interval) => interval.endMs > chunkStart + VOICE_OVERLAP_SECONDS * 1000)
+        .map((item) => ({ startMs: item.startMs, endMs: item.endMs }));
+      pushGlobal(target, beyondOverlap);
+    }
+  });
+
+  const merged = [];
+  for (const [label, list] of globalByLabel) {
+    for (const interval of list) {
+      merged.push({ speaker: label, startMs: interval.startMs, endMs: interval.endMs });
+    }
+  }
+
+  return merged.filter((interval) => interval.endMs > interval.startMs).sort((a, b) => a.startMs - b.startMs);
+}
+
+async function requestVoiceIntervals(normalizedBuffer, apiKey, model, offsetMs = 0) {
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -212,29 +334,55 @@ async function requestVoiceIntervals(normalizedBuffer, apiKey, model) {
 
   const parsed = parseIntervalsJson(body?.choices?.[0]?.message?.content);
   const rawList = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.intervals) ? parsed.intervals : [];
+  // Времена в ответе — от начала окна; offsetMs переводит в абсолютные.
   const intervals = rawList
     .map((interval) => ({
       speaker: String(interval?.speaker || '').trim() || 'S1',
-      startMs: Math.round(Number(interval?.start || 0) * 1000),
-      endMs: Math.round(Number(interval?.end || 0) * 1000),
+      startMs: offsetMs + Math.round(Number(interval?.start || 0) * 1000),
+      endMs: offsetMs + Math.round(Number(interval?.end || 0) * 1000),
     }))
     .filter((interval) => interval.endMs > interval.startMs)
     .sort((a, b) => a.startMs - b.startMs);
 
-  if (!intervals.length) {
-    throw new Error('Voice diarization returned no usable intervals');
-  }
-
   return intervals;
 }
 
-async function runVoiceDiarization(normalizedBuffer, apiKey, model) {
+async function requestVoiceIntervalsWithRetry(buffer, apiKey, model, offsetMs) {
   try {
-    return await requestVoiceIntervals(normalizedBuffer, apiKey, model);
+    return await requestVoiceIntervals(buffer, apiKey, model, offsetMs);
   } catch (error) {
-    console.warn(`Pipeline: voice diarization attempt 1 failed (${error.message}), retrying once`);
-    return requestVoiceIntervals(normalizedBuffer, apiKey, model);
+    console.warn(`Pipeline: voice diarization window at ${Math.round(offsetMs / 1000)}s failed (${error.message}), retrying once`);
+    return requestVoiceIntervals(buffer, apiKey, model, offsetMs);
   }
+}
+
+/**
+ * Разметка по голосу всей записи: режем на перекрывающиеся окна, размечаем
+ * каждое и сшиваем метки в сквозные (см. stitchChunkIntervals). Провал одного
+ * окна не рушит остальные. Короткая запись — одно окно без сшивки.
+ */
+async function runVoiceDiarization(workdir, normalizedPath, apiKey, model) {
+  const chunks = await splitOverlappingChunks(workdir, normalizedPath);
+  const perChunk = [];
+
+  for (const chunk of chunks) {
+    try {
+      const intervals = await requestVoiceIntervalsWithRetry(chunk.buffer, apiKey, model, chunk.offsetMs);
+      if (intervals.length) {
+        perChunk.push(intervals);
+      }
+    } catch (error) {
+      console.warn(`Pipeline: voice window at ${Math.round(chunk.offsetMs / 1000)}s gave nothing: ${error.message}`);
+    }
+  }
+
+  if (!perChunk.length) {
+    throw new Error('Voice diarization returned no usable intervals');
+  }
+
+  const stitched = chunks.length > 1 ? stitchChunkIntervals(perChunk) : perChunk[0];
+  console.log(`Pipeline: voice diarization ${chunks.length} window(s) → ${new Set(stitched.map((i) => i.speaker)).size} speaker(s)`);
+  return stitched;
 }
 
 function nearestInterval(segment, voiceIntervals) {
@@ -487,14 +635,13 @@ export async function transcribeWithAccuratePipeline(file, audioBuffer, config =
 
   try {
     const normalizedPath = await normalizeAudio(workdir, file, audioBuffer);
-    const normalizedBuffer = await readFile(normalizedPath);
     const chunks = await splitIntoChunks(workdir, normalizedPath);
 
     console.log(`Pipeline: split recording into ${chunks.length} chunk(s) of up to ${CHUNK_SECONDS}s for Whisper`);
 
     const [whisperSegments, voiceIntervals] = await Promise.all([
       runWhisperOnChunks(chunks, config.language),
-      runVoiceDiarization(normalizedBuffer, apiKey, VOICE_MODEL),
+      runVoiceDiarization(workdir, normalizedPath, apiKey, VOICE_MODEL),
     ]);
 
     console.log(
