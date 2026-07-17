@@ -3,6 +3,31 @@ import { apiFetch } from '../../lib/api.js';
 import { formatDate } from '../../lib/format.js';
 import { MEETING_TYPE_OPTIONS } from '../../lib/exporters.js';
 
+// US-16.3: отдельные согласия на обработку и их подписи.
+const PROCESSING_CONSENT_LABELS = [
+  ['recording', 'Запись встреч'],
+  ['transcription', 'Транскрипция (распознавание речи)'],
+  ['ai_analysis', 'AI-анализ: протокол, задачи, краткое содержание'],
+  ['cross_border', 'Трансграничная передача данных облачным сервисам'],
+];
+
+const CONSENT_TYPE_NAMES = {
+  recording: 'Запись',
+  transcription: 'Транскрипция',
+  ai_analysis: 'AI-анализ',
+  cross_border: 'Трансграничная передача',
+  participant_notice: 'Предупреждение участников',
+  support_access: 'Доступ поддержки',
+};
+
+const CONSENT_ACTION_NAMES = { grant: 'выдано', revoke: 'отозвано', decline: 'отказ' };
+
+const CONSENT_MODE_NAMES = {
+  consented: 'все согласны',
+  excluded: 'без участника',
+  override: 'несмотря на отказ',
+};
+
 function deviceLabel(userAgent) {
   if (!userAgent) return 'Неизвестное устройство';
   const ua = userAgent;
@@ -22,6 +47,8 @@ export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
   const [isSavingAccount, setIsSavingAccount] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [consents, setConsents] = useState(null);
+  const [consentHistory, setConsentHistory] = useState(null);
 
   async function loadSessions() {
     try {
@@ -33,8 +60,19 @@ export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
     }
   }
 
+  async function loadConsents() {
+    try {
+      const response = await apiFetch('/api/settings/consents');
+      const data = await response.json();
+      if (response.ok) setConsents(data);
+    } catch {
+      // блок согласий не критичен для остального экрана
+    }
+  }
+
   useEffect(() => {
     loadSessions();
+    loadConsents();
     (async () => {
       try {
         const response = await apiFetch('/api/settings/account');
@@ -45,6 +83,46 @@ export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
       }
     })();
   }, []);
+
+  async function toggleProcessingConsent(type, granted) {
+    try {
+      const response = await apiFetch('/api/settings/consents', {
+        method: 'PATCH',
+        body: JSON.stringify({ type, granted }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Не удалось сохранить согласие');
+      setConsents((prev) => (prev ? { ...prev, processing: data.processing } : prev));
+      setStatus('Согласие обновлено');
+    } catch (error) {
+      setStatus(error.message);
+    }
+  }
+
+  async function toggleSupportAccess(granted) {
+    try {
+      const response = await apiFetch('/api/settings/support-access', {
+        method: 'POST',
+        body: JSON.stringify({ granted }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Не удалось изменить доступ поддержки');
+      setConsents((prev) => (prev ? { ...prev, supportAccess: data.supportAccess } : prev));
+      setStatus(granted ? 'Доступ поддержки разрешён' : 'Доступ поддержки отозван');
+    } catch (error) {
+      setStatus(error.message);
+    }
+  }
+
+  async function loadConsentHistory() {
+    try {
+      const response = await apiFetch('/api/consent/history');
+      const data = await response.json();
+      if (response.ok) setConsentHistory(data.events || []);
+    } catch {
+      setConsentHistory([]);
+    }
+  }
 
   async function saveAccount(patch) {
     setIsSavingAccount(true);
@@ -135,6 +213,65 @@ export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
           />
           Предупреждать о согласии участников перед началом записи (152-ФЗ)
         </label>
+      </div>
+
+      <div className="account-block">
+        <h3>Приватность и согласия (152-ФЗ)</h3>
+        <p className="muted-text">
+          Отдельные согласия на обработку. Изменения фиксируются в журнале как доказательство.
+        </p>
+
+        {consents ? (
+          <>
+            {PROCESSING_CONSENT_LABELS.map(([type, label]) => (
+              <label className="settings-toggle" key={type} title={consents.texts?.[type] || ''}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(consents.processing?.[type]?.granted)}
+                  onChange={(event) => toggleProcessingConsent(type, event.target.checked)}
+                />
+                {label}
+              </label>
+            ))}
+
+            <label className="settings-toggle" title={consents.texts?.support_access || ''}>
+              <input
+                type="checkbox"
+                checked={Boolean(consents.supportAccess?.granted)}
+                onChange={(event) => toggleSupportAccess(event.target.checked)}
+              />
+              Разрешить службе поддержки доступ к содержимому моих встреч
+            </label>
+
+            {consentHistory === null ? (
+              <button className="link-button" type="button" onClick={loadConsentHistory}>
+                Показать журнал согласий
+              </button>
+            ) : (
+              <ul className="session-list">
+                {consentHistory.length === 0 ? (
+                  <li className="muted-text">Записей пока нет</li>
+                ) : (
+                  consentHistory.slice(0, 30).map((event) => (
+                    <li key={event.id} className="session-row">
+                      <div>
+                        <strong>{CONSENT_TYPE_NAMES[event.consentType] || event.consentType}</strong>
+                        <span className="muted-text">
+                          {CONSENT_ACTION_NAMES[event.action] || event.action}
+                          {event.detail?.mode ? ` · ${CONSENT_MODE_NAMES[event.detail.mode] || event.detail.mode}` : ''}
+                          {' · '}
+                          {formatDate(event.createdAt)}
+                        </span>
+                      </div>
+                    </li>
+                  ))
+                )}
+              </ul>
+            )}
+          </>
+        ) : (
+          <p className="muted-text">Загрузка…</p>
+        )}
       </div>
 
       <div className="account-block">

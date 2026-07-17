@@ -3253,6 +3253,48 @@ a.bitrix-sent-badge {
   font-size: 1.1rem;
 }
 
+/* US-16.3: диалог согласия на запись (152-ФЗ), поверх голосовой панели. */
+.consent-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--bg-overlay);
+  backdrop-filter: blur(2px);
+}
+
+.consent-dialog {
+  width: min(460px, 100%);
+  padding: 22px 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.consent-dialog h2 {
+  margin: 0 0 10px;
+  font-size: 1.2rem;
+}
+
+.consent-notice {
+  margin: 0 0 18px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.consent-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.consent-actions .link-button {
+  margin-top: 4px;
+  justify-self: center;
+}
+
 /* US-18.3: обратная связь. */
 .feedback-widget {
   display: grid;

@@ -84,7 +84,7 @@ function isRateLimited(key, limit, windowMs) {
 
 // Caddy fronts the API in production and appends the real client IP to
 // X-Forwarded-For; direct local requests have no header and share one bucket.
-function clientIp(c) {
+export function clientIp(c) {
   const forwarded = c.req.header('X-Forwarded-For') || '';
   return forwarded.split(',')[0].trim() || 'local';
 }

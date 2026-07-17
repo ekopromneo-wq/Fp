@@ -597,6 +597,44 @@ const migrations = [
         check (type in ('done', 'failed', 'task_overdue', 'new_login', 'meeting_reminder'));
     `,
   },
+  {
+    id: '030_consent_evidence',
+    sql: `
+      -- US-16.3/16.4 (152-ФЗ): доказательство согласия, отдельные согласия и
+      -- доступ поддержки по согласию. Тексты согласий — заготовки, требуют
+      -- вычитки юристом (см. consentTexts.js); в журнале хранится снимок точного
+      -- текста и его версии, чтобы доказательство фиксировало ровно то, что видел
+      -- пользователь на момент действия.
+
+      -- Неизменяемый аудит-журнал согласий. Каждая строка — отдельное событие
+      -- grant|decline|revoke по одному типу согласия. Снимок текста и версия
+      -- сохраняются на момент события. Строки не редактируются и не удаляются
+      -- вручную (только каскадом при удалении аккаунта).
+      create table if not exists consent_events (
+        id uuid primary key default gen_random_uuid(),
+        user_id uuid not null references app_users(id) on delete cascade,
+        recording_id uuid references recordings(id) on delete set null,
+        consent_type text not null
+          check (consent_type in ('recording', 'transcription', 'ai_analysis', 'cross_border', 'participant_notice', 'support_access')),
+        action text not null default 'grant' check (action in ('grant', 'decline', 'revoke')),
+        text_version text not null,
+        text_snapshot text not null,
+        -- Структурная деталь события: для participant_notice — режим ветки отказа
+        -- ('consented'|'excluded'|'override'), для остальных обычно пусто.
+        detail jsonb not null default '{}'::jsonb,
+        ip text,
+        user_agent text,
+        created_at timestamptz not null default now()
+      );
+      create index if not exists consent_events_user_idx on consent_events(user_id, created_at desc);
+      create index if not exists consent_events_recording_idx on consent_events(recording_id) where recording_id is not null;
+
+      -- Доступ поддержки к содержимому только с согласия пользователя (US-16.4).
+      -- null = не выдан; значение = момент выдачи; отзыв возвращает в null и
+      -- пишет revoke-событие в consent_events.
+      alter table app_users add column if not exists support_access_granted_at timestamptz;
+    `,
+  },
 ];
 
 export async function runMigrations() {

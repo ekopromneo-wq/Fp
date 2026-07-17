@@ -13,6 +13,7 @@ import RecordingDetail from './components/RecordingDetail.jsx';
 import AuthScreen from './components/AuthScreen.jsx';
 import SharePage from './components/SharePage.jsx';
 import VoicePanel from './components/VoicePanel/VoicePanel.jsx';
+import ConsentDialog from './components/ConsentDialog.jsx';
 import useMicRecorder from './hooks/useMicRecorder.js';
 import useIsMobile from './hooks/useIsMobile.js';
 import useUiStore from './store/uiStore.js';
@@ -48,6 +49,7 @@ import { enqueueRecording, processQueue, getQueueSnapshot, toSyntheticRecording 
 
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
+  const [consentPromptOpen, setConsentPromptOpen] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [registrationEnabled, setRegistrationEnabled] = useState(true);
   const [oauthProviders, setOauthProviders] = useState([]);
@@ -150,15 +152,11 @@ function App() {
   const toggleTheme = useUiStore((state) => state.toggleTheme);
   // US-16.3: предупреждение о согласии участников перед КАЖДОЙ записью
   // (152-ФЗ). Только при старте (не остановке) и если настройка включена.
+  // Показываем диалог с веткой отказа; доказательство пишет сам диалог.
   function startRecordingWithConsent() {
     if (!isMicRecording && accountConfig?.recordingConsentWarning !== false) {
-      const agreed = window.confirm(
-        'Запись встречи затрагивает персональные данные участников (152-ФЗ). Убедитесь, что участники предупреждены о записи и согласны. Начать запись?',
-      );
-
-      if (!agreed) {
-        return;
-      }
+      setConsentPromptOpen(true);
+      return;
     }
 
     handleMicRecordingToggle();
@@ -1191,6 +1189,15 @@ function App() {
         <div className="drop-overlay" aria-hidden="true">
           <div className="drop-overlay-inner">Отпустите файл, чтобы загрузить запись</div>
         </div>
+      ) : null}
+      {consentPromptOpen ? (
+        <ConsentDialog
+          onProceed={() => {
+            setConsentPromptOpen(false);
+            handleMicRecordingToggle();
+          }}
+          onCancel={() => setConsentPromptOpen(false)}
+        />
       ) : null}
       <Topbar
         activePage={activePage}
