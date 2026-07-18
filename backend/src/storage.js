@@ -1,3 +1,4 @@
+import { createReadStream } from 'node:fs';
 import { Client } from 'minio';
 
 const endpointUrl = new URL(process.env.S3_ENDPOINT || 'http://localhost:9000');
@@ -21,11 +22,14 @@ export async function ensureAudioBucket() {
   }
 }
 
-async function putAudioObject(recordingId, buffer, originalFilename, mimeType) {
+// body — Buffer или Readable-стрим; size обязателен (minio требует длину и для
+// стрима). Стрим позволяет заливать большие файлы (до 1 ГБ) без материализации
+// всего файла в памяти.
+async function putAudioObject(recordingId, body, size, originalFilename, mimeType) {
   const extension = originalFilename.includes('.') ? originalFilename.split('.').pop() : 'bin';
   const storageKey = `recordings/${recordingId}/audio-${Date.now()}.${extension}`;
 
-  await storageClient.putObject(audioBucket, storageKey, buffer, buffer.length, {
+  await storageClient.putObject(audioBucket, storageKey, body, size, {
     'Content-Type': mimeType,
     // HTTP headers (including S3 user metadata) must be ASCII - non-Latin
     // filenames (e.g. Cyrillic) would otherwise throw ERR_INVALID_CHAR here.
@@ -39,7 +43,7 @@ async function putAudioObject(recordingId, buffer, originalFilename, mimeType) {
     storageKey,
     originalFilename,
     mimeType,
-    fileSizeBytes: buffer.length,
+    fileSizeBytes: size,
   };
 }
 
@@ -48,7 +52,22 @@ export async function saveRecordingAudio(recordingId, file, buffer) {
   const resolvedBuffer = buffer || Buffer.from(await file.arrayBuffer());
   const mimeType = file.type || 'application/octet-stream';
 
-  return putAudioObject(recordingId, resolvedBuffer, originalFilename, mimeType);
+  return putAudioObject(recordingId, resolvedBuffer, resolvedBuffer.length, originalFilename, mimeType);
+}
+
+/**
+ * Заливает аудио в MinIO ПОТОКОМ прямо с диска (staging-файл чанковой загрузки),
+ * не читая весь файл в память. Память — O(chunk) вместо O(file), что и позволяет
+ * держать лимит 1 ГБ на небольшом сервере (см. §6.6).
+ */
+export async function saveRecordingAudioFromPath(recordingId, filePath, { originalFilename, mimeType, fileSizeBytes }) {
+  return putAudioObject(
+    recordingId,
+    createReadStream(filePath),
+    fileSizeBytes,
+    originalFilename || 'audio',
+    mimeType || 'application/octet-stream',
+  );
 }
 
 /**

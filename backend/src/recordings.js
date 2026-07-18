@@ -34,8 +34,8 @@ import {
 import { joinMeeting, stopMeeting, isSupportedMeetingUrl } from './meetingBot.js';
 import { detectPlatform, isSupportedMeetingUrl as isSelfHostedMeetingUrl, startRecorderJob, stopRecorderJob } from './recorderBot.js';
 import { Readable } from 'node:stream';
-import { deleteRecordingAudio, getRecordingAudioRange, getRecordingAudioStream, saveRecordingAudio } from './storage.js';
-import { MAX_UPLOAD_BYTES, UploadValidationError, probeUploadedAudio } from './uploadValidation.js';
+import { deleteRecordingAudio, getRecordingAudioRange, getRecordingAudioStream, saveRecordingAudio, saveRecordingAudioFromPath } from './storage.js';
+import { MAX_UPLOAD_BYTES, UploadValidationError, probeUploadedAudio, probeUploadedAudioPath } from './uploadValidation.js';
 import { transcribeWithOpenRouter } from './openrouterAsr.js';
 import { resolveDueDate } from './dueDateResolver.js';
 
@@ -2123,6 +2123,54 @@ export async function attachRecordingAudio(recordingId, file, ownerId) {
   const probe = await probeUploadedAudio(buffer, file.name);
 
   const metadata = await saveRecordingAudio(recordingId, file, buffer);
+  const result = await query(
+    `
+      update recordings
+      set
+        storage_key = $1,
+        original_filename = $2,
+        mime_type = $3,
+        file_size_bytes = $4,
+        duration_seconds = $5,
+        status = 'uploaded',
+        updated_at = now()
+      where id = $6
+      returning id, owner_id, title, status, source, duration_seconds, storage_key,
+        original_filename, mime_type, file_size_bytes, created_at, updated_at
+    `,
+    [
+      metadata.storageKey,
+      metadata.originalFilename,
+      metadata.mimeType,
+      metadata.fileSizeBytes,
+      Math.round(probe.durationSeconds),
+      recordingId,
+    ],
+  );
+
+  return mapRecording(result.rows[0]);
+}
+
+/**
+ * Потоковый вариант attachRecordingAudio для завершения ЧАНКОВОЙ загрузки (§6.6):
+ * файл уже целиком лежит на диске (staging), поэтому пробуем его ffprobe прямо по
+ * пути и заливаем в MinIO стримом — без чтения всего файла в память (иначе на 1 ГБ
+ * пик ~2×размера в RAM → своп/OOM на маленьком сервере). Buffer-версия выше
+ * оставлена для прямого multipart-роута и колбэка бота, где байты уже в памяти.
+ */
+export async function attachRecordingAudioFromPath(recordingId, filePath, { originalFilename, mimeType, fileSizeBytes }, ownerId) {
+  const recording = await query('select id from recordings where id = $1 and owner_id = $2', [
+    recordingId,
+    ownerId,
+  ]);
+
+  if (recording.rowCount === 0) {
+    return null;
+  }
+
+  const probe = await probeUploadedAudioPath(filePath);
+  const metadata = await saveRecordingAudioFromPath(recordingId, filePath, { originalFilename, mimeType, fileSizeBytes });
+
   const result = await query(
     `
       update recordings

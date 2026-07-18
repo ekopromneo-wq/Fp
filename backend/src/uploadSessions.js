@@ -1,7 +1,7 @@
-import { mkdir, readFile, rm, stat, writeFile, appendFile } from 'node:fs/promises';
+import { mkdir, rm, stat, writeFile, appendFile } from 'node:fs/promises';
 import path from 'node:path';
 import { query } from './db.js';
-import { attachRecordingAudio, enqueueRecording } from './recordings.js';
+import { attachRecordingAudioFromPath, enqueueRecording } from './recordings.js';
 import { MAX_UPLOAD_BYTES } from './uploadValidation.js';
 
 const STAGING_DIR = process.env.UPLOAD_STAGING_DIR || path.join(process.cwd(), 'data', 'upload-staging');
@@ -195,15 +195,20 @@ export async function completeUploadSession(recordingId, ownerId) {
     throw new UploadSessionError('no_session', 'Файл загрузки повреждён — начните заново.');
   }
 
-  const buffer = await readFile(session.staging_path);
-  const fileLike = {
-    arrayBuffer: async () => buffer,
-    name: session.original_filename,
-    type: session.mime_type,
-  };
-
   try {
-    const recording = await attachRecordingAudio(recordingId, fileLike, ownerId);
+    // Стрим прямо со staging-файла (он уже целиком на диске) — без чтения всего
+    // файла в память: ffprobe по пути + потоковая заливка в MinIO. Держит лимит
+    // 1 ГБ на маленьком сервере (§6.6).
+    const recording = await attachRecordingAudioFromPath(
+      recordingId,
+      session.staging_path,
+      {
+        originalFilename: session.original_filename,
+        mimeType: session.mime_type,
+        fileSizeBytes: Number(session.total_size_bytes),
+      },
+      ownerId,
+    );
     // The upload conveyor is meant to run end-to-end without a manual
     // "Запустить обработку" click (US-4.1/4.2) - the meeting-bot recording
     // path already auto-enqueues itself (see recordings.js), this is the
