@@ -1047,3 +1047,15 @@ DOCX генерирует `backend/src/protocolDocx.js` (`buildProtocolDocxBuffe
 Проверялся серверный генератор (вложение к письму, US-11.2). Параллельный фронтовый экспорт (`exporters.js buildProtocolDocxBlob`) по замыслу даёт тот же документ — отдельно не гонялся. **Gate §6.8 закрыт.**
 
 **Итог по Gate на 2026-07-18:** §6.3 ✅, §6.4 ✅ (серверное ядро), §6.8 ✅. Внешние блокеры: §6.1/§6.2 (юрист), §6.5 (нужен реальный размеченный датасет — 50 встреч/40 ч/500 задач, 2 разметчика+арбитр, ADR-032). Остаются инженерные §6.6 (нагрузка 4ч/1ГБ — цель/площадка под вопросом: прод живой) и §6.7 (security review OAuth/интеграций).
+
+## 2026-07-18 — Gate §6.7: security review OAuth и интеграций
+
+Ручной аудит `oauth.js`, `auth.js` (start/callback, `findOrCreateOauthUser`, `createSession`), `calendar.js` (Microsoft OAuth), `recordings.js` (`/api/internal/recorder-bot/callback`), Telegram-login. **Хорошее:** оба OAuth-потока и календарь — server-side single-use `state` (`delete … returning`) + 15-мин TTL + PKCE S256 → надёжно против CSRF; календарь привязывает `state` к аутентифицированному юзеру. Сессионный токен — 32 байта случайных, хранится хэшем.
+
+**Находки (OAuth выключен на проде — креды не заданы, поэтому дефекты латентны, но должны быть закрыты ДО включения):**
+- **[HIGH] OAuth обходит закрытую регистрацию.** `findOrCreateOauthUser` (auth.js:322–328) безусловно создаёт нового пользователя, если совпадений нет, — без проверки `REGISTRATION_ENABLED`. Модель доступа (`ALLOW_REGISTRATION=false`, пароль аккаунта защищает весь PWA) обходится: любой с Google/Яндекс/VK/Сбер/Telegram-аккаунтом само-регистрируется и попадает внутрь. Fix: гейтить создание по `REGISTRATION_ENABLED` (разрешать только вход в существующий аккаунт).
+- **[HIGH] Захват аккаунта по непроверенному email провайдера.** `findOrCreateOauthUser` (auth.js:315–320) связывает OAuth-личность с существующим аккаунтом только по совпадению `email`, без проверки `email_verified`. Провайдер с непроверенным email (или атакующий, задавший чужой email у себя) → вход в чужой парольный аккаунт. Fix: линковать по email только при подтверждённом провайдером email; иначе — не авто-линковать.
+- **[MEDIUM] `/api/internal/recorder-bot/callback` доступен публично.** Caddy проксирует `/api/*` наружу, эндпоинт (recordings.js:2403) не под `requireAuth`, защищён только общим секретом `X-Internal-Secret`, сравнение `!==` — не constant-time. Fix: constant-time сравнение (`crypto.timingSafeEqual`) + резать `/api/internal/*` на Caddy (или сетевая изоляция).
+- **[LOW] Telegram-login: HMAC сравнивается `expected !== hash`** (oauth.js:110) — не timing-safe. Fix: `timingSafeEqual`.
+
+Статус §6.7: **обзор проведён, находки открыты**; закрытие — после решения о фиксах (все фиксы небольшие и хирургические).
