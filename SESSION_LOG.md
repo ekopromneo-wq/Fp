@@ -1067,3 +1067,17 @@ DOCX генерирует `backend/src/protocolDocx.js` (`buildProtocolDocxBuffe
 - Проверки: `node --check` всех трёх файлов, юнит `constantTimeEqual` (6 кейсов). Деплой api+worker; **живьём:** `/api/internal/recorder-bot/callback` снаружи → **404 от Caddy** (было 401 от api), health/login/PWA — ок, OAuth по-прежнему выключен (google/start → 404). Находки 1–2 (OAuth) живьём не тестируются — креды не заданы; проверены ревью+`node --check`. **Gate §6.7 закрыт.**
 
 **⚠️ Нюанс деплоя (важно на будущее):** Caddyfile смонтирован как ОДИНОЧНЫЙ файл (`./deploy/Caddyfile:/etc/caddy/Caddyfile:ro`). `git pull` заменяет файл новым inode, а bind-mount пинит старый → контейнер видит СТАРЫЙ конфиг, а `caddy validate/adapt/reload` работают со старым содержимым и «проходят». Изменения Caddyfile требуют **`docker compose up -d --force-recreate --no-deps caddy`**, а не `reload`. (Диагностировано: `docker exec caddy grep -c internal /etc/caddy/Caddyfile` = 0 при 2 на хосте.)
+
+## 2026-07-18 — Gate §6.6: нагрузочный тест 4ч/1ГБ — НАЙДЕН БЛОКЕР (память)
+
+Лимиты (NFR §3): длительность ≤ 4 ч, файл ≤ 1 ГБ. Проанализировал путь завершения загрузки на пик памяти/диска (анализ кода — полный 4ч-ASR-прогон на живом проде не запускал: реальные деньги на Whisper + часы занятого воркера, это отдельное дорогое решение).
+
+**НАХОДКА [HIGH]: тройная материализация файла при завершении загрузки → OOM/своп-thrashing на 1 ГБ.** Цепочка `completeUploadSession` → `attachRecordingAudio` → `probeUploadedAudio`/`saveRecordingAudio`:
+- `uploadSessions.js:198` `readFile(staging)` → Buffer #1 (весь файл в RAM), хотя staging-файл уже на диске;
+- `recordings.js:2122` `Buffer.from(await file.arrayBuffer())` → **копия** Buffer #2 (ещё раз весь файл) — пик ~2× размера в RAM;
+- `uploadValidation.js:46` `writeFile(tmp, buffer)` → ещё раз весь файл во временный файл на диске (лишний — staging уже на диске), затем ffprobe;
+- `storage.js:28` `putObject(bucket, key, buffer, len)` — весь буфер в MinIO-клиент.
+
+Для 1 ГБ: пик RAM ≈ 2 ГБ, диск ≈ 3 ГБ (staging+tmp+minio). Прод: 2.9 ГБ RAM (~2 ГБ свободно) + 1.5 ГБ swap, у api нет mem-limit. → при 1 ГБ пик 2 ГБ упирается в своп → thrashing всех сервисов, под давлением V8+MinIO вероятен OOM-kill. Диск (38 ГБ свободно) не проблема. Тот же `Buffer.from(await file.arrayBuffer())` и в прямом multipart-роуте (`recordings.js:2656`) — та же двойная буферизация. Загрузка чанков сама по себе безопасна (`appendChunk` пишет на диск потоково, O(chunk) памяти) — проблема только на шаге complete.
+
+**Фикс (потоковая обработка, без буферизации всего файла):** completeUploadSession отдаёт staging-ПУТЬ; `probeUploadedAudio` запускает ffprobe прямо по staging-файлу (он уже на диске — убрать readFile и временный writeFile); `saveRecordingAudio`/putObject стримит `createReadStream(staging)` в MinIO (принимает Readable+size). Память падает до O(chunk). Затрагивает общий путь загрузки (чанковый + прямой multipart + завершение бота) — рефактор критического пути, требует аккуратной проверки. **Статус §6.6: блокер найден, фикс спроектирован, ждёт реализации.**
