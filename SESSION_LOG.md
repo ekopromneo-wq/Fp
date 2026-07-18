@@ -984,3 +984,33 @@ US-18.4 (админ-панель) — «След. релиз», пропущен
 - Замена только заглавного токена `VoxMate`→`Stenogram`. **Инфраструктура в нижнем регистре не тронута** намеренно: имя cookie `voxmate_session`, БД `voxmate`, бакет `voxmate-audio`, tmpdir-префиксы, демо-почта `demo@voxmate.local`, IndexedDB `voxmate`, ключ persist `voxmate-ui` — их переименование разлогинило бы/осиротило бы данные и сломало прод.
 
 **Деплой:** backend `git pull` + rebuild api+worker; frontend — dist (собран с прод-API) в `/opt/voxmate/app` (22 файла), обновлён `download/voxmate-pwa.zip`. Проверено снаружи: title и манифест обновлены, theme_color `#2FB3B7`, все 5 иконок отдаются (200, размеры совпадают с локальными). Установленные ранее PWA подтянут новый манифест/иконки через autoUpdate SW; OS-иконка на части платформ обновится только при переустановке.
+
+## 2026-07-17 — Этап 9: продуктовая аналитика (NFR §6/§9) — КОД-КОМПЛИТ, НЕ ЗАКОММИЧЕНО
+
+Продолжили по спецификации (`new/VoxMate_Решения_риски_порядок.md`, порядок сборки). Этапы 0–8 закрыты, этап 10 — поздний. Единственный незакрытый функциональный пункт — **этап 9: продуктовая аналитика и воронка активации** (NFR §6/§9). В коде отсутствовала полностью — реализована целиком.
+
+**Принцип 152-ФЗ:** аналитика НЕ содержит аудио, текста встреч, имён и контактов. Только имя события из белого списка + скалярные `props` (канал, источник, счётчики, флаги). `user_id`/`recording_id` — псевдонимные UUID для воронки/ретеншена, `on delete set null` сохраняет агрегаты.
+
+**Что реализовано:**
+- **Миграция 031** `analytics_events` (event, user_id, recording_id, props jsonb, created_at + индексы).
+- **`backend/src/analytics.js`**: белый список `ANALYTICS_EVENTS`; `sanitizeProps` (обрезает до скаляров, строки ≤64); `track()` — fire-and-forget, никогда не бросает; `getProductMetrics({days})` — activation rate (воронка recording→protocol→tasks_opened), медианное time-to-first-protocol, delivery success rate по каналам, incomplete-task-sent rate, retention D14; роуты `POST /api/analytics/track` (только фронт-события из подсписка `tasks_opened`/`offline_recovery`) и `GET /api/analytics/metrics` (за `ANALYTICS_ADMINS`, иначе — любой авторизованный, данные агрегированные). Зарегистрирован в `index.js`.
+- **Инструментирование backend:** `recording_created` (createRecording), `processing_started`/`protocol_ready`(+ taskCount/hasIncompleteTasks)/`processing_failed` (worker.js, включая обработчик `worker.on('failed')`), `delivery_sent`/`delivery_failed` с `{channel,payloadKind}` (sendingRoutes /send + per-task email/telegram + bitrix), четыре именованных события NFR §6 — `incomplete_task_confirmed` (PATCH task при confirmed неполной), `incomplete_task_sent_email`/`incomplete_task_sent_telegram` (per-task маршруты, по `isTaskIncomplete`), `incomplete_task_blocked_b24` (send-bitrix без responsibleId), плюс `task_sent_bitrix`. Хелпер `isTaskIncomplete(task)` = нет assignee или нет dueText.
+- **Инструментирование frontend:** `track()` в `lib/api.js` (fire-and-forget POST); `tasks_opened` (useEffect на TaskSearchPage); `offline_recovery` (App.jsx handleOnline при непустой очереди — US-3 offline recovery rate).
+
+**СТАТУС — не собрано / не задеплоено / не закоммичено.** Во время работы был устойчиво недоступен классификатор безопасности команд платформы (не песочница) — не удалось выполнить `node --check`, `vite build`, валидацию миграции 031 на проде и деплой. Код-комплит и вычитан чтением (SQL параметризация проверена, `emitProtocolReady` — hoisted-декларация, циклов импорта нет). По решению пользователя («только документация») оставлен в рабочем дереве незакоммиченным.
+
+**Незакоммиченные файлы (для подхвата):** новый `backend/src/analytics.js`; правки `backend/src/{migrations.js,index.js,recordings.js,worker.js,sendingRoutes.js}`, `frontend/src/{App.jsx,components/TaskSearchPage.jsx,lib/api.js}`.
+
+**Осталось при возобновлении:** `node --check` бэкенда + `vite build`; валидация SQL миграции 031 на проде в откатываемой транзакции; коммит; деплой api+worker+фронт; сквозная проверка на демо (сгенерировать события → `GET /api/analytics/metrics`).
+
+Разговор этой сессии — `chats/2026-07-17-consent-rebrand-analytics.md`.
+
+## 2026-07-18 — Этап 9: аналитика — сборка, коммит, деплой
+
+Возобновил незакоммиченную работу прошлой сессии (классификатор команд снова доступен).
+
+**Проверки сборки — зелёные:** `node --check` по всем правленым backend-файлам (`analytics.js`, `index.js`, `recordings.js`, `worker.js`, `sendingRoutes.js`, `migrations.js`) — OK; `vite build` фронтенда — OK (билд 2.47 s, PWA-precache 25 файлов). Колонки `recording_tasks.assignee`/`due_text` в `emitProtocolReady` сверены со схемой; `getQueueSnapshot` в `App.jsx` импортирован. Миграция 031 — идемпотентный DDL по паттерну миграции 030 (`consent_events`), локальной voxmate-БД для прогона нет (на проде).
+
+**Коммит:** `backend/src/analytics.js` (новый) + правки backend/frontend + `SESSION_LOG.md` + чат-лог. `nrdp-adminconsole.png` (от 15.07, не связан с аналитикой) оставлен вне коммита.
+
+**Деплой:** сервер `git pull` + `docker compose -f docker-compose.server.yml up -d --build api worker` (миграция 031 прогоняется при старте api). Фронтенд собран с `VITE_API_BASE_URL=https://vox.ekoprom.org`, dist залит в `/opt/voxmate/app` (Caddy отдаёт статику оттуда, `/api/*` реверс-проксируется на api:4000).

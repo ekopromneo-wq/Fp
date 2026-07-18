@@ -24,7 +24,7 @@ import useTaskSearch from './hooks/useTaskSearch.js';
 import useTasks from './hooks/useTasks.js';
 import useSpeakers from './hooks/useSpeakers.js';
 import useSending from './hooks/useSending.js';
-import { apiFetch, isProcessingStatus } from './lib/api.js';
+import { apiFetch, isProcessingStatus, track } from './lib/api.js';
 import { formatDate } from './lib/format.js';
 import {
   buildRecordingExport,
@@ -497,6 +497,15 @@ function App() {
   useEffect(() => {
     function handleOnline() {
       setIsOnline(true);
+      // US-3 offline recovery rate (NFR §9): связь вернулась, а в очереди есть
+      // несинхронизированные записи — фиксируем момент восстановления.
+      getQueueSnapshot()
+        .then((items) => {
+          if (items.length > 0) {
+            track('offline_recovery', { pending: items.length });
+          }
+        })
+        .catch(() => {});
       processQueue(apiFetch, syncCallbacks).catch((error) => {
         console.error('processQueue failed', error);
       });

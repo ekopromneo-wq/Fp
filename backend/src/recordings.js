@@ -10,6 +10,7 @@ import {
   requireAuth,
 } from './auth.js';
 import { query, transaction } from './db.js';
+import { track } from './analytics.js';
 import { sendRecordingEmail, sendTaskEmail } from './email.js';
 import { sendRecordingTelegram, sendTaskTelegram } from './telegram.js';
 import { recordDelivery, sendWithRetry } from './sending.js';
@@ -219,6 +220,12 @@ function mapTask(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+// Неполная задача (NFR §6) — без исполнителя или без срока (то самое «?»).
+// Работает и с mapTask-объектом, и с task из getRecording.
+function isTaskIncomplete(task) {
+  return !task?.assignee || !task?.dueText;
 }
 
 function mapSpeaker(row) {
@@ -980,7 +987,9 @@ export async function createRecording(input, ownerId) {
     [ownerId, title, source, input.durationSeconds || null, input.storageKey || null, meetingType],
   );
 
-  return mapRecording(result.rows[0]);
+  const recording = mapRecording(result.rows[0]);
+  track('recording_created', { userId: ownerId, recordingId: recording.id, props: { source } });
+  return recording;
 }
 
 /**
@@ -2809,6 +2818,7 @@ export function registerRecordingRoutes(app) {
 
     if (!String(body.responsibleId || '').trim()) {
       // Спека: «если не найден — сообщение, задачу не отправляем».
+      track('incomplete_task_blocked_b24', { userId: user.id, recordingId });
       return c.json({ error: 'Сотрудник Битрикс24 не выбран — задача не отправлена' }, 400);
     }
 
@@ -2862,6 +2872,9 @@ export function registerRecordingRoutes(app) {
         [taskId, String(result.bitrixTaskId), result.url, result.responsibleId, result.groupId],
       );
 
+      track('task_sent_bitrix', { userId: user.id, recordingId });
+      track('delivery_sent', { userId: user.id, recordingId, props: { channel: 'bitrix', payloadKind: 'tasks' } });
+
       return c.json({ result, task: mapTask(updated.rows[0]) });
     } catch (error) {
       await recordDelivery({
@@ -2874,6 +2887,8 @@ export function registerRecordingRoutes(app) {
         attempts: error.attempts || 1,
         lastError: error.message,
       });
+
+      track('delivery_failed', { userId: user.id, recordingId, props: { channel: 'bitrix', payloadKind: 'tasks' } });
 
       return c.json({ error: error.message || 'Не удалось отправить задачу в Битрикс24' }, 400);
     }
@@ -2957,6 +2972,11 @@ export function registerRecordingRoutes(app) {
         return c.json({ error: 'Task not found' }, 404);
       }
 
+      // NFR §6: пользователь подтвердил неполную задачу (без срока/исполнителя).
+      if (body.status === 'confirmed' && isTaskIncomplete(task)) {
+        track('incomplete_task_confirmed', { userId: user.id, recordingId: c.req.param('recordingId') });
+      }
+
       return c.json({ task });
     } catch (error) {
       return c.json({ error: error.message || 'Failed to update task' }, 400);
@@ -3004,8 +3024,14 @@ export function registerRecordingRoutes(app) {
         [taskId, body.email],
       );
 
+      track('delivery_sent', { userId: user.id, recordingId, props: { channel: 'email', payloadKind: 'tasks' } });
+      if (isTaskIncomplete(task)) {
+        track('incomplete_task_sent_email', { userId: user.id, recordingId });
+      }
+
       return c.json({ delivery, task: mapTask(updated.rows[0]) });
     } catch (error) {
+      track('delivery_failed', { userId: user.id, recordingId, props: { channel: 'email', payloadKind: 'tasks' } });
       return c.json({ error: error.message || 'Failed to send task email' }, 400);
     }
   });
@@ -3059,6 +3085,11 @@ export function registerRecordingRoutes(app) {
         [taskId, result.chatId, result.messageId],
       );
 
+      track('delivery_sent', { userId: user.id, recordingId, props: { channel: 'telegram', payloadKind: 'tasks' } });
+      if (isTaskIncomplete(task)) {
+        track('incomplete_task_sent_telegram', { userId: user.id, recordingId });
+      }
+
       return c.json({ delivery: result, task: mapTask(updated.rows[0]) });
     } catch (error) {
       await recordDelivery({
@@ -3071,6 +3102,8 @@ export function registerRecordingRoutes(app) {
         attempts: error.attempts || 1,
         lastError: error.message,
       });
+
+      track('delivery_failed', { userId: user.id, recordingId, props: { channel: 'telegram', payloadKind: 'tasks' } });
 
       return c.json({ error: error.message || 'Не удалось отправить задачу в Telegram' }, 400);
     }

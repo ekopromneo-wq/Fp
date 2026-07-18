@@ -17,6 +17,20 @@ export function getAudioUrl(recording) {
   return recording?.storageKey ? `${apiBaseUrl}/api/recordings/${recording.id}/audio` : '';
 }
 
+/**
+ * Продуктовая аналитика (NFR §9): fire-and-forget отправка события. Разрешены
+ * только события из белого списка на сервере (tasks_opened, offline_recovery).
+ * Ошибки глотаем — аналитика не должна мешать пользователю. Только метаданные,
+ * без содержимого встреч (152-ФЗ).
+ */
+export function track(event, props = {}) {
+  try {
+    apiFetch('/api/analytics/track', { method: 'POST', body: JSON.stringify({ event, props }) }).catch(() => {});
+  } catch {
+    // сеть/сериализация не должны влиять на UX
+  }
+}
+
 export function isProcessingStatus(status) {
   return status === 'queued' || status === 'processing' || status === 'transcribing' || status === 'summarizing';
 }

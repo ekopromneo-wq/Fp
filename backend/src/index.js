@@ -12,6 +12,7 @@ import { registerSendingRoutes } from './sendingRoutes.js';
 import { registerFeedbackRoutes } from './feedback.js';
 import { registerCalendarRoutes } from './calendar.js';
 import { registerConsentRoutes } from './consent.js';
+import { registerAnalyticsRoutes } from './analytics.js';
 import { runMigrations } from './migrations.js';
 import { ensureAudioBucket } from './storage.js';
 
@@ -94,6 +95,7 @@ registerSendingRoutes(app);
 registerFeedbackRoutes(app);
 registerCalendarRoutes(app);
 registerConsentRoutes(app);
+registerAnalyticsRoutes(app);
 
 const CLEANUP_INTERVAL_MS = Number(process.env.CLEANUP_INTERVAL_MS || 60 * 60 * 1000);
 

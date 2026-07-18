@@ -1,6 +1,7 @@
 import { getAuthUser, getUserSmtpConfig, getUserTelegramConfig, requireAuth } from './auth.js';
 import { buildEmailContent, buildSubject, sendRecordingEmail } from './email.js';
 import { getRecording } from './recordings.js';
+import { track } from './analytics.js';
 import {
   CHANNELS,
   PAYLOAD_KINDS,
@@ -111,6 +112,11 @@ export function registerSendingRoutes(app) {
         externalRefs: result,
       });
 
+      // Именованные события неполных задач (NFR §6) считаем в per-task маршрутах
+      // send-email/send-telegram, где известна конкретная задача. Здесь — только
+      // канальная доставка (bulk-дайджест протокола/сводки/задач).
+      track('delivery_sent', { userId: user.id, recordingId: recording.id, props: { channel, payloadKind } });
+
       return c.json({ delivery, result });
     } catch (error) {
       const attempts = error.attempts || 1;
@@ -124,6 +130,8 @@ export function registerSendingRoutes(app) {
         attempts,
         lastError: error.message,
       });
+
+      track('delivery_failed', { userId: user.id, recordingId: recording.id, props: { channel, payloadKind } });
 
       return c.json(
         {

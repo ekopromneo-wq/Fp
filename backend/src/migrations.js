@@ -635,6 +635,28 @@ const migrations = [
       alter table app_users add column if not exists support_access_granted_at timestamptz;
     `,
   },
+  {
+    id: '031_analytics_events',
+    sql: `
+      -- Этап 9 (NFR §6/§9): продуктовая аналитика и воронка активации.
+      -- ВАЖНО (152-ФЗ): здесь только метаданные событий — никакого аудио, текста
+      -- встреч, имён, контактов. props хранит лишь скалярные признаки (канал,
+      -- источник, счётчики, флаги). user_id/recording_id — псевдонимные UUID для
+      -- построения воронки/ретеншена; on delete set null сохраняет агрегаты после
+      -- удаления аккаунта/записи.
+      create table if not exists analytics_events (
+        id uuid primary key default gen_random_uuid(),
+        event text not null,
+        user_id uuid references app_users(id) on delete set null,
+        recording_id uuid references recordings(id) on delete set null,
+        props jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now()
+      );
+      create index if not exists analytics_events_event_idx on analytics_events(event, created_at desc);
+      create index if not exists analytics_events_user_idx on analytics_events(user_id, created_at);
+      create index if not exists analytics_events_recording_idx on analytics_events(recording_id) where recording_id is not null;
+    `,
+  },
 ];
 
 export async function runMigrations() {

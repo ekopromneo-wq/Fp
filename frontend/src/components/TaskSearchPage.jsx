@@ -1,7 +1,9 @@
+import { useEffect } from 'react';
 import VoiceInputButton from './VoiceInputButton.jsx';
 import { formatDate } from '../lib/format.js';
 import { getTaskStatusLabel, TASK_STATUS_LABELS } from '../lib/statusLabels.js';
 import { buildTaskSearchExport, downloadTextFile } from '../lib/exporters.js';
+import { track } from '../lib/api.js';
 
 /**
  * Страница поиска по задачам всех встреч (US-10.2): текстовый запрос по
@@ -11,6 +13,11 @@ import { buildTaskSearchExport, downloadTextFile } from '../lib/exporters.js';
  */
 function TaskSearchPage({ search, projectOptions, onOpenRecording, onDictate, setStatus }) {
   const { taskFilters, setTaskFilters, taskResults, isSearchingTasks, hasSearchedTasks, searchTasks, resetTaskSearch } = search;
+
+  // Воронка активации (NFR §9): пользователь открыл раздел задач.
+  useEffect(() => {
+    track('tasks_opened');
+  }, []);
 
   function setFilter(key, value) {
     setTaskFilters((current) => ({ ...current, [key]: value }));

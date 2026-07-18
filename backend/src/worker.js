@@ -15,6 +15,7 @@ import { transcribeWithAccuratePipeline } from './pipelineDiarizer.js';
 import { transcribeWithSpeech2Text, checkSpeech2TextStatus, fetchSpeech2TextResult, parseSpeech2TextResult } from './speech2textDiarizer.js';
 import { getUserDiarizationConfig } from './auth.js';
 import { summarizeRecording, purgeExpiredTrash } from './recordings.js';
+import { track } from './analytics.js';
 import { notifyRecordingEvent, notifyTaskOverdue, notifyMeetingReminder } from './notifications.js';
 import { pollCalendars } from './calendar.js';
 import { pollTelegramCallbacks } from './telegramCallbacks.js';
@@ -100,6 +101,8 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
   const title = recording.rows[0]?.title || 'recording';
   const file = recording.rows[0];
 
+  track('processing_started', { userId: file?.owner_id, recordingId, props: { resumed: alreadyTranscribed } });
+
   if (alreadyTranscribed) {
     await summarizeRecording(recordingId, file?.owner_id);
 
@@ -107,6 +110,7 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
       await client.query(`update processing_jobs set status = 'done', error = null, updated_at = now() where id = $1`, [jobId]);
       await client.query(`update recordings set status = 'done', updated_at = now() where id = $1`, [recordingId]);
     });
+    await emitProtocolReady(recordingId, file?.owner_id);
     await notifyRecordingEvent(recordingId, file?.owner_id, 'done');
     return;
   }
@@ -259,7 +263,32 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
     );
   });
 
+  await emitProtocolReady(recordingId, file?.owner_id);
   await notifyRecordingEvent(recordingId, file?.owner_id, 'done');
+}
+
+/**
+ * Событие «протокол готов» для воронки активации (NFR §9). Считаем задачи и
+ * наличие неполных (нет исполнителя или срока — то самое «?») — только счётчик
+ * и флаг, без содержимого задач.
+ */
+async function emitProtocolReady(recordingId, ownerId) {
+  try {
+    const stats = await query(
+      `select count(*)::int as total,
+              count(*) filter (where assignee is null or due_text is null)::int as incomplete
+       from recording_tasks where recording_id = $1 and status <> 'dismissed'`,
+      [recordingId],
+    );
+    const row = stats.rows[0] || {};
+    track('protocol_ready', {
+      userId: ownerId,
+      recordingId,
+      props: { taskCount: row.total || 0, hasIncompleteTasks: (row.incomplete || 0) > 0 },
+    });
+  } catch (error) {
+    console.warn('analytics: protocol_ready stats failed:', error.message);
+  }
 }
 
 const MEETING_BOT_POLL_INTERVAL_MS = Number(process.env.MEETING_BOT_POLL_INTERVAL_MS || 30000);
@@ -507,6 +536,7 @@ async function main() {
       if (!isCancelled) {
         const owner = await query('select owner_id from recordings where id = $1', [job.data.recordingId]);
         await notifyRecordingEvent(job.data.recordingId, owner.rows[0]?.owner_id, 'failed');
+        track('processing_failed', { recordingId: job.data.recordingId, userId: owner.rows[0]?.owner_id });
       }
     }
   });
