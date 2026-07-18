@@ -1,4 +1,17 @@
-import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+
+/**
+ * Сравнение секретов/подписей за постоянное время — против timing-атак. Разной
+ * длины строки сразу неравны (без утечки через ранний выход самого timingSafeEqual).
+ */
+export function constantTimeEqual(a, b) {
+  const bufA = Buffer.from(String(a ?? ''), 'utf8');
+  const bufB = Buffer.from(String(b ?? ''), 'utf8');
+  if (bufA.length !== bufB.length) {
+    return false;
+  }
+  return timingSafeEqual(bufA, bufB);
+}
 
 /**
  * Реестр OAuth-провайдеров (ADR-027). Каждый включается, только если заданы его
@@ -16,7 +29,12 @@ const REGISTRY = {
     tokenUrl: () => process.env.OAUTH_GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token',
     userinfoUrl: () => process.env.OAUTH_GOOGLE_USERINFO_URL || 'https://openidconnect.googleapis.com/v1/userinfo',
     scope: 'openid email profile',
-    profile: (info) => ({ id: String(info.sub), email: info.email, name: info.name || info.email }),
+    profile: (info) => ({
+      id: String(info.sub),
+      email: info.email,
+      emailVerified: info.email_verified === true || info.email_verified === 'true',
+      name: info.name || info.email,
+    }),
   },
   yandex: {
     label: 'Яндекс',
@@ -27,6 +45,8 @@ const REGISTRY = {
     profile: (info) => ({
       id: String(info.id),
       email: info.default_email || info.emails?.[0] || null,
+      // Яндекс не возвращает признак подтверждения email → не авто-линкуем к чужому аккаунту.
+      emailVerified: false,
       name: info.real_name || info.display_name || info.login,
     }),
   },
@@ -41,6 +61,8 @@ const REGISTRY = {
       return {
         id: String(user.user_id || user.id),
         email: user.email || null,
+        // VK не даёт признак подтверждения email через user_info → не авто-линкуем.
+        emailVerified: false,
         name: [user.first_name, user.last_name].filter(Boolean).join(' ') || user.email,
       };
     },
@@ -51,7 +73,12 @@ const REGISTRY = {
     tokenUrl: () => process.env.OAUTH_SBER_TOKEN_URL || 'https://api.sberbank.ru/ru/prod/tokens/v2/oidc',
     userinfoUrl: () => process.env.OAUTH_SBER_USERINFO_URL || 'https://api.sberbank.ru/ru/prod/sberbankid/v2.1/userinfo',
     scope: 'openid email name',
-    profile: (info) => ({ id: String(info.sub), email: info.email, name: info.name || info.email }),
+    profile: (info) => ({
+      id: String(info.sub),
+      email: info.email,
+      emailVerified: info.email_verified === true || info.email_verified === 'true',
+      name: info.name || info.email,
+    }),
   },
 };
 
@@ -107,7 +134,7 @@ export function verifyTelegramLogin(params) {
   const secret = createHash('sha256').update(token).digest();
   const expected = createHmac('sha256', secret).update(dataCheckString).digest('hex');
 
-  if (expected !== hash) {
+  if (!constantTimeEqual(expected, hash)) {
     return null;
   }
 

@@ -11,6 +11,7 @@ import {
 } from './auth.js';
 import { query, transaction } from './db.js';
 import { track } from './analytics.js';
+import { constantTimeEqual } from './oauth.js';
 import { sendRecordingEmail, sendTaskEmail } from './email.js';
 import { sendRecordingTelegram, sendTaskTelegram } from './telegram.js';
 import { recordDelivery, sendWithRetry } from './sending.js';
@@ -2403,7 +2404,7 @@ export function registerRecordingRoutes(app) {
   app.post('/api/internal/recorder-bot/callback', async (c) => {
     const secret = c.req.header('X-Internal-Secret') || '';
 
-    if (!process.env.RECORDER_BOT_INTERNAL_SECRET || secret !== process.env.RECORDER_BOT_INTERNAL_SECRET) {
+    if (!process.env.RECORDER_BOT_INTERNAL_SECRET || !constantTimeEqual(secret, process.env.RECORDER_BOT_INTERNAL_SECRET)) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 

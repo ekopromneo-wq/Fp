@@ -306,13 +306,18 @@ async function findOrCreateOauthUser(provider, profile) {
   );
 
   if (existing.rowCount) {
+    // Вход в уже связанный аккаунт — разрешён всегда (в т.ч. при закрытой регистрации).
     return mapUser(existing.rows[0]);
   }
 
   const email = profile.email ? normalizeEmail(profile.email) : null;
+  const emailVerified = Boolean(profile.emailVerified);
   let user = null;
 
-  if (email) {
+  // Привязка к СУЩЕСТВУЮЩЕМУ аккаунту — только по ПОДТВЕРЖДЁННОМУ провайдером email.
+  // Иначе провайдер с непроверенным email (или атакующий, задавший чужой email у себя)
+  // получил бы доступ к чужому, в т.ч. парольному, аккаунту.
+  if (email && emailVerified) {
     const byEmail = await query('select id, display_name, email, created_at, updated_at from app_users where email = $1', [email]);
     if (byEmail.rowCount) {
       user = mapUser(byEmail.rows[0]);
@@ -320,9 +325,21 @@ async function findOrCreateOauthUser(provider, profile) {
   }
 
   if (!user) {
+    // Закрытая регистрация: OAuth не должен само-провижнить новые аккаунты в обход
+    // администратора (иначе любой внешний аккаунт = доступ ко всему PWA).
+    if (!REGISTRATION_ENABLED) {
+      return null;
+    }
+    // email прикрепляем к новому аккаунту только если он подтверждён и ещё не занят
+    // (app_users.email — unique; непроверенным email нельзя «застолбить» чужой адрес).
+    let newEmail = null;
+    if (email && emailVerified) {
+      const taken = await query('select 1 from app_users where email = $1', [email]);
+      newEmail = taken.rowCount ? null : email;
+    }
     const created = await query(
       'insert into app_users (display_name, email) values ($1, $2) returning id, display_name, email, created_at, updated_at',
-      [profile.name || email || `Пользователь ${provider}`, email],
+      [profile.name || email || `Пользователь ${provider}`, newEmail],
     );
     user = mapUser(created.rows[0]);
   }
@@ -487,6 +504,11 @@ export function registerAuthRoutes(app) {
 
     try {
       const user = await findOrCreateOauthUser('telegram', profile);
+
+      if (!user) {
+        return c.redirect(`${appUrl}/?auth_error=${encodeURIComponent('Регистрация закрыта — обратитесь к администратору')}`);
+      }
+
       const session = await createSession(user.id, { userAgent: c.req.header('User-Agent') || '', ip: clientIp(c) });
       c.header('Set-Cookie', session.cookie);
       return c.redirect(`${appUrl}/`);
@@ -540,6 +562,12 @@ export function registerAuthRoutes(app) {
       const uri = redirectUri(provider, c.req.url);
       const profile = await exchangeCodeForProfile(provider, { code, codeVerifier: stored.rows[0].code_verifier, redirectUri: uri });
       const user = await findOrCreateOauthUser(provider, profile);
+
+      if (!user) {
+        // Закрытая регистрация: аккаунта нет и создавать нельзя.
+        return fail('Регистрация закрыта — обратитесь к администратору');
+      }
+
       const session = await createSession(user.id, { userAgent: c.req.header('User-Agent') || '', ip: clientIp(c) });
 
       c.header('Set-Cookie', session.cookie);
