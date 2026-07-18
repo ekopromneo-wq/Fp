@@ -1059,3 +1059,11 @@ DOCX генерирует `backend/src/protocolDocx.js` (`buildProtocolDocxBuffe
 - **[LOW] Telegram-login: HMAC сравнивается `expected !== hash`** (oauth.js:110) — не timing-safe. Fix: `timingSafeEqual`.
 
 Статус §6.7: **обзор проведён, находки открыты**; закрытие — после решения о фиксах (все фиксы небольшие и хирургические).
+
+**Фиксы внесены и задеплоены (коммит `aa9ceb3`):**
+- `findOrCreateOauthUser`: при `ALLOW_REGISTRATION=false` возвращает `null` вместо создания аккаунта (оба callback'а — OAuth и Telegram — показывают «регистрация закрыта»); линковка к существующему аккаунту — только по `emailVerified` (Google/Сбер отдают `email_verified`; Яндекс/VK помечены `emailVerified:false` → не авто-линкуем; при создании непроверенный email не прикрепляем, чтобы не «застолбить» чужой).
+- `constantTimeEqual` (crypto.timingSafeEqual) в `oauth.js` — использован в `verifyTelegramLogin` и в internal recorder-bot callback (`recordings.js`).
+- Caddyfile: `@internal path /api/internal/*` → `respond 404` (бот ходит на api по docker-сети напрямую, снаружи эндпоинт не нужен).
+- Проверки: `node --check` всех трёх файлов, юнит `constantTimeEqual` (6 кейсов). Деплой api+worker; **живьём:** `/api/internal/recorder-bot/callback` снаружи → **404 от Caddy** (было 401 от api), health/login/PWA — ок, OAuth по-прежнему выключен (google/start → 404). Находки 1–2 (OAuth) живьём не тестируются — креды не заданы; проверены ревью+`node --check`. **Gate §6.7 закрыт.**
+
+**⚠️ Нюанс деплоя (важно на будущее):** Caddyfile смонтирован как ОДИНОЧНЫЙ файл (`./deploy/Caddyfile:/etc/caddy/Caddyfile:ro`). `git pull` заменяет файл новым inode, а bind-mount пинит старый → контейнер видит СТАРЫЙ конфиг, а `caddy validate/adapt/reload` работают со старым содержимым и «проходят». Изменения Caddyfile требуют **`docker compose up -d --force-recreate --no-deps caddy`**, а не `reload`. (Диагностировано: `docker exec caddy grep -c internal /etc/caddy/Caddyfile` = 0 при 2 на хосте.)
