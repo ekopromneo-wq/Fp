@@ -1014,3 +1014,5 @@ US-18.4 (админ-панель) — «След. релиз», пропущен
 **Коммит:** `backend/src/analytics.js` (новый) + правки backend/frontend + `SESSION_LOG.md` + чат-лог. `nrdp-adminconsole.png` (от 15.07, не связан с аналитикой) оставлен вне коммита.
 
 **Деплой:** сервер `git pull` + `docker compose -f docker-compose.server.yml up -d --build api worker` (миграция 031 прогоняется при старте api). Фронтенд собран с `VITE_API_BASE_URL=https://vox.ekoprom.org`, dist залит в `/opt/voxmate/app` (Caddy отдаёт статику оттуда, `/api/*` реверс-проксируется на api:4000).
+
+**Проверено вживую на проде:** лог api `Ensured migration 031_analytics_events`; `/health/ready` — postgres/redis/minio ok; таблица `analytics_events` с индексами и FK (`on delete set null`) создана. Сквозной цикл: логин демо → `POST /api/analytics/track {tasks_opened}` → `{ok:true}` → `GET /api/analytics/metrics` вернул агрегат (`eventCounts.tasks_opened:1`, `withTasksOpened:1`). Негативный путь: серверное событие `recording_created` с клиента отклонено (400 «не разрешено к отправке с клиента»). Тестовое событие удалено из БД. PWA отдаётся снаружи (200), API-база вшита `https://vox.ekoprom.org`. **Этап 9 закрыт.**
