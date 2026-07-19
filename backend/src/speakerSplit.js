@@ -75,7 +75,7 @@ function mergeAdjacentTurns(turns) {
   }, []);
 }
 
-async function callOpenRouterSpeakerSplit(transcriptText, model, { knownSpeakers = [], previousTail = '' } = {}) {
+async function callOpenRouterSpeakerSplit(transcriptText, model, { knownSpeakers = [], previousTail = '', hints = '' } = {}) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
@@ -112,6 +112,11 @@ async function callOpenRouterSpeakerSplit(transcriptText, model, { knownSpeakers
         {
           role: 'user',
           content: [
+            // US-2.3: известные имена/термины от пользователя — помогают верно
+            // писать имена и профтермины при разметке.
+            hints
+              ? `Известные имена и термины этой встречи (пиши их правильно): ${hints}.`
+              : '',
             // Куски размечаются отдельными запросами, поэтому имена и хвост
             // предыдущего куска передаём явно: иначе «Спикер 2» во втором куске
             // окажется другим человеком, чем в первом.
@@ -168,7 +173,7 @@ function turnsToSegments(turns) {
  * обратно, и часовое совещание одним запросом упирается в лимит вывода —
  * ответ обрывается посреди JSON, и разметка терялась целиком.
  */
-async function trySplitTranscriptBySpeaker(transcriptText, model) {
+async function trySplitTranscriptBySpeaker(transcriptText, model, { hints = '' } = {}) {
   const text = String(transcriptText || '').trim();
 
   if (!text || countWords(text) < MIN_WORDS_TO_SPLIT) {
@@ -186,7 +191,7 @@ async function trySplitTranscriptBySpeaker(transcriptText, model) {
       // Сбой одного куска не должен обнулять разметку всей встречи: пропускаем
       // его и идём дальше, а годность итога решает проверка покрытия ниже.
       try {
-        collected.push(...(await callOpenRouterSpeakerSplit(chunk, model, { knownSpeakers, previousTail })));
+        collected.push(...(await callOpenRouterSpeakerSplit(chunk, model, { knownSpeakers, previousTail, hints })));
       } catch (error) {
         console.warn(`Speaker split failed for chunk ${index + 1}/${chunks.length}: ${error.message}`);
       }

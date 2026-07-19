@@ -31,7 +31,7 @@ function mergeSpeech2TextSegments(segments) {
   return merged;
 }
 
-async function submitSpeech2TextJob(file, audioBuffer, apiKey) {
+async function submitSpeech2TextJob(file, audioBuffer, apiKey, hints) {
   const formData = new FormData();
   formData.append(
     'file',
@@ -39,6 +39,11 @@ async function submitSpeech2TextJob(file, audioBuffer, apiKey) {
     file?.original_filename || 'audio',
   );
   formData.append('lang', process.env.SPEECH2TEXT_LANGUAGE || 'ru');
+  // US-2.3: best-effort подсказка терминов. Поле не документировано у Speech2Text —
+  // при ошибке отправки вызывающий повторит без него.
+  if (hints) {
+    formData.append('prompt', hints);
+  }
 
   const response = await fetch(`${SPEECH2TEXT_API_URL}/api/recognitions/task/file?api-key=${apiKey}`, {
     method: 'POST',
@@ -158,7 +163,17 @@ export async function transcribeWithSpeech2Text(file, audioBuffer, config = {}) 
   }
 
   try {
-    const taskId = await submitSpeech2TextJob(file, audioBuffer, apiKey);
+    const hints = config.hints || '';
+    let taskId;
+    try {
+      taskId = await submitSpeech2TextJob(file, audioBuffer, apiKey, hints);
+    } catch (submitError) {
+      if (!hints) {
+        throw submitError;
+      }
+      console.warn('Speech2Text submit with hints failed, retrying without prompt field:', submitError.message);
+      taskId = await submitSpeech2TextJob(file, audioBuffer, apiKey, '');
+    }
     console.log(`Submitted Speech2Text task ${taskId}`);
 
     await pollSpeech2TextJob(taskId, apiKey);

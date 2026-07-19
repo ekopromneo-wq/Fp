@@ -668,6 +668,15 @@ const migrations = [
         on recordings(owner_id, content_hash) where content_hash is not null;
     `,
   },
+  {
+    id: '033_recording_asr_hints',
+    sql: `
+      -- US-2.3: известные имена/термины, заданные пользователем до обработки.
+      -- Подмешиваются в промпт ASR/диаризации, чтобы точнее распознать имена,
+      -- аббревиатуры и профжаргон.
+      alter table recordings add column if not exists asr_hints text;
+    `,
+  },
 ];
 
 export async function runMigrations() {

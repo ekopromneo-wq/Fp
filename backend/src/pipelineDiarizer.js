@@ -125,13 +125,13 @@ function batchArray(items, size) {
  * without a `segments` array (see transcribeChunkWithTimestamps' doc comment
  * on provider routing) is logged and skipped rather than trusted untimed.
  */
-async function runWhisperOnChunks(chunks, language) {
+async function runWhisperOnChunks(chunks, language, hints) {
   const allSegments = [];
 
   for (const batch of batchArray(chunks, WHISPER_CONCURRENCY)) {
     const results = await Promise.all(
       batch.map((chunk) =>
-        transcribeChunkWithTimestamps(chunk.buffer, 'mp3', { model: WHISPER_MODEL, granularities: ['segment'], language }).catch(
+        transcribeChunkWithTimestamps(chunk.buffer, 'mp3', { model: WHISPER_MODEL, granularities: ['segment'], language, hints }).catch(
           (error) => {
             console.warn(`Pipeline: Whisper chunk at offset ${chunk.offsetMs}ms failed:`, error.message);
             return null;
@@ -640,7 +640,7 @@ export async function transcribeWithAccuratePipeline(file, audioBuffer, config =
     console.log(`Pipeline: split recording into ${chunks.length} chunk(s) of up to ${CHUNK_SECONDS}s for Whisper`);
 
     const [whisperSegments, voiceIntervals] = await Promise.all([
-      runWhisperOnChunks(chunks, config.language),
+      runWhisperOnChunks(chunks, config.language, config.hints),
       runVoiceDiarization(workdir, normalizedPath, apiKey, VOICE_MODEL),
     ]);
 

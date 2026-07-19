@@ -92,7 +92,7 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
 
   const recording = await query(
     `
-      select owner_id, title, original_filename, mime_type, file_size_bytes, storage_key
+      select owner_id, title, original_filename, mime_type, file_size_bytes, storage_key, asr_hints
       from recordings
       where id = $1
     `,
@@ -145,6 +145,13 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
   }
 
   const diarizationConfig = file?.owner_id ? (await getUserDiarizationConfig(file.owner_id)) || {} : {};
+  // US-2.3: известные имена/термины пользователя — единая точка подмешивания для
+  // всех методов диаризации; каждый читает config.hints по-своему (prompt ASR,
+  // инструкция LLM или поле формы у облачных провайдеров).
+  const hints = typeof file?.asr_hints === 'string' && file.asr_hints.trim() ? file.asr_hints.trim() : null;
+  if (hints) {
+    diarizationConfig.hints = hints;
+  }
   const diarizationMethod = diarizationConfig.method || 'shopot';
 
   let diarized = null;
@@ -174,7 +181,10 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
     finalSegments = diarized.segments;
     resolvedLanguage = resolvedLanguage || diarized.language || 'ru';
   } else {
-    const transcription = await transcribeWithOpenRouter(file, audioBuffer, { language: diarizationConfig.language || undefined });
+    const transcription = await transcribeWithOpenRouter(file, audioBuffer, {
+      language: diarizationConfig.language || undefined,
+      hints: diarizationConfig.hints || undefined,
+    });
     resolvedLanguage = resolvedLanguage || transcription?.language || 'ru';
     const transcriptText =
       transcription?.text ||
@@ -182,7 +192,7 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
         ? `Audio file received for "${title}", but OpenRouter ASR is not configured.`
         : `Mock transcript for "${title}". No audio file is attached yet.`);
 
-    const speakerSplit = await trySplitTranscriptBySpeaker(transcriptText);
+    const speakerSplit = await trySplitTranscriptBySpeaker(transcriptText, undefined, { hints: diarizationConfig.hints });
 
     if (speakerSplit) {
       console.log(`Split transcript for recording ${recordingId} into ${speakerSplit.speakerCount} speakers`);

@@ -74,6 +74,12 @@ async function callOpenRouterAsr(payload) {
     language: payload.language || process.env.OPENROUTER_ASR_LANGUAGE || 'ru',
   };
 
+  // US-2.3: Whisper принимает prompt-подсказку — известные имена/термины
+  // смещают распознавание к правильному написанию.
+  if (payload.hints) {
+    body.prompt = payload.hints;
+  }
+
   if (payload.responseFormat) {
     body.response_format = payload.responseFormat;
   }
@@ -138,7 +144,7 @@ async function withAsrRetries(attemptFn, describePayload) {
  * diarization methods (like Kimi) that need a transcript to split by speaker,
  * since OpenRouter ASR models never return speaker labels themselves.
  */
-export async function transcribeWithOpenRouter(file, audioBuffer, { language } = {}) {
+export async function transcribeWithOpenRouter(file, audioBuffer, { language, hints } = {}) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey || !audioBuffer) {
@@ -154,6 +160,7 @@ export async function transcribeWithOpenRouter(file, audioBuffer, { language } =
         audioBuffer: preparedAudio.buffer,
         format: preparedAudio.format,
         language,
+        hints,
       });
 
       return {
@@ -177,7 +184,7 @@ export async function transcribeWithOpenRouter(file, audioBuffer, { language } =
  * (pipelineDiarizer.js) on pre-chunked, pre-normalized audio - no size-based
  * compression here, callers are expected to hand it small-enough chunks.
  */
-export async function transcribeChunkWithTimestamps(buffer, format, { model, granularities, language } = {}) {
+export async function transcribeChunkWithTimestamps(buffer, format, { model, granularities, language, hints } = {}) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey || !buffer) {
@@ -192,6 +199,7 @@ export async function transcribeChunkWithTimestamps(buffer, format, { model, gra
         format,
         model,
         language,
+        hints,
         responseFormat: 'verbose_json',
         timestampGranularities: granularities || ['segment'],
       });

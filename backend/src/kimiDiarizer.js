@@ -17,14 +17,17 @@ export async function transcribeWithKimi(file, audioBuffer, config = {}) {
   const model = config.kimiModel || DEFAULT_KIMI_MODEL;
 
   try {
-    const transcription = await transcribeWithOpenRouter(file, audioBuffer, { language: config.language });
+    const transcription = await transcribeWithOpenRouter(file, audioBuffer, {
+      language: config.language,
+      hints: config.hints,
+    });
     const transcriptText = transcription?.text;
 
     if (!transcriptText) {
       return null;
     }
 
-    const speakerSplit = await trySplitTranscriptBySpeaker(transcriptText, model);
+    const speakerSplit = await trySplitTranscriptBySpeaker(transcriptText, model, { hints: config.hints });
 
     if (!speakerSplit) {
       return null;

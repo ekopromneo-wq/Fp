@@ -95,6 +95,8 @@ function mapRecording(row) {
     meetingBotTaskId: row.meeting_bot_task_id || null,
     confidential: Boolean(row.confidential),
     downloadLocked: Boolean(row.download_locked),
+    // US-2.3: известные имена/термины для ASR (только в detail-выборке).
+    asrHints: row.asr_hints || null,
     deletedAt: row.deleted_at || null,
     recorderEngine: row.recorder_engine || null,
     failureCount: row.failure_count || 0,
@@ -1230,7 +1232,7 @@ export async function getRecording(id, ownerId) {
     `
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
       , original_filename, mime_type, file_size_bytes, auto_named, meeting_url, meeting_bot_task_id,
-        recorder_engine, failure_count, meeting_type, confidential, download_locked, deleted_at,
+        recorder_engine, failure_count, meeting_type, confidential, download_locked, asr_hints, deleted_at,
         ${RECORDING_PROJECTS_SELECT}
       from recordings
       where id = $1 and owner_id = $2
@@ -1418,8 +1420,12 @@ export async function updateRecordingMetadata(recordingId, ownerId, input) {
   // treated as a one-element (or empty) set.
   const hasProjectIds = Object.prototype.hasOwnProperty.call(data, 'projectIds');
   const hasProjectId = Object.prototype.hasOwnProperty.call(data, 'projectId');
+  const hasAsrHints = Object.prototype.hasOwnProperty.call(data, 'asrHints');
   const title = hasTitle && typeof data.title === 'string' ? data.title.trim() : null;
   const meetingType = hasMeetingType && MEETING_TYPES.has(data.meetingType) ? data.meetingType : null;
+  // US-2.3: пустая строка = очистить подсказки. Ограничиваем длину, чтобы не
+  // раздувать промпт ASR.
+  const asrHints = hasAsrHints && typeof data.asrHints === 'string' ? data.asrHints.trim().slice(0, 2000) || null : null;
 
   let projectIds = null;
   if (hasProjectIds) {
@@ -1444,12 +1450,13 @@ export async function updateRecordingMetadata(recordingId, ownerId, input) {
           title = case when $3 then $4 else recordings.title end,
           auto_named = case when $3 then false else recordings.auto_named end,
           meeting_type = case when $5 then $6 else recordings.meeting_type end,
+          asr_hints = case when $7 then $8 else recordings.asr_hints end,
           updated_at = now()
         where recordings.id = $1
           and recordings.owner_id = $2
         returning recordings.id
       `,
-      [recordingId, ownerId, hasTitle, title, hasMeetingType, meetingType],
+      [recordingId, ownerId, hasTitle, title, hasMeetingType, meetingType, hasAsrHints, asrHints],
     );
 
     if (result.rowCount === 0) {

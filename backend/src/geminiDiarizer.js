@@ -62,7 +62,11 @@ function mergeGeminiSegments(segments) {
  * model. Returns null (instead of throwing) on any failure, so callers can
  * fall back to the plain OpenRouter ASR + text-based speaker split.
  */
-async function requestGeminiSegments(mp3Buffer, apiKey, model) {
+async function requestGeminiSegments(mp3Buffer, apiKey, model, hints = '') {
+  // US-2.3: известные имена/термины помогают модели верно подписать спикеров.
+  const systemPrompt = hints
+    ? `${SYSTEM_PROMPT} Известные имена и термины этой встречи (пиши их правильно): ${hints}.`
+    : SYSTEM_PROMPT;
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -75,7 +79,7 @@ async function requestGeminiSegments(mp3Buffer, apiKey, model) {
       model,
       response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: systemPrompt },
         {
           role: 'user',
           content: [
@@ -115,16 +119,17 @@ export async function transcribeWithGeminiAudio(file, audioBuffer, config = {}) 
   }
 
   const model = config.geminiModel || 'google/gemini-2.5-pro';
+  const hints = config.hints || '';
 
   try {
     const mp3Buffer = await convertToMp3(file, audioBuffer);
     let rawSegments;
 
     try {
-      rawSegments = await requestGeminiSegments(mp3Buffer, apiKey, model);
+      rawSegments = await requestGeminiSegments(mp3Buffer, apiKey, model, hints);
     } catch (error) {
       console.warn(`Gemini audio request attempt 1 failed (${error.message}), retrying once`);
-      rawSegments = await requestGeminiSegments(mp3Buffer, apiKey, model);
+      rawSegments = await requestGeminiSegments(mp3Buffer, apiKey, model, hints);
     }
 
     const segments = mergeGeminiSegments(rawSegments);

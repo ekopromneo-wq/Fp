@@ -42,7 +42,7 @@ function mergeShopotSegments(segments) {
   return merged;
 }
 
-async function submitShopotJob(file, audioBuffer, apiKey) {
+async function submitShopotJob(file, audioBuffer, apiKey, hints) {
   const formData = new FormData();
   formData.append(
     'file',
@@ -51,6 +51,11 @@ async function submitShopotJob(file, audioBuffer, apiKey) {
   );
   formData.append('language', process.env.SHOPOT_LANGUAGE || 'ru');
   formData.append('disable_diarization', 'false');
+  // US-2.3: best-effort подсказка терминов. Поле не документировано у Shopot —
+  // если сервис его не примет, вызывающий повторит отправку без него (см. ниже).
+  if (hints) {
+    formData.append('prompt', hints);
+  }
 
   const response = await fetch(`${SHOPOT_API_URL}/v1/transcribe`, {
     method: 'POST',
@@ -146,7 +151,19 @@ async function transcribeWithShopot(file, audioBuffer, config = {}) {
   }
 
   try {
-    const taskId = await submitShopotJob(file, audioBuffer, apiKey);
+    const hints = config.hints || '';
+    let taskId;
+    try {
+      taskId = await submitShopotJob(file, audioBuffer, apiKey, hints);
+    } catch (submitError) {
+      // Подсказка могла не понравиться API — повторяем без неё, чтобы не терять
+      // саму расшифровку из-за необязательного поля.
+      if (!hints) {
+        throw submitError;
+      }
+      console.warn('Shopot submit with hints failed, retrying without prompt field:', submitError.message);
+      taskId = await submitShopotJob(file, audioBuffer, apiKey, '');
+    }
     console.log(`Submitted Shopot transcription task ${taskId}`);
 
     const result = await pollShopotJob(taskId, apiKey);

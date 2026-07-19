@@ -97,7 +97,7 @@ function App() {
     participant: '',
     hasTasks: '',
   });
-  const [recordingDraft, setRecordingDraft] = useState({ title: '', projectIds: [], meetingType: 'meeting' });
+  const [recordingDraft, setRecordingDraft] = useState({ title: '', projectIds: [], meetingType: 'meeting', asrHints: '' });
   const [meetingBotDraft, setMeetingBotDraft] = useState({ meetingUrl: '', title: '' });
   const [isJoiningMeeting, setIsJoiningMeeting] = useState(false);
   const [isStoppingMeetingBot, setIsStoppingMeetingBot] = useState(false);
@@ -623,8 +623,15 @@ function App() {
       title: selectedRecording?.title || '',
       projectIds: selectedProjectIds,
       meetingType: selectedRecording?.meetingType || 'meeting',
+      asrHints: selectedRecording?.asrHints || '',
     });
-  }, [selectedRecording?.id, selectedRecording?.title, selectedProjectIds.join(','), selectedRecording?.meetingType]);
+  }, [
+    selectedRecording?.id,
+    selectedRecording?.title,
+    selectedProjectIds.join(','),
+    selectedRecording?.meetingType,
+    selectedRecording?.asrHints,
+  ]);
 
 
   // Переход к встрече из сводки проекта или результатов поиска задач.
@@ -707,6 +714,7 @@ function App() {
           title: recordingDraft.title,
           projectIds: recordingDraft.projectIds,
           meetingType: recordingDraft.meetingType,
+          asrHints: recordingDraft.asrHints,
         }),
       });
       const data = await response.json();

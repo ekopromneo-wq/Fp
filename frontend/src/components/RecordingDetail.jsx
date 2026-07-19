@@ -295,6 +295,19 @@ function RecordingDetail({
           </select>
         </label>
 
+        {/* US-2.3: известные имена/термины до обработки — подсказки для ASR.
+            Задавать имеет смысл до расшифровки; после — применятся при повторной. */}
+        <label>
+          Известные имена и термины
+          <textarea
+            rows={2}
+            placeholder="Например: Иванов, ООО «Ромашка», API, CRM — через запятую"
+            value={recordingDraft.asrHints || ''}
+            onChange={(event) => setRecordingDraft((current) => ({ ...current, asrHints: event.target.value }))}
+          />
+          <span className="field-hint">Помогает точнее распознать имена, аббревиатуры и термины. Применяется при обработке.</span>
+        </label>
+
         {/* US-16.4: метка «конфиденциально» и запрет скачивания — рядом с
             остальными свойствами записи, а не отдельной плавающей рамкой. */}
         <div className="recording-protection-inline">
