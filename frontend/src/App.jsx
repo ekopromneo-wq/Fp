@@ -141,6 +141,11 @@ function App() {
   const hiddenHomeBlocks = useUiStore((state) => state.hiddenHomeBlocks);
   const toggleHomeBlock = useUiStore((state) => state.toggleHomeBlock);
   const setMicDeviceId = useUiStore((state) => state.setMicDeviceId);
+  // US-3.4: запрет выгрузки по мобильной сети + ручная синхронизация.
+  const blockMobileUpload = useUiStore((state) => state.blockMobileUpload);
+  const setBlockMobileUpload = useUiStore((state) => state.setBlockMobileUpload);
+  const [unsyncedCount, setUnsyncedCount] = useState(0);
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
 
   const {
     isMicRecording,
@@ -515,9 +520,7 @@ function App() {
           }
         })
         .catch(() => {});
-      processQueue(apiFetch, syncCallbacks).catch((error) => {
-        console.error('processQueue failed', error);
-      });
+      runSync();
     }
 
     function handleOffline() {
@@ -830,10 +833,19 @@ function App() {
   }
 
   function handleSyncSuccess(localId, serverRecording) {
-    setRecordings((current) => current.map((recording) => (recording.id === localId ? serverRecording : recording)));
+    // US-3.2: «две галочки — отправлено» показываем ненадолго, затем карточка
+    // выглядит как обычная синхронизированная запись (без пилюли).
+    const justSynced = { ...serverRecording, syncState: 'synced' };
+    setRecordings((current) => current.map((recording) => (recording.id === localId ? justSynced : recording)));
     setSelectedRecordingId((current) => (current === localId ? serverRecording.id : current));
-    setSelectedRecording((current) => (current?.id === localId ? serverRecording : current));
+    setSelectedRecording((current) => (current?.id === localId ? justSynced : current));
     cacheRecordingDetail(serverRecording);
+    refreshUnsyncedCount();
+
+    setTimeout(() => {
+      setRecordings((current) => current.map((recording) => (recording.id === serverRecording.id ? serverRecording : recording)));
+      setSelectedRecording((current) => (current?.id === serverRecording.id ? serverRecording : current));
+    }, 4000);
 
     if (serverRecording.duplicateOf) {
       promptDuplicate(serverRecording);
@@ -854,7 +866,44 @@ function App() {
     onItemChange: handleSyncItemChange,
     onSynced: handleSyncSuccess,
     onFailed: handleSyncFailure,
+    onMeteredSkip: () => setStatus('Выгрузка отложена — вы в мобильной сети. Нажмите «Синхронизировать», чтобы отправить сейчас.'),
   };
+
+  async function refreshUnsyncedCount() {
+    try {
+      const items = await getQueueSnapshot();
+      setUnsyncedCount(items.length);
+    } catch {
+      // Снимок очереди — вспомогательный счётчик, его сбой не критичен.
+    }
+  }
+
+  // US-3.4: единая точка запуска синхронизации. Авто-вызовы уважают запрет
+  // мобильной сети; ручной (force) — заливает несмотря на неё.
+  function runSync(options = {}) {
+    // Читаем флаг из стора напрямую: часть вызовов живёт в once-эффектах, где
+    // замкнутое значение из пропса устарело бы.
+    const blockMetered = useUiStore.getState().blockMobileUpload;
+    return processQueue(apiFetch, syncCallbacks, { blockMobileUpload: blockMetered, ...options })
+      .catch((error) => console.error('processQueue failed', error))
+      .finally(() => refreshUnsyncedCount());
+  }
+
+  async function handleManualSync() {
+    setIsManualSyncing(true);
+    setStatus('Синхронизируем...');
+
+    try {
+      await runSync({ force: true });
+      setStatus('Синхронизация завершена');
+    } finally {
+      setIsManualSyncing(false);
+    }
+  }
+
+  useEffect(() => {
+    refreshUnsyncedCount();
+  }, [currentUser?.id]);
 
   async function uploadRecordingFile(file, source = 'frontend-upload') {
     setIsUploading(true);
@@ -874,9 +923,7 @@ function App() {
       // The recording is already safe in IndexedDB regardless of how long
       // sync takes, so this deliberately isn't awaited - the UI shouldn't
       // block on the network round-trip.
-      processQueue(apiFetch, syncCallbacks).catch((error) => {
-        console.error('processQueue failed', error);
-      });
+      runSync();
     } catch (error) {
       setStatus(error.message || 'Не удалось сохранить запись');
     } finally {
@@ -1468,6 +1515,35 @@ function App() {
               {trashMode ? '← В библиотеку' : 'Корзина'}
             </button>
           </section>
+
+          {/* US-3.2/US-3.4: несинхронизированные записи + ручной запуск синхры и
+              запрет выгрузки по мобильной сети. Панель видна, только когда есть
+              что отправлять. */}
+          {unsyncedCount > 0 && !trashMode ? (
+            <section className="sync-bar" aria-label="Синхронизация">
+              <span className="sync-bar-count">
+                Несинхронизированных записей: <strong>{unsyncedCount}</strong>
+              </span>
+              <div className="sync-bar-actions">
+                <label className="settings-toggle sync-bar-toggle">
+                  <input
+                    type="checkbox"
+                    checked={blockMobileUpload}
+                    onChange={(event) => setBlockMobileUpload(event.target.checked)}
+                  />
+                  Не выгружать по мобильной сети
+                </label>
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  onClick={handleManualSync}
+                  disabled={isManualSyncing || !isOnline}
+                >
+                  {isManualSyncing ? 'Синхронизируем...' : 'Синхронизировать'}
+                </button>
+              </div>
+            </section>
+          ) : null}
 
           <section className="workspace" aria-label="Рабочая область записей">
             <section className="recording-list" aria-label="Список записей">

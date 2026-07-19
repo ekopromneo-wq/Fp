@@ -8,8 +8,17 @@ import useSwipeAction from '../hooks/useSwipeAction.js';
 // never collide. Absent/'synced' renders nothing, matching how an already-
 // synced recording looks today (zero visual diff for the common case).
 function SyncPill({ syncState, syncProgress, syncError }) {
-  if (!syncState || syncState === 'synced') {
+  if (!syncState) {
     return null;
+  }
+
+  // US-3.2: две галочки = отправлено в облако (показываем ненадолго после синка).
+  if (syncState === 'synced') {
+    return (
+      <span className="sync-pill sync-synced" title="Отправлено в облако">
+        ✓✓ отправлено
+      </span>
+    );
   }
 
   if (syncState === 'local-pending') {

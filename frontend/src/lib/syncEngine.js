@@ -7,6 +7,20 @@ function generateLocalId() {
   return `local-${crypto.randomUUID()}`;
 }
 
+// US-3.4: мобильная сеть определяется по Network Information API. Надёжного
+// сигнала «это сотовая сеть» в вебе нет: type='cellular' отдают не все
+// браузеры, поэтому дополнительно считаем метку saveData («экономия трафика»)
+// признаком, что выгрузку лучше придержать. Если API недоступен — не блокируем.
+export function isMeteredConnection() {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+
+  if (!connection) {
+    return false;
+  }
+
+  return connection.type === 'cellular' || Boolean(connection.saveData);
+}
+
 /**
  * Shapes a writeQueue row into something RecordingCard/App.jsx can render
  * exactly like a real recording - id: localId means every existing
@@ -141,8 +155,15 @@ async function syncOneItem(apiFetch, item, callbacks) {
  * click) - a concurrent call is a no-op, and a previously-failed item is
  * retried automatically just by being included in the next run.
  */
-export async function processQueue(apiFetch, callbacks = {}) {
+export async function processQueue(apiFetch, callbacks = {}, options = {}) {
   if (isProcessing || !navigator.onLine) {
+    return;
+  }
+
+  // US-3.4: авто-синхронизация уважает запрет выгрузки по мобильной сети;
+  // ручной запуск передаёт force=true и заливает несмотря на сеть.
+  if (!options.force && options.blockMobileUpload && isMeteredConnection()) {
+    callbacks.onMeteredSkip?.();
     return;
   }
 

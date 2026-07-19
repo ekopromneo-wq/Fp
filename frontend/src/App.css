@@ -1048,6 +1048,37 @@ h3 {
   background: rgba(248, 113, 113, 0.14);
 }
 
+.sync-synced {
+  color: var(--accent-success, #34d399);
+  background: rgba(52, 211, 153, 0.14);
+}
+
+/* US-3.2/US-3.4: панель несинхронизированных записей. */
+.sync-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.28));
+  border-radius: 12px;
+  background: var(--bg-elevated, rgba(148, 163, 184, 0.08));
+  font-size: 0.86rem;
+}
+
+.sync-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.sync-bar-toggle {
+  font-size: 0.82rem;
+}
+
 .recording-meta {
   display: flex;
   flex-wrap: wrap;
