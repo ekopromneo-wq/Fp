@@ -657,6 +657,17 @@ const migrations = [
       create index if not exists analytics_events_recording_idx on analytics_events(recording_id) where recording_id is not null;
     `,
   },
+  {
+    id: '032_recording_content_hash',
+    sql: `
+      -- US-2.2: обнаружение дублей загрузки. content_hash — SHA-256 аудио,
+      -- считается при завершении загрузки; частичный индекс по (owner_id, hash)
+      -- ускоряет поиск «этот же файл уже был у пользователя».
+      alter table recordings add column if not exists content_hash text;
+      create index if not exists recordings_owner_content_hash_idx
+        on recordings(owner_id, content_hash) where content_hash is not null;
+    `,
+  },
 ];
 
 export async function runMigrations() {

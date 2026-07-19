@@ -786,11 +786,50 @@ function App() {
     );
   }
 
+  // US-2.2: сервер распознал, что этот же файл уже загружен. Даём выбор
+  // «оставить обе / удалить дубль» — загрузку не откатываем автоматически.
+  async function promptDuplicate(serverRecording) {
+    const dup = serverRecording.duplicateOf;
+
+    if (!dup) {
+      return;
+    }
+
+    const removeThis = window.confirm(
+      `Похоже, этот файл уже загружен как «${dup.title || 'другая встреча'}». Удалить эту копию? (Отмена — оставить обе.)`,
+    );
+
+    if (!removeThis) {
+      setStatus('Оставили обе записи');
+      return;
+    }
+
+    try {
+      const response = await apiFetch(`/api/recordings/${serverRecording.id}`, { method: 'DELETE' });
+
+      if (!response.ok) {
+        throw new Error('Не удалось удалить дубль');
+      }
+
+      const nextSelectedId = selectedRecordingId === serverRecording.id ? dup.id : selectedRecordingId;
+      setSelectedRecordingId(nextSelectedId);
+      setSelectedRecording((current) => (current?.id === serverRecording.id ? null : current));
+      await loadRecordings(nextSelectedId);
+      setStatus('Дубль удалён');
+    } catch (error) {
+      setStatus(error.message || 'Не удалось удалить дубль');
+    }
+  }
+
   function handleSyncSuccess(localId, serverRecording) {
     setRecordings((current) => current.map((recording) => (recording.id === localId ? serverRecording : recording)));
     setSelectedRecordingId((current) => (current === localId ? serverRecording.id : current));
     setSelectedRecording((current) => (current?.id === localId ? serverRecording : current));
     cacheRecordingDetail(serverRecording);
+
+    if (serverRecording.duplicateOf) {
+      promptDuplicate(serverRecording);
+    }
   }
 
   function handleSyncFailure(localId, updatedQueueItem) {

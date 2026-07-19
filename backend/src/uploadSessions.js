@@ -1,5 +1,6 @@
 import { mkdir, rm, stat, writeFile, appendFile } from 'node:fs/promises';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, createReadStream } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { query } from './db.js';
@@ -40,6 +41,14 @@ function mapSession(row) {
 
 async function ensureStagingDir() {
   await mkdir(STAGING_DIR, { recursive: true });
+}
+
+// US-2.2: SHA-256 файла потоком (без чтения всего в память) — основа поиска
+// дублей загрузки.
+async function hashFilePath(filePath) {
+  const hash = createHash('sha256');
+  await pipeline(createReadStream(filePath), hash);
+  return hash.digest('hex');
 }
 
 async function findSessionRow(recordingId) {
@@ -265,11 +274,29 @@ export async function completeUploadSession(recordingId, ownerId) {
       },
       ownerId,
     );
+
+    // US-2.2: считаем хэш содержимого и ищем такой же файл у пользователя.
+    // Загрузку не блокируем — просто сообщаем FE о дубле, чтобы пользователь сам
+    // выбрал «оставить оба» или удалить лишнюю встречу.
+    const contentHash = await hashFilePath(session.staging_path);
+    const duplicate = await query(
+      `select id, title from recordings
+       where owner_id = $1 and content_hash = $2 and id <> $3 and deleted_at is null
+       order by created_at asc limit 1`,
+      [ownerId, contentHash, recordingId],
+    );
+    await query('update recordings set content_hash = $1 where id = $2', [contentHash, recordingId]);
+
     // The upload conveyor is meant to run end-to-end without a manual
     // "Запустить обработку" click (US-4.1/4.2) - the meeting-bot recording
     // path already auto-enqueues itself (see recordings.js), this is the
     // equivalent trigger for the mic/file-picker upload path.
     await enqueueRecording(recordingId, ownerId);
+
+    if (duplicate.rowCount) {
+      recording.duplicateOf = { id: duplicate.rows[0].id, title: duplicate.rows[0].title };
+    }
+
     return recording;
   } finally {
     await deleteSessionRow(session);
