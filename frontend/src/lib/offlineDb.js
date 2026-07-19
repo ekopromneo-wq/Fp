@@ -1,7 +1,9 @@
 import { openDB } from 'idb';
 
 const DB_NAME = 'voxmate';
-const DB_VERSION = 1;
+// v2: добавлен стор liveChunks для US-1.8 — чанки идущей записи сбрасываются
+// в него по ходу дела, чтобы пережить разряд/крэш вкладки до нажатия «Стоп».
+const DB_VERSION = 2;
 
 let dbPromise = null;
 
@@ -26,6 +28,13 @@ function getDb() {
 
         if (!db.objectStoreNames.contains('meta')) {
           db.createObjectStore('meta', { keyPath: 'key' });
+        }
+
+        // US-1.8: append-only чанки активной записи. Ключ autoIncrement сохраняет
+        // порядок вставки, индекс by-session позволяет собрать/очистить одну сессию.
+        if (!db.objectStoreNames.contains('liveChunks')) {
+          const liveChunks = db.createObjectStore('liveChunks', { keyPath: 'seq', autoIncrement: true });
+          liveChunks.createIndex('by-session', 'sessionId');
         }
       },
     });
@@ -124,6 +133,51 @@ export async function deleteQueueItem(localId) {
 export async function clearOfflineCache() {
   const db = await getDb();
   await Promise.all(
-    ['recordings', 'projects', 'writeQueue', 'meta'].map((storeName) => db.clear(storeName)),
+    ['recordings', 'projects', 'writeQueue', 'meta', 'liveChunks'].map((storeName) => db.clear(storeName)),
   );
+}
+
+// --- US-1.8: живая запись, устойчивая к разряду/крэшу ------------------------
+
+// Открывает новую сессию записи: сносит остатки прошлых сессий (страховка от
+// незакрытой аварийной) и запоминает метаданные для последующей сборки файла.
+export async function startLiveRecordingSession(session) {
+  if (!session?.sessionId) {
+    return;
+  }
+
+  const db = await getDb();
+  await db.clear('liveChunks');
+  await db.put('meta', { key: 'activeRecording', value: session });
+}
+
+// Дописывает один чанк идущей записи. Fire-and-forget из ondataavailable —
+// потеря одного чанка не должна ронять саму запись, поэтому без throw наружу.
+export async function appendLiveRecordingChunk(sessionId, blob) {
+  if (!sessionId || !blob?.size) {
+    return;
+  }
+
+  const db = await getDb();
+  await db.add('liveChunks', { sessionId, blob });
+}
+
+export async function getActiveRecordingSession() {
+  const db = await getDb();
+  const row = await db.get('meta', 'activeRecording');
+  return row?.value || null;
+}
+
+export async function getLiveRecordingChunks(sessionId) {
+  const db = await getDb();
+  const rows = await db.getAllFromIndex('liveChunks', 'by-session', sessionId);
+  return rows.map((row) => row.blob).filter(Boolean);
+}
+
+// Закрывает сессию: удаляет дескриптор и все её чанки. Вызывается и после
+// нормального «Стоп» (файл уже в очереди отправки), и после восстановления.
+export async function clearLiveRecordingSession() {
+  const db = await getDb();
+  await db.delete('meta', 'activeRecording');
+  await db.clear('liveChunks');
 }

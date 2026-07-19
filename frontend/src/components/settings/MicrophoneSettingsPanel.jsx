@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import useUiStore from '../../store/uiStore.js';
 
 export default function MicrophoneSettingsPanel({ micDeviceId, setMicDeviceId }) {
+  const startSoundEnabled = useUiStore((state) => state.startSoundEnabled);
+  const setStartSoundEnabled = useUiStore((state) => state.setStartSoundEnabled);
   const [devices, setDevices] = useState([]);
   const [isTesting, setIsTesting] = useState(false);
   const [testLevel, setTestLevel] = useState(0);
@@ -131,6 +134,15 @@ export default function MicrophoneSettingsPanel({ micDeviceId, setMicDeviceId })
         </div>
 
         {testError ? <p className="settings-note mic-test-error">{testError}</p> : null}
+
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={startSoundEnabled}
+            onChange={(event) => setStartSoundEnabled(event.target.checked)}
+          />
+          Звуковой сигнал в начале записи
+        </label>
       </div>
 
       <p className="settings-note">

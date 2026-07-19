@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import Topbar from './components/Topbar.jsx';
 import BottomNav from './components/BottomNav.jsx';
@@ -44,8 +44,17 @@ import {
   cacheProjects,
   offlineProjects,
 } from './lib/recordingsRepo.js';
-import { clearOfflineCache, putCachedCurrentUser, getCachedCurrentUser, getQueueItem } from './lib/offlineDb.js';
+import {
+  clearOfflineCache,
+  putCachedCurrentUser,
+  getCachedCurrentUser,
+  getQueueItem,
+  getActiveRecordingSession,
+  getLiveRecordingChunks,
+  clearLiveRecordingSession,
+} from './lib/offlineDb.js';
 import { enqueueRecording, processQueue, getQueueSnapshot, toSyntheticRecording } from './lib/syncEngine.js';
+import { uploadBlobInChunks } from './lib/chunkedUploader.js';
 
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -839,6 +848,96 @@ function App() {
     await uploadRecordingFile(file);
   }
 
+  // US-1.5: дозапись фрагмента к уже существующей (серверной) встрече. Грузим
+  // файл в ту же встречу через чанковую сессию — бэкенд склеит его с текущим
+  // аудио и пересоберёт протокол. Онлайн-действие поверх серверной записи,
+  // поэтому мимо офлайн-очереди (у синтетической записи и аудио-то ещё нет).
+  const [isAppendingFragment, setIsAppendingFragment] = useState(false);
+  async function handleAppendFragment(recording, file) {
+    if (!recording || !file || isAppendingFragment) {
+      return;
+    }
+
+    setIsAppendingFragment(true);
+    setStatus(`Добавляем фрагмент к «${recording.title || 'встрече'}»...`);
+
+    try {
+      const sessionResponse = await apiFetch(`/api/recordings/${recording.id}/upload-session`, {
+        method: 'POST',
+        body: JSON.stringify({
+          originalFilename: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          totalSizeBytes: file.size,
+        }),
+      });
+      const sessionData = await sessionResponse.json();
+
+      if (!sessionResponse.ok) {
+        throw new Error(sessionData.error || 'Не удалось начать загрузку фрагмента');
+      }
+
+      const chunkSizeBytes = sessionData.session?.chunkSizeBytes || 5 * 1024 * 1024;
+      const startOffset = sessionData.session?.bytesReceived || 0;
+      await uploadBlobInChunks(apiFetch, recording.id, file, { chunkSizeBytes, startOffset });
+
+      const completeResponse = await apiFetch(`/api/recordings/${recording.id}/upload-session/complete`, {
+        method: 'POST',
+      });
+      const completeData = await completeResponse.json();
+
+      if (!completeResponse.ok) {
+        throw new Error(completeData.error || 'Не удалось объединить фрагмент со встречей');
+      }
+
+      setStatus('Фрагмент добавлен — встреча пересобрана и обрабатывается');
+      await loadRecordings(recording.id);
+    } catch (error) {
+      setStatus(error.message || 'Не удалось добавить фрагмент');
+    } finally {
+      setIsAppendingFragment(false);
+    }
+  }
+
+  // US-1.8: восстановление записи, оборвавшейся до «Стоп» (разряд, крэш вкладки,
+  // случайное обновление страницы). Чанки лежат в IndexedDB — собираем файл и
+  // ставим в ту же очередь отправки. Один раз за сессию, после появления юзера
+  // (иначе processQueue не пройдёт авторизацию на сервере).
+  const recoveryDoneRef = useRef(false);
+  useEffect(() => {
+    if (!currentUser || recoveryDoneRef.current) {
+      return;
+    }
+
+    recoveryDoneRef.current = true;
+
+    (async () => {
+      try {
+        const session = await getActiveRecordingSession();
+
+        if (!session?.sessionId) {
+          return;
+        }
+
+        const chunks = await getLiveRecordingChunks(session.sessionId);
+        await clearLiveRecordingSession();
+
+        if (!chunks.length) {
+          return;
+        }
+
+        const mimeType = session.mimeType || 'audio/webm';
+        const file = new File([new Blob(chunks, { type: mimeType })], session.filename || 'recovered-recording.webm', {
+          type: mimeType,
+        });
+
+        await uploadRecordingFile(file, session.source || 'frontend-microphone');
+        setStatus('Восстановлена прерванная запись');
+      } catch (error) {
+        console.error('live recording recovery failed', error);
+      }
+    })();
+  }, [currentUser?.id]);
+
   // US-18.1: drag-and-drop файлов на ПК. На телефоне не показываем оверлей —
   // там перетаскивать нечем.
   const [isDragging, setIsDragging] = useState(false);
@@ -1411,6 +1510,8 @@ function App() {
                   onUpdateTranscript={handleUpdateTranscript}
                   onUpdateProtocol={handleUpdateProtocol}
                   onDictate={handleDictateVoiceNote}
+                  onAppendFragment={handleAppendFragment}
+                  isAppendingFragment={isAppendingFragment}
                   setStatus={setStatus}
                   tasks={tasks}
                   speakers={speakers}

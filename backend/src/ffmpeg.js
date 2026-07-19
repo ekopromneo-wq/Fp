@@ -37,6 +37,37 @@ export function runFfmpeg(args) {
 }
 
 /**
+ * US-1.5: склеивает несколько аудиофайлов (возможно разных форматов) в один.
+ * Через concat-фильтр с полным перекодированием в MP3 — единственный надёжный
+ * путь для разнородных кодеков (webm/opus запись + загруженный mp3/m4a/wav):
+ * простая склейка контейнеров на разных кодеках даёт битый файл. MP3 на выходе
+ * принимает и ASR-пайплайн (getAudioFormat → mp3 по умолчанию).
+ */
+export function concatAudioFiles(inputPaths, outputPath) {
+  if (!inputPaths?.length) {
+    return Promise.reject(new Error('concatAudioFiles: no input files'));
+  }
+
+  const inputArgs = inputPaths.flatMap((filePath) => ['-i', filePath]);
+  const filterInputs = inputPaths.map((_, index) => `[${index}:a]`).join('');
+  const filter = `${filterInputs}concat=n=${inputPaths.length}:v=0:a=1[out]`;
+
+  return runFfmpeg([
+    '-y',
+    ...inputArgs,
+    '-filter_complex',
+    filter,
+    '-map',
+    '[out]',
+    '-c:a',
+    'libmp3lame',
+    '-q:a',
+    '4',
+    outputPath,
+  ]);
+}
+
+/**
  * Reads a media file's duration via ffprobe. A failure here (non-zero exit,
  * unparseable output) is also the cheapest reliable "is this file actually a
  * readable media file" check available - callers use it to detect corrupt or

@@ -8,6 +8,9 @@ const useUiStore = create(
       isVoicePanelOpen: false,
       activeSwipeCardId: null,
       micDeviceId: '',
+      // US-1.1: звуковой сигнал в начале записи — по настройке пользователя.
+      // По умолчанию выключен, чтобы старт оставался беззвучным «в один тап».
+      startSoundEnabled: false,
       // US-13.1: «экран настраивается» — скрытые блоки главного экрана.
       hiddenHomeBlocks: [],
 
@@ -16,6 +19,7 @@ const useUiStore = create(
       closeVoicePanel: () => set({ isVoicePanelOpen: false }),
       setActiveSwipeCardId: (id) => set({ activeSwipeCardId: id }),
       setMicDeviceId: (deviceId) => set({ micDeviceId: deviceId }),
+      setStartSoundEnabled: (enabled) => set({ startSoundEnabled: Boolean(enabled) }),
       toggleHomeBlock: (key) =>
         set({
           hiddenHomeBlocks: get().hiddenHomeBlocks.includes(key)
@@ -25,7 +29,12 @@ const useUiStore = create(
     }),
     {
       name: 'voxmate-ui',
-      partialize: (state) => ({ theme: state.theme, micDeviceId: state.micDeviceId, hiddenHomeBlocks: state.hiddenHomeBlocks }),
+      partialize: (state) => ({
+        theme: state.theme,
+        micDeviceId: state.micDeviceId,
+        startSoundEnabled: state.startSoundEnabled,
+        hiddenHomeBlocks: state.hiddenHomeBlocks,
+      }),
     },
   ),
 );

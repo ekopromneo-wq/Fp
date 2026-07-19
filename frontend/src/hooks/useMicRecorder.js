@@ -1,7 +1,49 @@
 import { useEffect, useRef, useState } from 'react';
+import useUiStore from '../store/uiStore.js';
+import { startLiveRecordingSession, appendLiveRecordingChunk, clearLiveRecordingSession } from '../lib/offlineDb.js';
 
 const LOW_LEVEL_THRESHOLD = 0.03;
 const LOW_LEVEL_WARNING_MS = 4000;
+// US-1.8: как часто MediaRecorder отдаёт готовый кусок, чтобы мы сбросили его в
+// IndexedDB. При разряде теряется максимум последний неполный интервал.
+const LIVE_CHUNK_INTERVAL_MS = 5000;
+
+// US-1.1: короткий звуковой сигнал старта записи, по настройке пользователя.
+// Отдельный одноразовый AudioContext (не тот, что у измерителя уровня) — играем
+// в динамик, закрываем сразу после. Вызывается из обработчика клика, поэтому
+// autoplay-политика браузера не мешает. Огибающая с плавным входом/выходом,
+// чтобы тон не «щёлкал».
+function playStartBeep() {
+  if (!useUiStore.getState().startSoundEnabled) {
+    return;
+  }
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioContextClass) {
+    return;
+  }
+
+  try {
+    const ctx = new AudioContextClass();
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+
+    oscillator.type = 'sine';
+    oscillator.frequency.value = 880;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.15, now + 0.02);
+    gain.gain.linearRampToValueAtTime(0, now + 0.16);
+
+    oscillator.connect(gain).connect(ctx.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.18);
+    oscillator.onended = () => ctx.close().catch(() => {});
+  } catch {
+    // Сигнал старта — необязательное украшение; запись работает и без него.
+  }
+}
 
 export default function useMicRecorder(uploadRecordingFile, setStatus, micDeviceId) {
   const mediaRecorderRef = useRef(null);
@@ -16,6 +58,7 @@ export default function useMicRecorder(uploadRecordingFile, setStatus, micDevice
   const wakeLockRef = useRef(null);
   const micLowLevelSinceRef = useRef(null);
   const micLevelLowRef = useRef(false);
+  const micSessionIdRef = useRef(null);
 
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [isMicPaused, setIsMicPaused] = useState(false);
@@ -271,18 +314,26 @@ export default function useMicRecorder(uploadRecordingFile, setStatus, micDevice
       mediaRecorderRef.current = recorder;
       micStartedAtRef.current = new Date();
 
+      // US-1.8: заводим сессию до старта рекордера, чтобы каждый чанк из
+      // ondataavailable сразу оседал в IndexedDB. mimeType/имя фиксируем здесь —
+      // при восстановлении файл собирается ровно с теми же параметрами.
+      const mimeType = recorder.mimeType || options.mimeType || 'audio/webm';
+      const extension = mimeType.includes('ogg') ? 'ogg' : 'webm';
+      const filename = `mic-recording-${micStartedAtRef.current.toISOString().replace(/[:.]/g, '-')}.${extension}`;
+      const sessionId = (crypto.randomUUID?.() || String(Date.now()));
+      micSessionIdRef.current = sessionId;
+      startLiveRecordingSession({ sessionId, mimeType, filename, source: 'frontend-microphone' }).catch(() => {});
+
       recorder.ondataavailable = (event) => {
         if (event.data?.size) {
           micChunksRef.current.push(event.data);
+          // Fire-and-forget: сбой записи в БД не должен прерывать саму запись.
+          appendLiveRecordingChunk(sessionId, event.data).catch(() => {});
         }
       };
 
       recorder.onstop = async () => {
         const chunks = micChunksRef.current;
-        const mimeType = recorder.mimeType || 'audio/webm';
-        const extension = mimeType.includes('ogg') ? 'ogg' : 'webm';
-        const startedAt = micStartedAtRef.current || new Date();
-        const filename = `mic-recording-${startedAt.toISOString().replace(/[:.]/g, '-')}.${extension}`;
 
         stream.getTracks().forEach((track) => track.stop());
         micStreamRef.current = null;
@@ -297,16 +348,24 @@ export default function useMicRecorder(uploadRecordingFile, setStatus, micDevice
         setIsMicPaused(false);
 
         if (!chunks.length) {
+          // Ничего не записалось — восстанавливать нечего, чистим сессию.
+          clearLiveRecordingSession().catch(() => {});
+          micSessionIdRef.current = null;
           setStatus('Микрофонная запись пустая');
           return;
         }
 
         const file = new File([new Blob(chunks, { type: mimeType })], filename, { type: mimeType });
         micChunksRef.current = [];
+        // Файл собран и уходит в очередь отправки — persisted-чанки больше не
+        // нужны, иначе запись «восстановится» повторно при следующем запуске.
+        await clearLiveRecordingSession().catch(() => {});
+        micSessionIdRef.current = null;
         await uploadRecordingFile(file, 'frontend-microphone');
       };
 
-      recorder.start();
+      recorder.start(LIVE_CHUNK_INTERVAL_MS);
+      playStartBeep();
       resetLowLevelWarning();
       startMicLevelMeter(stream);
       startDurationTimer();

@@ -51,6 +51,8 @@ function RecordingDetail({
   onUpdateTranscript,
   onUpdateProtocol,
   onDictate,
+  onAppendFragment,
+  isAppendingFragment,
   setStatus,
   tasks,
   speakers,
@@ -58,6 +60,11 @@ function RecordingDetail({
   onToggleJobsCollapsed,
 }) {
   const [isExportOpen, setIsExportOpen] = useState(false);
+
+  // US-1.5: дозапись фрагмента возможна только у серверной встречи (у неё уже
+  // есть аудио) и когда она не в обработке — иначе воркер читает то же аудио.
+  const canAppendFragment =
+    Boolean(recording.id) && !String(recording.id).startsWith('local-') && !isProcessingStatus(recording.status);
 
   return (
     <>
@@ -150,6 +157,29 @@ function RecordingDetail({
             >
               {cancellingId === recording.id ? 'Отменяем...' : 'Отменить'}
             </button>
+          ) : null}
+          {/* US-1.5: добавить ещё один аудиофайл к встрече — бэкенд склеит его с
+              текущим аудио и пересоберёт единый протокол. */}
+          {canAppendFragment ? (
+            <label
+              className={`button button-secondary${isAppendingFragment ? ' is-disabled' : ''}`}
+              title="Добавить ещё один аудиофайл к этой встрече — он будет склеен, протокол пересоберётся"
+            >
+              {isAppendingFragment ? 'Добавляем...' : 'Добавить фрагмент'}
+              <input
+                type="file"
+                accept="audio/*,video/*"
+                hidden
+                disabled={isAppendingFragment}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (file) {
+                    onAppendFragment(recording, file);
+                  }
+                }}
+              />
+            </label>
           ) : null}
         </div>
 

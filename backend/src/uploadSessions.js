@@ -1,8 +1,16 @@
 import { mkdir, rm, stat, writeFile, appendFile } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { query } from './db.js';
 import { attachRecordingAudioFromPath, enqueueRecording } from './recordings.js';
+import { getRecordingAudioStream, deleteRecordingAudio } from './storage.js';
+import { concatAudioFiles } from './ffmpeg.js';
 import { MAX_UPLOAD_BYTES } from './uploadValidation.js';
+
+// US-1.5: пока встреча в этих статусах, воркер читает её аудио — дозаписывать
+// нельзя (иначе гонка). Дозапись разрешена из uploaded/done/failed.
+const IN_FLIGHT_STATUSES = new Set(['queued', 'processing', 'transcribing', 'summarizing']);
 
 const STAGING_DIR = process.env.UPLOAD_STAGING_DIR || path.join(process.cwd(), 'data', 'upload-staging');
 const DEFAULT_CHUNK_SIZE_BYTES = Number(process.env.UPLOAD_CHUNK_SIZE_BYTES || 5 * 1024 * 1024);
@@ -193,6 +201,54 @@ export async function completeUploadSession(recordingId, ownerId) {
   if (fileSize !== Number(session.total_size_bytes)) {
     await deleteSessionRow(session);
     throw new UploadSessionError('no_session', 'Файл загрузки повреждён — начните заново.');
+  }
+
+  // US-1.5: если у встречи уже есть аудио — этот upload не заменяет его, а
+  // дозаписывает фрагмент: скачиваем существующее аудио, склеиваем со свежим
+  // куском через ffmpeg и пересобираем встречу в один файл (единый протокол).
+  const existing = await query('select storage_key, status from recordings where id = $1', [recordingId]);
+  const existingKey = existing.rows[0]?.storage_key || null;
+
+  if (existingKey) {
+    if (IN_FLIGHT_STATUSES.has(existing.rows[0].status)) {
+      await deleteSessionRow(session);
+      throw new UploadSessionError('busy', 'Встреча ещё обрабатывается — добавьте фрагмент после завершения.');
+    }
+
+    const existingPath = `${session.staging_path}.existing`;
+    const combinedPath = `${session.staging_path}.combined.mp3`;
+
+    try {
+      const audioStream = await getRecordingAudioStream(existingKey);
+
+      if (!audioStream) {
+        throw new UploadSessionError('no_audio', 'Исходное аудио встречи недоступно.');
+      }
+
+      await pipeline(audioStream, createWriteStream(existingPath));
+      await concatAudioFiles([existingPath, session.staging_path], combinedPath);
+      const combinedSize = (await stat(combinedPath)).size;
+
+      const recording = await attachRecordingAudioFromPath(
+        recordingId,
+        combinedPath,
+        { originalFilename: 'combined-recording.mp3', mimeType: 'audio/mpeg', fileSizeBytes: combinedSize },
+        ownerId,
+      );
+
+      // Прежний объект в MinIO осиротел (storage_key уже указывает на склейку).
+      await deleteRecordingAudio(existingKey).catch((error) =>
+        console.error(`Failed to delete pre-append audio ${existingKey}`, error),
+      );
+      // Пересобранную встречу гоним на полную (пере)расшифровку — старый
+      // транскрипт/протокол больше не соответствует объединённому аудио.
+      await enqueueRecording(recordingId, ownerId, { retranscribe: true });
+      return recording;
+    } finally {
+      await rm(existingPath, { force: true }).catch(() => {});
+      await rm(combinedPath, { force: true }).catch(() => {});
+      await deleteSessionRow(session);
+    }
   }
 
   try {
