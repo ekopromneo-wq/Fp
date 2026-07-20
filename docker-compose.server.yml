@@ -93,6 +93,14 @@ services:
       - SHOPOT_API_KEY=${SHOPOT_API_KEY:-}
       - RECORDER_BOT_URL=${RECORDER_BOT_URL:-http://recorder-bot:8100}
       - RECORDER_BOT_INTERNAL_SECRET=${RECORDER_BOT_INTERNAL_SECRET:-}
+      # ADR-033: пилотные фиксированные квоты обработки (сбалансированный пресет).
+      # Дневной cap ≥ 4ч, чтобы 4-часовая встреча не упиралась в лимит.
+      - QUOTA_MONTHLY_MINUTES=${QUOTA_MONTHLY_MINUTES:-1200}
+      - QUOTA_DAILY_MINUTES=${QUOTA_DAILY_MINUTES:-300}
+      - QUOTA_MAX_PARALLEL=${QUOTA_MAX_PARALLEL:-2}
+      - QUOTA_SOFT_RATIO=${QUOTA_SOFT_RATIO:-0.8}
+      - DAILY_BUDGET_CAP_USD=${DAILY_BUDGET_CAP_USD:-75}
+      - MEETING_COST_CEILING_USD=${MEETING_COST_CEILING_USD:-3}
     volumes:
       # Chunked-upload staging must survive `up -d --build` (the standard
       # deploy step) - without this, resumable uploads in progress during a
@@ -153,6 +161,14 @@ services:
       - MS_OAUTH_TENANT=${MS_OAUTH_TENANT:-common}
       - MS_OAUTH_TOKEN_URL=${MS_OAUTH_TOKEN_URL:-}
       - MS_GRAPH_BASE=${MS_GRAPH_BASE:-}
+      # ADR-033: те же квоты, что у api (воркер считает cost-ceiling и
+      # переочередь waiting_quota — ему нужны те же лимиты).
+      - QUOTA_MONTHLY_MINUTES=${QUOTA_MONTHLY_MINUTES:-1200}
+      - QUOTA_DAILY_MINUTES=${QUOTA_DAILY_MINUTES:-300}
+      - QUOTA_MAX_PARALLEL=${QUOTA_MAX_PARALLEL:-2}
+      - QUOTA_SOFT_RATIO=${QUOTA_SOFT_RATIO:-0.8}
+      - DAILY_BUDGET_CAP_USD=${DAILY_BUDGET_CAP_USD:-75}
+      - MEETING_COST_CEILING_USD=${MEETING_COST_CEILING_USD:-3}
     depends_on:
       db:
         condition: service_healthy
