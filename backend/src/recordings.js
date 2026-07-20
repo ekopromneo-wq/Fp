@@ -11,6 +11,7 @@ import {
 } from './auth.js';
 import { query, transaction } from './db.js';
 import { track } from './analytics.js';
+import { checkProcessingQuota, minutesFromSeconds } from './quota.js';
 import { constantTimeEqual } from './oauth.js';
 import { sendRecordingEmail, sendTaskEmail } from './email.js';
 import { sendRecordingTelegram, sendTaskTelegram } from './telegram.js';
@@ -1990,6 +1991,35 @@ export async function getRecordingAudio(id, ownerId, range = null) {
  * протокол из той же стенограммы.
  */
 export async function enqueueRecording(recordingId, ownerId, { retranscribe = false } = {}) {
+  // ADR-033: гейт квоты ДО постановки в очередь. Запись уже сохранена
+  // (offline-first), поэтому при хард-лимите она не теряется — переводим в
+  // 'waiting_quota' и обработку откладываем (гейтится только обработка, не запись).
+  const meta = await query(
+    'select duration_seconds from recordings where id = $1 and owner_id = $2',
+    [recordingId, ownerId],
+  );
+
+  if (meta.rowCount === 0) {
+    return null;
+  }
+
+  const plannedMinutes = minutesFromSeconds(meta.rows[0].duration_seconds);
+  const quota = await checkProcessingQuota(ownerId, plannedMinutes);
+
+  if (quota.decision === 'hard') {
+    await query(
+      "update recordings set status = 'waiting_quota', updated_at = now() where id = $1 and owner_id = $2",
+      [recordingId, ownerId],
+    );
+    track('quota_hard_block', { userId: ownerId, recordingId, props: { reason: quota.reason } });
+    track('processing_waiting_quota', { userId: ownerId, recordingId, props: { reason: quota.reason } });
+    return { waitingQuota: true, reason: quota.reason };
+  }
+
+  if (quota.decision === 'soft') {
+    track('quota_soft_warning', { userId: ownerId, recordingId, props: { reason: quota.reason } });
+  }
+
   const job = await transaction(async (client) => {
     const recording = await client.query('select id from recordings where id = $1 and owner_id = $2', [
       recordingId,
@@ -2633,6 +2663,11 @@ export function registerRecordingRoutes(app) {
 
     if (!job) {
       return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    // ADR-033: обработка заблокирована квотой — запись сохранена, ждёт квоты.
+    if (job.waitingQuota) {
+      return c.json({ waitingQuota: true, reason: job.reason, status: 'waiting_quota' }, 202);
     }
 
     return c.json({ job }, 202);

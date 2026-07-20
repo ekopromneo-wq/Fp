@@ -16,7 +16,12 @@ const useUiStore = create(
       blockMobileUpload: false,
       // US-13.1: «экран настраивается» — скрытые блоки главного экрана.
       hiddenHomeBlocks: [],
+      // ADR-035 §4.3: идёт ли активная запись. Обновление PWA во время записи
+      // откладывается, чтобы не прервать сценарий молчаливой перезагрузкой.
+      // Транзиентный флаг — намеренно не персистится.
+      isRecordingActive: false,
 
+      setRecordingActive: (active) => set({ isRecordingActive: Boolean(active) }),
       toggleTheme: () => set({ theme: get().theme === 'dark' ? 'light' : 'dark' }),
       openVoicePanel: () => set({ isVoicePanelOpen: true }),
       closeVoicePanel: () => set({ isVoicePanelOpen: false }),

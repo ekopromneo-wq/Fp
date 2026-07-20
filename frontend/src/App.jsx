@@ -11,6 +11,7 @@ import SettingsPage from './components/SettingsPage.jsx';
 import LibraryControls from './components/LibraryControls.jsx';
 import RecordingDetail from './components/RecordingDetail.jsx';
 import AuthScreen from './components/AuthScreen.jsx';
+import LinkEmailScreen from './components/LinkEmailScreen.jsx';
 import SharePage from './components/SharePage.jsx';
 import VoicePanel from './components/VoicePanel/VoicePanel.jsx';
 import ConsentDialog from './components/ConsentDialog.jsx';
@@ -74,6 +75,19 @@ function App() {
     return error || '';
   });
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+  // ADR-034: провайдер без пригодного email вернул токен «висящего» линка через
+  // ?link_email=... — показываем экран «подтвердите email». Читаем один раз при
+  // монтировании и чистим адрес.
+  const [linkEmail, setLinkEmail] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('link_email');
+    if (!token) {
+      return null;
+    }
+    window.history.replaceState({}, '', window.location.pathname);
+    return { token, provider: params.get('provider') || '' };
+  });
+  const [linkEmailNeedsPassword, setLinkEmailNeedsPassword] = useState(false);
   const [recordings, setRecordings] = useState([]);
   const [projects, setProjects] = useState([]);
   // Токен читается один раз при монтировании: смена адреса без роутера всё
@@ -256,6 +270,38 @@ function App() {
       setAuthMessage('');
     } catch (error) {
       setAuthMessage(error.message || 'Ошибка авторизации');
+    } finally {
+      setIsAuthSubmitting(false);
+    }
+  }
+
+  // ADR-034: завершение входа через шаг «подтвердите email».
+  async function handleCompleteOauth(input) {
+    setIsAuthSubmitting(true);
+    setAuthMessage('');
+
+    try {
+      const response = await apiFetch('/api/auth/oauth/complete', {
+        method: 'POST',
+        body: JSON.stringify({ token: linkEmail.token, ...input }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        // Занятый email → сервер просит пароль от аккаунта: раскрываем поле.
+        if (data.needsPassword) {
+          setLinkEmailNeedsPassword(true);
+        }
+        throw new Error(data.error || 'Не удалось завершить вход');
+      }
+
+      setCurrentUser(data.user);
+      putCachedCurrentUser(data.user);
+      setLinkEmail(null);
+      setLinkEmailNeedsPassword(false);
+      setAuthMessage('');
+    } catch (error) {
+      setAuthMessage(error.message || 'Не удалось завершить вход');
     } finally {
       setIsAuthSubmitting(false);
     }
@@ -1367,6 +1413,23 @@ function App() {
           <h1>Проверяем вход</h1>
         </section>
       </main>
+    );
+  }
+
+  if (!currentUser && linkEmail) {
+    const providerLabel =
+      linkEmail.provider === 'telegram'
+        ? 'Telegram'
+        : oauthProviders.find((item) => item.provider === linkEmail.provider)?.label || '';
+
+    return (
+      <LinkEmailScreen
+        providerLabel={providerLabel}
+        onSubmit={handleCompleteOauth}
+        isSubmitting={isAuthSubmitting}
+        message={authMessage}
+        needsPassword={linkEmailNeedsPassword}
+      />
     );
   }
 

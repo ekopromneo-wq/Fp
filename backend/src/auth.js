@@ -14,6 +14,7 @@ import {
   exchangeCodeForProfile,
   isProviderEnabled,
   isTelegramLoginEnabled,
+  providerCanRegister,
   redirectUri,
   telegramLoginConfig,
   verifyTelegramLogin,
@@ -291,11 +292,44 @@ function publicSendConfig(config = {}) {
   return normalizeSendConfig(config, config);
 }
 
+// Привязка внешней личности к аккаунту (идемпотентно: повторный вход тем же
+// провайдером обновляет user_id, не плодит строк).
+async function linkOauthIdentity(provider, providerUserId, userId, email) {
+  await query(
+    `insert into oauth_identities (provider, provider_user_id, user_id, email)
+     values ($1, $2, $3, $4)
+     on conflict (provider, provider_user_id) do update set user_id = excluded.user_id`,
+    [provider, String(providerUserId), userId, email],
+  );
+}
+
+// ADR-034: короткоживущий «висящий» линк для шага «подтвердите email». Возвращает
+// токен, который уходит на фронт в редиректе и предъявляется в /oauth/complete.
+async function createPendingOauthLink(provider, profile) {
+  const token = randomBytes(24).toString('base64url');
+  await query("delete from oauth_pending_links where created_at < now() - interval '15 minutes'", []);
+  await query(
+    `insert into oauth_pending_links (token, provider, provider_user_id, provider_name, provider_email)
+     values ($1, $2, $3, $4, $5)`,
+    [
+      token,
+      provider,
+      String(profile.id),
+      profile.name || null,
+      profile.email ? normalizeEmail(profile.email) : null,
+    ],
+  );
+  return token;
+}
+
 /**
- * Находит или создаёт аккаунт по внешней личности (US-16.1). Порядок:
- * 1) уже связанная личность → её аккаунт; 2) совпадение по e-mail (провайдер
- * его подтвердил) → связываем с существующим аккаунтом; 3) иначе новый аккаунт.
- * Так «Совпадение email → тот же аккаунт» из спеки выполняется автоматически.
+ * Находит аккаунт по внешней личности (US-16.1), а при первом входе решает по
+ * ADR-034, можно ли создать аккаунт прямо сейчас. Возвращает статус:
+ *   { status: 'ok', user }              — вход/регистрация состоялись;
+ *   { status: 'registration_closed' }   — новый аккаунт создать нельзя;
+ *   { status: 'needs_email', provider, profile } — нужен шаг «подтвердите email»
+ *      (Telegram/ВК, либо email занят/недоступен) — аккаунт без первичного email
+ *      НЕ создаём.
  */
 async function findOrCreateOauthUser(provider, profile) {
   const existing = await query(
@@ -307,51 +341,50 @@ async function findOrCreateOauthUser(provider, profile) {
 
   if (existing.rowCount) {
     // Вход в уже связанный аккаунт — разрешён всегда (в т.ч. при закрытой регистрации).
-    return mapUser(existing.rows[0]);
+    return { status: 'ok', user: mapUser(existing.rows[0]) };
   }
 
   const email = profile.email ? normalizeEmail(profile.email) : null;
   const emailVerified = Boolean(profile.emailVerified);
-  let user = null;
 
-  // Привязка к СУЩЕСТВУЮЩЕМУ аккаунту — только по ПОДТВЕРЖДЁННОМУ провайдером email.
-  // Иначе провайдер с непроверенным email (или атакующий, задавший чужой email у себя)
-  // получил бы доступ к чужому, в т.ч. парольному, аккаунту.
+  // Авто-привязка к СУЩЕСТВУЮЩЕМУ аккаунту — только по ПОДТВЕРЖДЁННОМУ провайдером
+  // email. Иначе провайдер с непроверенным email (или атакующий, задавший чужой
+  // email у себя) получил бы доступ к чужому, в т.ч. парольному, аккаунту.
   if (email && emailVerified) {
-    const byEmail = await query('select id, display_name, email, created_at, updated_at from app_users where email = $1', [email]);
-    if (byEmail.rowCount) {
-      user = mapUser(byEmail.rows[0]);
-    }
-  }
-
-  if (!user) {
-    // Закрытая регистрация: OAuth не должен само-провижнить новые аккаунты в обход
-    // администратора (иначе любой внешний аккаунт = доступ ко всему PWA).
-    if (!REGISTRATION_ENABLED) {
-      return null;
-    }
-    // email прикрепляем к новому аккаунту только если он подтверждён и ещё не занят
-    // (app_users.email — unique; непроверенным email нельзя «застолбить» чужой адрес).
-    let newEmail = null;
-    if (email && emailVerified) {
-      const taken = await query('select 1 from app_users where email = $1', [email]);
-      newEmail = taken.rowCount ? null : email;
-    }
-    const created = await query(
-      'insert into app_users (display_name, email) values ($1, $2) returning id, display_name, email, created_at, updated_at',
-      [profile.name || email || `Пользователь ${provider}`, newEmail],
+    const byEmail = await query(
+      'select id, display_name, email, created_at, updated_at from app_users where email = $1',
+      [email],
     );
-    user = mapUser(created.rows[0]);
+    if (byEmail.rowCount) {
+      const user = mapUser(byEmail.rows[0]);
+      await linkOauthIdentity(provider, profile.id, user.id, email);
+      return { status: 'ok', user };
+    }
   }
 
-  await query(
-    `insert into oauth_identities (provider, provider_user_id, user_id, email)
-     values ($1, $2, $3, $4)
-     on conflict (provider, provider_user_id) do update set user_id = excluded.user_id`,
-    [provider, profile.id, user.id, email],
-  );
+  // ADR-034: прямая регистрация — только через провайдеров с email (Google/
+  // Яндекс/Сбер) и только когда email реально пришёл и ещё не занят. Аккаунт без
+  // первичного email не создаём никогда.
+  if (email && providerCanRegister(provider)) {
+    const taken = await query('select 1 from app_users where email = $1', [email]);
+    if (!taken.rowCount) {
+      if (!REGISTRATION_ENABLED) {
+        return { status: 'registration_closed' };
+      }
+      const created = await query(
+        'insert into app_users (display_name, email) values ($1, $2) returning id, display_name, email, created_at, updated_at',
+        [profile.name || email, email],
+      );
+      const user = mapUser(created.rows[0]);
+      await linkOauthIdentity(provider, profile.id, user.id, email);
+      return { status: 'ok', user };
+    }
+  }
 
-  return user;
+  // Иначе нужен явный email-шаг: Telegram/ВК (email не гарантируют), либо email
+  // занят/непроверен — пусть пользователь введёт email и, при коллизии, докажет
+  // владение существующим аккаунтом паролем (в /oauth/complete).
+  return { status: 'needs_email', provider, profile };
 }
 
 async function createSession(userId, context = {}) {
@@ -503,13 +536,19 @@ export function registerAuthRoutes(app) {
     }
 
     try {
-      const user = await findOrCreateOauthUser('telegram', profile);
+      const result = await findOrCreateOauthUser('telegram', profile);
 
-      if (!user) {
+      if (result.status === 'registration_closed') {
         return c.redirect(`${appUrl}/?auth_error=${encodeURIComponent('Регистрация закрыта — обратитесь к администратору')}`);
       }
 
-      const session = await createSession(user.id, { userAgent: c.req.header('User-Agent') || '', ip: clientIp(c) });
+      // ADR-034: Telegram email не отдаёт — ведём на шаг «подтвердите email».
+      if (result.status === 'needs_email') {
+        const token = await createPendingOauthLink(result.provider, result.profile);
+        return c.redirect(`${appUrl}/?link_email=${encodeURIComponent(token)}&provider=telegram`);
+      }
+
+      const session = await createSession(result.user.id, { userAgent: c.req.header('User-Agent') || '', ip: clientIp(c) });
       c.header('Set-Cookie', session.cookie);
       return c.redirect(`${appUrl}/`);
     } catch (error) {
@@ -561,14 +600,21 @@ export function registerAuthRoutes(app) {
     try {
       const uri = redirectUri(provider, c.req.url);
       const profile = await exchangeCodeForProfile(provider, { code, codeVerifier: stored.rows[0].code_verifier, redirectUri: uri });
-      const user = await findOrCreateOauthUser(provider, profile);
+      const result = await findOrCreateOauthUser(provider, profile);
 
-      if (!user) {
+      if (result.status === 'registration_closed') {
         // Закрытая регистрация: аккаунта нет и создавать нельзя.
         return fail('Регистрация закрыта — обратитесь к администратору');
       }
 
-      const session = await createSession(user.id, { userAgent: c.req.header('User-Agent') || '', ip: clientIp(c) });
+      // ADR-034: провайдер без пригодного email (ВК) или email занят — ведём на
+      // шаг «подтвердите email», аккаунт без первичного email не создаём.
+      if (result.status === 'needs_email') {
+        const token = await createPendingOauthLink(result.provider, result.profile);
+        return c.redirect(`${appUrl}/?link_email=${encodeURIComponent(token)}&provider=${encodeURIComponent(provider)}`);
+      }
+
+      const session = await createSession(result.user.id, { userAgent: c.req.header('User-Agent') || '', ip: clientIp(c) });
 
       c.header('Set-Cookie', session.cookie);
       return c.redirect(`${appUrl}/`);
@@ -576,6 +622,99 @@ export function registerAuthRoutes(app) {
       console.warn(`OAuth ${provider} callback failed: ${error.message}`);
       return fail('Не удалось войти через провайдера');
     }
+  });
+
+  // ADR-034: шаг «подтвердите email». Внешняя личность (Telegram/ВК или email
+  // занят) предъявляет токен висящего линка и вводит email. Модель доверия к
+  // email — та же, что у нативной регистрации (email на входе + уникальность;
+  // отдельной ссылки-подтверждения в системе нет — это общий будущий hardening).
+  // При коллизии email привязка к существующему аккаунту — только по паролю, иначе
+  // любой TG/ВК-вход с чужим email = захват аккаунта.
+  app.post('/api/auth/oauth/complete', async (c) => {
+    if (isRateLimited(`oauth-complete:${clientIp(c)}`, 10, 15 * 60 * 1000)) {
+      return c.json({ error: 'Too many attempts - try again later' }, 429);
+    }
+
+    const body = await c.req.json().catch(() => ({}));
+    const token = typeof body.token === 'string' ? body.token : '';
+    const email = normalizeEmail(body.email);
+    const password = typeof body.password === 'string' ? body.password : '';
+    const displayName = typeof body.displayName === 'string' && body.displayName.trim() ? body.displayName.trim() : '';
+
+    if (!token) {
+      return c.json({ error: 'Сессия входа устарела — начните заново' }, 400);
+    }
+
+    if (!email || !email.includes('@')) {
+      return c.json({ error: 'Укажите корректный email' }, 400);
+    }
+
+    // Забираем линк атомарно (delete-returning), заодно проверяя срок жизни.
+    const pending = await query(
+      `delete from oauth_pending_links
+       where token = $1 and created_at > now() - interval '15 minutes'
+       returning provider, provider_user_id, provider_name`,
+      [token],
+    );
+
+    if (!pending.rowCount) {
+      return c.json({ error: 'Сессия входа устарела — начните заново' }, 400);
+    }
+
+    const { provider, provider_user_id: providerUserId, provider_name: providerName } = pending.rows[0];
+
+    const existing = await query(
+      'select id, display_name, email, password_hash, created_at, updated_at from app_users where email = $1',
+      [email],
+    );
+
+    let user;
+
+    if (existing.rowCount) {
+      const row = existing.rows[0];
+
+      // Привязка к чужому существующему аккаунту — только по доказательству владения.
+      if (!row.password_hash || !verifyPassword(password, row.password_hash)) {
+        return c.json(
+          {
+            error: 'Этот email уже занят. Введите пароль от аккаунта, чтобы привязать вход, либо войдите обычным способом.',
+            needsPassword: true,
+          },
+          401,
+        );
+      }
+
+      user = mapUser(row);
+    } else {
+      if (!REGISTRATION_ENABLED) {
+        return c.json({ error: 'Регистрация закрыта — обратитесь к администратору' }, 403);
+      }
+
+      if (password && password.length < 6) {
+        return c.json({ error: 'Пароль должен быть не короче 6 символов' }, 400);
+      }
+
+      const created = await query(
+        `insert into app_users (display_name, email, password_hash)
+         values ($1, $2, $3)
+         on conflict (email) do nothing
+         returning id, display_name, email, created_at, updated_at`,
+        [displayName || providerName || email.split('@')[0], email, password ? hashPassword(password) : null],
+      );
+
+      // Гонка: тот же email заняли между select и insert — просим войти обычно.
+      if (!created.rowCount) {
+        return c.json({ error: 'Аккаунт с таким email уже существует — войдите' }, 409);
+      }
+
+      user = mapUser(created.rows[0]);
+    }
+
+    await linkOauthIdentity(provider, providerUserId, user.id, email);
+    const session = await createSession(user.id, { userAgent: c.req.header('User-Agent') || '', ip: clientIp(c) });
+
+    c.header('Set-Cookie', session.cookie);
+    return c.json({ user });
   });
 
   app.get('/api/settings/smtp', requireAuth, async (c) => {
