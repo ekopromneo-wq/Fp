@@ -1104,6 +1104,58 @@ h3 {
   background: rgba(251, 146, 60, 0.12);
 }
 
+/* US-15.1: журнал подключений бота-участника. */
+.bot-event-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bot-event {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 0.85rem;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.bot-event-time {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+}
+
+.bot-event-label {
+  flex: 1 1 auto;
+  color: var(--text-primary);
+}
+
+.bot-event-detail {
+  flex: 0 1 auto;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.bot-event-rtc_disconnected .bot-event-label,
+.bot-event-join_failed .bot-event-label,
+.bot-event-ended_error .bot-event-label,
+.bot-event-poll_failed .bot-event-label {
+  color: var(--accent-danger, #f87171);
+}
+
+.bot-event-rtc_reconnected .bot-event-label,
+.bot-event-in_meeting .bot-event-label,
+.bot-event-ingested .bot-event-label {
+  color: var(--accent-success, #4ade80);
+}
+
 /* US-3.2/US-3.4: панель несинхронизированных записей. */
 .sync-bar {
   display: flex;

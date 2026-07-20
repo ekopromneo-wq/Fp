@@ -734,6 +734,27 @@ const migrations = [
         check (status in ('uploaded', 'queued', 'processing', 'transcribing', 'summarizing', 'waiting_quota', 'done', 'failed'));
     `,
   },
+  {
+    id: '036_bot_connection_events',
+    sql: `
+      -- US-15.1: технический журнал подключений бота-участника конференций.
+      -- Неизменяемый append-only лог событий жизненного цикла (запрос входа,
+      -- вход/зал ожидания, разрыв/переподключение WebRTC, конец, остановка).
+      -- Пишут и бэкенд (join/stop/callback/ингест), и сам recorder-bot (отчёты
+      -- из контейнера через internal-эндпоинт).
+      create table if not exists bot_connection_events (
+        id uuid primary key default gen_random_uuid(),
+        recording_id uuid not null references recordings(id) on delete cascade,
+        engine text,
+        platform text,
+        event text not null,
+        detail jsonb not null default '{}',
+        created_at timestamptz not null default now()
+      );
+      create index if not exists bot_connection_events_recording_idx
+        on bot_connection_events(recording_id, created_at);
+    `,
+  },
 ];
 
 export async function runMigrations() {

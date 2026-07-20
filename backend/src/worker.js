@@ -16,6 +16,7 @@ import { transcribeWithSpeech2Text, checkSpeech2TextStatus, fetchSpeech2TextResu
 import { getUserDiarizationConfig } from './auth.js';
 import { summarizeRecording, purgeExpiredTrash, enqueueRecording } from './recordings.js';
 import { track } from './analytics.js';
+import { logBotEvent } from './botLog.js';
 import {
   recordUsage,
   minutesFromSeconds,
@@ -404,6 +405,8 @@ async function ingestCompletedMeeting(recording, statusBody) {
   }
 
   await notifyRecordingEvent(recording.id, recording.owner_id, 'done');
+  // US-15.1: журнал подключений — транскрипт получен и внесён.
+  logBotEvent(recording.id, { engine: 'speech2text', event: 'ingested', detail: { hasSpeech } });
   console.log(`Meeting bot recording ${recording.id} finished (${finalSegmentsCountLabel(statusCode)})`);
 }
 
@@ -422,6 +425,7 @@ async function failMeeting(recording, message) {
   });
 
   await notifyRecordingEvent(recording.id, recording.owner_id, 'failed');
+  logBotEvent(recording.id, { engine: 'speech2text', event: 'poll_failed', detail: { error: message } });
   console.warn(`Meeting bot recording ${recording.id} failed: ${message}`);
 }
 

@@ -8,6 +8,7 @@ import ProtocolView from './ProtocolView.jsx';
 import SendPanel from './SendPanel.jsx';
 import TranscriptView from './TranscriptView.jsx';
 import TranscribingProgress from './TranscribingProgress.jsx';
+import BotConnectionLog from './BotConnectionLog.jsx';
 import { getAudioUrl, isProcessingStatus } from '../lib/api.js';
 import { MEETING_TYPE_OPTIONS } from '../lib/exporters.js';
 import { formatDate, formatFileSize } from '../lib/format.js';
@@ -117,6 +118,12 @@ function RecordingDetail({
             </>
           ) : null}
         </section>
+      ) : null}
+
+      {/* US-15.1: журнал подключений бота — для обоих движков (meeting_bot и
+          самохост recorder_bot). Показывается, только если события есть. */}
+      {recording.source === 'meeting_bot' || recording.source === 'recorder_bot' ? (
+        <BotConnectionLog recordingId={recording.id} status={recording.status} />
       ) : null}
 
       {/* Действия сгруппированы: обработка, протокол, экспорт — вместо стены

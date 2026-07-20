@@ -11,6 +11,7 @@ import {
 } from './auth.js';
 import { query, transaction } from './db.js';
 import { track } from './analytics.js';
+import { logBotEvent, getBotEvents, isKnownBotEvent } from './botLog.js';
 import { checkProcessingQuota, minutesFromSeconds } from './quota.js';
 import { constantTimeEqual } from './oauth.js';
 import { sendRecordingEmail, sendTaskEmail } from './email.js';
@@ -1032,6 +1033,8 @@ export async function createMeetingBotRecording(input, ownerId) {
     [ownerId, title, meetingUrl],
   );
   const recordingId = inserted.rows[0].id;
+  // US-15.1: журнал подключений — запрос входа бота.
+  logBotEvent(recordingId, { engine: 'speech2text', event: 'join_requested' });
 
   try {
     const task = await joinMeeting(
@@ -1057,8 +1060,10 @@ export async function createMeetingBotRecording(input, ownerId) {
         [recordingId, task.id],
       );
     });
+    logBotEvent(recordingId, { engine: 'speech2text', event: 'join_accepted', detail: { taskId: task.id } });
   } catch (error) {
     await query('update recordings set status = $1, updated_at = now() where id = $2', ['failed', recordingId]);
+    logBotEvent(recordingId, { engine: 'speech2text', event: 'join_failed', detail: { error: error.message } });
     throw error;
   }
 
@@ -1096,6 +1101,7 @@ export async function stopMeetingBotRecording(recordingId, ownerId) {
       [recordingId],
     );
   });
+  logBotEvent(recordingId, { engine: 'speech2text', event: 'stopped_by_user' });
 
   return getRecording(recordingId, ownerId);
 }
@@ -1127,6 +1133,8 @@ export async function createSelfHostedMeetingRecording(input, ownerId) {
     [ownerId, title, meetingUrl],
   );
   const recordingId = inserted.rows[0].id;
+  // US-15.1: журнал подключений — запрос входа самохост-бота.
+  logBotEvent(recordingId, { engine: 'self_hosted', platform, event: 'join_requested' });
 
   try {
     const job = await startRecorderJob({
@@ -1148,8 +1156,10 @@ export async function createSelfHostedMeetingRecording(input, ownerId) {
         [recordingId, job.jobId],
       );
     });
+    logBotEvent(recordingId, { engine: 'self_hosted', platform, event: 'join_accepted', detail: { jobId: job.jobId } });
   } catch (error) {
     await query('update recordings set status = $1, updated_at = now() where id = $2', ['failed', recordingId]);
+    logBotEvent(recordingId, { engine: 'self_hosted', platform, event: 'join_failed', detail: { error: error.message } });
     throw error;
   }
 
@@ -1168,6 +1178,7 @@ export async function stopSelfHostedMeetingRecording(recordingId, ownerId) {
   }
 
   await stopRecorderJob(jobId);
+  logBotEvent(recordingId, { engine: 'self_hosted', event: 'stopped_by_user' });
 
   return getRecording(recordingId, ownerId);
 }
@@ -1185,6 +1196,12 @@ export async function completeSelfHostedMeetingRecording(recordingId, file, erro
     return null;
   }
 
+  logBotEvent(recordingId, {
+    engine: 'self_hosted',
+    event: 'callback_received',
+    detail: { hasFile: Boolean(file), error: errorMessage || null },
+  });
+
   if (errorMessage || !file) {
     await transaction(async (client) => {
       await client.query('update recordings set status = $1, updated_at = now() where id = $2', ['failed', recordingId]);
@@ -1197,6 +1214,7 @@ export async function completeSelfHostedMeetingRecording(recordingId, file, erro
         [errorMessage || 'Recorder-bot did not return an audio file', recordingId],
       );
     });
+    logBotEvent(recordingId, { engine: 'self_hosted', event: 'ended_error', detail: { error: errorMessage || 'no audio file' } });
 
     return getRecording(recordingId, ownerId);
   }
@@ -2513,6 +2531,44 @@ export function registerRecordingRoutes(app) {
     }
 
     return c.json({ recording });
+  });
+
+  // US-15.1: recorder-bot из контейнера отчитывается о событиях подключения
+  // (joining/waiting_room/in_meeting/rtc_disconnected/rtc_reconnected/ended).
+  // Тот же internal-secret, что и у callback (constant-time).
+  app.post('/api/internal/recorder-bot/event', async (c) => {
+    const secret = c.req.header('X-Internal-Secret') || '';
+
+    if (!process.env.RECORDER_BOT_INTERNAL_SECRET || !constantTimeEqual(secret, process.env.RECORDER_BOT_INTERNAL_SECRET)) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const body = await c.req.json().catch(() => ({}));
+
+    if (!body.recordingId || !isKnownBotEvent(body.event)) {
+      return c.json({ error: 'recordingId and a known event are required' }, 400);
+    }
+
+    await logBotEvent(body.recordingId, {
+      engine: 'self_hosted',
+      platform: typeof body.platform === 'string' ? body.platform : null,
+      event: body.event,
+      detail: body.detail && typeof body.detail === 'object' ? body.detail : {},
+    });
+
+    return c.json({ ok: true });
+  });
+
+  // US-15.1: журнал подключений бота для владельца записи.
+  app.get('/api/recordings/:id/bot-events', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const recording = await getRecording(c.req.param('id'), user.id);
+
+    if (!recording) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    return c.json({ events: await getBotEvents(c.req.param('id')) });
   });
 
   app.get('/api/recordings/:id', requireAuth, async (c) => {

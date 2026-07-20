@@ -1,7 +1,7 @@
 import { chromium } from 'playwright';
 import { startCapture } from './audioCapture.js';
 import { getPlatformAdapter } from './platforms/index.js';
-import { sendCallback } from './callback.js';
+import { sendCallback, sendEvent } from './callback.js';
 import { waitForMeetingEnd } from './endDetection.js';
 import { installWebrtcMonitor } from './webrtcMonitor.js';
 
@@ -49,8 +49,15 @@ async function runJob({ jobId, recordingId, meetingUrl, botName, adapter, signal
   let browser = null;
   let capture = null;
 
+  // US-15.1: отчёт о событии подключения в журнал бэкенда (fire-and-forget).
+  const report = (event, detail = {}) =>
+    sendEvent({ recordingId, event, detail }).catch((error) =>
+      console.warn(`[job ${jobId}] event report "${event}" failed:`, error.message),
+    );
+
   try {
     currentJob.status = 'joining';
+    report('joining');
     browser = await chromium.launch({
       // Playwright mutes audio by default (--mute-audio) to keep CI runs
       // quiet - we need real call audio to reach our PulseAudio sink, so it
@@ -71,8 +78,16 @@ async function runJob({ jobId, recordingId, meetingUrl, botName, adapter, signal
 
     await installWebrtcMonitor(page, (state) => {
       if (state === 'disconnected' || state === 'failed' || state === 'closed') {
+        // Первый переход в разрыв — фиксируем событие (не спамим на каждый тик).
+        if (!rtcState.disconnectedSince) {
+          report('rtc_disconnected', { state });
+        }
         rtcState.disconnectedSince ||= Date.now();
       } else {
+        // Восстановление после ранее зафиксированного разрыва.
+        if (rtcState.disconnectedSince) {
+          report('rtc_reconnected', { state });
+        }
         rtcState.disconnectedSince = null;
       }
     }).catch((error) => {
@@ -83,9 +98,12 @@ async function runJob({ jobId, recordingId, meetingUrl, botName, adapter, signal
     currentJob.status = 'recording';
 
     await adapter.join({ page, meetingUrl, botName });
+    // Вошёл в конференцию, идёт запись.
+    report('in_meeting');
 
     const reason = await waitForMeetingEnd({ page, signal, adapter, capture, rtcState });
     console.log(`[job ${jobId}] ending (${reason})`);
+    report('ended', { reason });
 
     await capture.stop();
     await browser.close();
@@ -95,6 +113,7 @@ async function runJob({ jobId, recordingId, meetingUrl, botName, adapter, signal
     currentJob = currentJob && currentJob.jobId === jobId ? null : currentJob;
   } catch (error) {
     console.error(`[job ${jobId}] error:`, error);
+    report('ended_error', { error: error.message });
 
     if (capture) {
       await capture.stop().catch(() => {});
