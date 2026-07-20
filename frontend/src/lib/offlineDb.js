@@ -1,4 +1,5 @@
 import { openDB } from 'idb';
+import { isWebCryptoAvailable, generateAudioKey, encryptBlob, decryptBlob } from './blobCrypto.js';
 
 const DB_NAME = 'voxmate';
 // v2: добавлен стор liveChunks для US-1.8 — чанки идущей записи сбрасываются
@@ -41,6 +42,36 @@ function getDb() {
   }
 
   return dbPromise;
+}
+
+// US-3.5: ключ шифрования аудио. Неэкспортируемый CryptoKey хранится в meta и
+// переживает перезагрузки (structured clone сохраняет и материал, и флаг
+// extractable=false). Создаётся один раз при первой необходимости. null —
+// WebCrypto недоступен (очень старый браузер): тогда пишем без шифрования, чтобы
+// не потерять офлайн-запись (доступность важнее для сценария «нет сети»).
+let audioKeyPromise = null;
+
+async function getAudioKey() {
+  if (!isWebCryptoAvailable()) {
+    return null;
+  }
+
+  if (!audioKeyPromise) {
+    audioKeyPromise = (async () => {
+      const db = await getDb();
+      const existing = await db.get('meta', 'audioEncKey');
+
+      if (existing?.value) {
+        return existing.value;
+      }
+
+      const key = await generateAudioKey();
+      await db.put('meta', { key: 'audioEncKey', value: key });
+      return key;
+    })().catch(() => null);
+  }
+
+  return audioKeyPromise;
 }
 
 export async function putCachedRecording(recording) {
@@ -99,7 +130,37 @@ export async function getCachedCurrentUser() {
 
 export async function putQueueItem(item) {
   const db = await getDb();
-  await db.put('writeQueue', item);
+  await db.put('writeQueue', await encryptQueueItem(item));
+}
+
+// US-3.5: шифруем аудио-блоб очереди перед записью в IndexedDB. Метаданные
+// (title/filename/размер) остаются как есть — шифруется именно запись (аудио).
+async function encryptQueueItem(item) {
+  const key = await getAudioKey();
+
+  if (key && item.blob instanceof Blob) {
+    const enc = await encryptBlob(key, item.blob);
+    return { ...item, blob: enc, blobEncrypted: true };
+  }
+
+  return item;
+}
+
+// Расшифровка аудио элемента очереди — вызывается синхронизатором прямо перед
+// выгрузкой (а не на каждом чтении списка), чтобы не разворачивать аудио в память
+// ради рендера метаданных. Возвращает Blob или null, если недоступно.
+export async function getDecryptedQueueBlob(item) {
+  if (!item?.blobEncrypted) {
+    return item?.blob || null;
+  }
+
+  const key = await getAudioKey();
+
+  if (!key) {
+    return null;
+  }
+
+  return decryptBlob(key, item.blob, item.mimeType);
 }
 
 export async function updateQueueItem(localId, patch) {
@@ -159,7 +220,14 @@ export async function appendLiveRecordingChunk(sessionId, blob) {
   }
 
   const db = await getDb();
-  await db.add('liveChunks', { sessionId, blob });
+  const key = await getAudioKey();
+
+  if (key) {
+    // US-3.5: чанки идущей записи тоже шифруем на устройстве.
+    await db.add('liveChunks', { sessionId, enc: await encryptBlob(key, blob), encrypted: true });
+  } else {
+    await db.add('liveChunks', { sessionId, blob });
+  }
 }
 
 export async function getActiveRecordingSession() {
@@ -171,7 +239,20 @@ export async function getActiveRecordingSession() {
 export async function getLiveRecordingChunks(sessionId) {
   const db = await getDb();
   const rows = await db.getAllFromIndex('liveChunks', 'by-session', sessionId);
-  return rows.map((row) => row.blob).filter(Boolean);
+  const key = await getAudioKey();
+  const blobs = [];
+
+  for (const row of rows) {
+    if (row.encrypted && row.enc) {
+      // Ключ должен быть — чанки писались с ним; если недоступен, пропускаем.
+      // eslint-disable-next-line no-await-in-loop
+      if (key) blobs.push(await decryptBlob(key, row.enc));
+    } else if (row.blob) {
+      blobs.push(row.blob);
+    }
+  }
+
+  return blobs;
 }
 
 // Закрывает сессию: удаляет дескриптор и все её чанки. Вызывается и после

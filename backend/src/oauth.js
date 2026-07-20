@@ -25,6 +25,8 @@ export function constantTimeEqual(a, b) {
 const REGISTRY = {
   google: {
     label: 'Google',
+    // ADR-034: провайдер с email → может быть первичной регистрацией.
+    canRegister: true,
     authUrl: () => process.env.OAUTH_GOOGLE_AUTH_URL || 'https://accounts.google.com/o/oauth2/v2/auth',
     tokenUrl: () => process.env.OAUTH_GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token',
     userinfoUrl: () => process.env.OAUTH_GOOGLE_USERINFO_URL || 'https://openidconnect.googleapis.com/v1/userinfo',
@@ -38,6 +40,10 @@ const REGISTRY = {
   },
   yandex: {
     label: 'Яндекс',
+    // ADR-034: Яндекс отдаёт свой первичный email → регистрация допустима.
+    // (emailVerified=false — не авто-линкуем к чужому существующему аккаунту, но
+    // для НОВОГО аккаунта этот email допустим как первичный, чужого не задеваем.)
+    canRegister: true,
     authUrl: () => process.env.OAUTH_YANDEX_AUTH_URL || 'https://oauth.yandex.ru/authorize',
     tokenUrl: () => process.env.OAUTH_YANDEX_TOKEN_URL || 'https://oauth.yandex.ru/token',
     userinfoUrl: () => process.env.OAUTH_YANDEX_USERINFO_URL || 'https://login.yandex.ru/info?format=json',
@@ -52,6 +58,8 @@ const REGISTRY = {
   },
   vk: {
     label: 'ВКонтакте',
+    // ADR-034: ВК не гарантирует email → только привязка, не первичная регистрация.
+    canRegister: false,
     authUrl: () => process.env.OAUTH_VK_AUTH_URL || 'https://id.vk.com/authorize',
     tokenUrl: () => process.env.OAUTH_VK_TOKEN_URL || 'https://id.vk.com/oauth2/auth',
     userinfoUrl: () => process.env.OAUTH_VK_USERINFO_URL || 'https://id.vk.com/oauth2/user_info',
@@ -69,6 +77,8 @@ const REGISTRY = {
   },
   sber: {
     label: 'Сбер ID',
+    // ADR-034: Сбер ID отдаёт верифицированный email → регистрация допустима.
+    canRegister: true,
     authUrl: () => process.env.OAUTH_SBER_AUTH_URL || 'https://online.sberbank.ru/CSAFront/oidc/authorize.do',
     tokenUrl: () => process.env.OAUTH_SBER_TOKEN_URL || 'https://api.sberbank.ru/ru/prod/tokens/v2/oidc',
     userinfoUrl: () => process.env.OAUTH_SBER_USERINFO_URL || 'https://api.sberbank.ru/ru/prod/sberbankid/v2.1/userinfo',
@@ -93,6 +103,12 @@ function credsFor(provider) {
 export function isProviderEnabled(provider) {
   const creds = credsFor(provider);
   return Boolean(REGISTRY[provider] && creds.clientId && creds.clientSecret);
+}
+
+// ADR-034: может ли провайдер быть первичной регистрацией (даёт email), или он
+// только для привязки к существующему аккаунту (Telegram/ВК — email не гарантируют).
+export function providerCanRegister(provider) {
+  return REGISTRY[provider]?.canRegister === true;
 }
 
 export function enabledProviders() {

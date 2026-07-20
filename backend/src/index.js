@@ -13,6 +13,7 @@ import { registerFeedbackRoutes } from './feedback.js';
 import { registerCalendarRoutes } from './calendar.js';
 import { registerConsentRoutes } from './consent.js';
 import { registerAnalyticsRoutes } from './analytics.js';
+import { registerAppRuntimeRoutes } from './appRuntime.js';
 import { runMigrations } from './migrations.js';
 import { ensureAudioBucket } from './storage.js';
 
@@ -40,7 +41,8 @@ app.use('/api/*', async (c, next) => {
   }
 
   c.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
-  c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  // X-Client-Version — версия сборки PWA (ADR-035), клиент шлёт её на каждый запрос.
+  c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Client-Version');
 
   if (c.req.method === 'OPTIONS') {
     return c.body(null, 204);
@@ -48,6 +50,10 @@ app.use('/api/*', async (c, next) => {
 
   await next();
 });
+
+// ADR-035: гейт версии контракта + GET /api/app/runtime (kill-switch, min-версия).
+// Ставится до бизнес-роутов, чтобы несовместимый клиент не дошёл до старого контракта.
+registerAppRuntimeRoutes(app);
 
 app.get('/', (c) => c.text('Stenogram backend running'));
 

@@ -677,6 +677,63 @@ const migrations = [
       alter table recordings add column if not exists asr_hints text;
     `,
   },
+  {
+    id: '034_oauth_pending_links',
+    sql: `
+      -- ADR-034: внешняя личность (Telegram/ВК или провайдер без пригодного email)
+      -- вошла впервые и аккаунта нет. Аккаунт без первичного email не создаём —
+      -- держим короткоживущий «висящий» линк, пока пользователь на шаге
+      -- «подтвердите email» не введёт email (и создаст/привяжет аккаунт).
+      create table if not exists oauth_pending_links (
+        token text primary key,
+        provider text not null,
+        provider_user_id text not null,
+        provider_name text,
+        provider_email text,
+        created_at timestamptz not null default now()
+      );
+    `,
+  },
+  {
+    id: '035_usage_quota',
+    sql: `
+      -- ADR-033: экономика обработки. Единица учёта — минута обработки (audio-minute).
+      -- На каждую обработку пишем расход: минуты ASR, токены LLM (best-effort) и
+      -- стоимость по прайсу провайдера НА МОМЕНТ операции (фиксируем, чтобы задним
+      -- числом расход не «плыл»). Основа для алертов, себестоимости и будущего прайсинга.
+      create table if not exists usage_ledger (
+        id uuid primary key default gen_random_uuid(),
+        recording_id uuid references recordings(id) on delete set null,
+        user_id uuid references app_users(id) on delete set null,
+        asr_minutes numeric not null default 0,
+        llm_tokens_in integer not null default 0,
+        llm_tokens_out integer not null default 0,
+        cost_usd numeric not null default 0,
+        provider text,
+        model text,
+        created_at timestamptz not null default now()
+      );
+      create index if not exists usage_ledger_user_created_idx on usage_ledger(user_id, created_at);
+      create index if not exists usage_ledger_created_idx on usage_ledger(created_at);
+
+      -- Пер-аккаунтные квоты (пилот — фиксированные значения из окружения; строка
+      -- здесь нужна только для переопределений отдельным пользователям). NULL =
+      -- «брать значение по умолчанию из env».
+      create table if not exists account_quotas (
+        user_id uuid primary key references app_users(id) on delete cascade,
+        monthly_minutes_limit integer,
+        daily_minutes_cap integer,
+        max_parallel_jobs integer,
+        updated_at timestamptz not null default now()
+      );
+
+      -- Хард-лимит квоты: запись сохранена (offline-first), но обработка
+      -- заблокирована → статус «ожидает квоты». Гейтится ТОЛЬКО обработка, не запись.
+      alter table recordings drop constraint recordings_status_check;
+      alter table recordings add constraint recordings_status_check
+        check (status in ('uploaded', 'queued', 'processing', 'transcribing', 'summarizing', 'waiting_quota', 'done', 'failed'));
+    `,
+  },
 ];
 
 export async function runMigrations() {

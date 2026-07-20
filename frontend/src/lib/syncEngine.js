@@ -1,4 +1,4 @@
-import { putQueueItem, updateQueueItem, deleteQueueItem, getAllQueueItems } from './offlineDb.js';
+import { putQueueItem, updateQueueItem, deleteQueueItem, getAllQueueItems, getDecryptedQueueBlob } from './offlineDb.js';
 import { uploadBlobInChunks } from './chunkedUploader.js';
 
 let isProcessing = false;
@@ -47,7 +47,7 @@ export function toSyntheticRecording(item) {
   };
 }
 
-export async function enqueueRecording(file, title, source) {
+export async function enqueueRecording(file, title, source, { deviceOnly = false } = {}) {
   const item = {
     localId: generateLocalId(),
     title: title || file.name,
@@ -59,7 +59,10 @@ export async function enqueueRecording(file, title, source) {
     bytesAcked: 0,
     chunkSizeBytes: null,
     serverRecordingId: null,
-    syncState: 'local-pending',
+    // US-3.5: 'device-only' — запись остаётся на устройстве и НЕ выгружается
+    // (processQueue её пропускает). Расшифровки/протокола не будет — осознанный
+    // выбор пользователя ради приватности. Обычная запись — 'local-pending'.
+    syncState: deviceOnly ? 'device-only' : 'local-pending',
     attempts: 0,
     lastError: null,
     createdAt: new Date().toISOString(),
@@ -116,7 +119,15 @@ async function syncOneItem(apiFetch, item, callbacks) {
     await updateQueueItem(item.localId, { bytesAcked: session.bytesReceived, chunkSizeBytes: session.chunkSizeBytes });
     callbacks.onItemChange?.(item.localId, { bytesAcked: session.bytesReceived });
 
-    await uploadBlobInChunks(apiFetch, serverRecordingId, item.blob, {
+    // US-3.5: аудио в очереди зашифровано на устройстве — расшифровываем прямо
+    // перед выгрузкой (offset-протокол работает по открытым байтам файла).
+    const blob = await getDecryptedQueueBlob(item);
+
+    if (!blob) {
+      throw new Error('Локальный файл записи недоступен');
+    }
+
+    await uploadBlobInChunks(apiFetch, serverRecordingId, blob, {
       chunkSizeBytes: session.chunkSizeBytes,
       startOffset: session.bytesReceived,
       onChunkUploaded: async (bytesAcked) => {
@@ -173,6 +184,11 @@ export async function processQueue(apiFetch, callbacks = {}, options = {}) {
     const items = await getAllQueueItems();
 
     for (const item of items) {
+      // US-3.5: записи «только на устройстве» намеренно не выгружаем.
+      if (item.syncState === 'device-only') {
+        continue;
+      }
+
       // eslint-disable-next-line no-await-in-loop
       await syncOneItem(apiFetch, item, callbacks);
     }

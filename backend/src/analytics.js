@@ -29,6 +29,11 @@ export const ANALYTICS_EVENTS = Object.freeze([
   'incomplete_task_sent_telegram',
   'incomplete_task_blocked_b24',
   'task_sent_bitrix',
+  // Экономика обработки (ADR-033 §2.7)
+  'quota_soft_warning',
+  'quota_hard_block',
+  'processing_cost_exceeded',
+  'processing_waiting_quota',
   // Надёжность
   'offline_recovery',
 ]);
@@ -95,7 +100,7 @@ function isAnalyticsAdmin(email) {
 export async function getProductMetrics({ days = 30 } = {}) {
   const since = `now() - ($1 || ' days')::interval`;
 
-  const [counts, activation, ttfp, delivery, incompleteRate, retention] = await Promise.all([
+  const [counts, activation, ttfp, delivery, incompleteRate, retention, economics] = await Promise.all([
     // Счётчики по каждому событию.
     query(
       `select event, count(*)::int as n
@@ -160,6 +165,20 @@ export async function getProductMetrics({ days = 30 } = {}) {
        from firsts`,
       [],
     ),
+    // ADR-033 §2.7: себестоимость и попадания в квоту. Стоимость/минуты — из
+    // usage_ledger (реальный расход). quota_hit_rate — доля попыток обработки,
+    // упёршихся в хард-лимит: hard_block / (hard_block + processing_started).
+    // Ограничена [0,1] и не зависит от того, как создавалась запись.
+    query(
+      `select
+         coalesce((select sum(cost_usd) from usage_ledger where created_at >= ${since}), 0)::float as total_cost_usd,
+         coalesce((select sum(asr_minutes) from usage_ledger where created_at >= ${since}), 0)::float as total_asr_minutes,
+         (select count(*) from analytics_events
+            where event = 'quota_hard_block' and created_at >= ${since})::int as quota_hard_blocks,
+         (select count(*) from analytics_events
+            where event = 'processing_started' and created_at >= ${since})::int as processing_starts`,
+      [String(days)],
+    ),
   ]);
 
   const a = activation.rows[0] || {};
@@ -167,6 +186,9 @@ export async function getProductMetrics({ days = 30 } = {}) {
   const activatedUsers = Math.min(a.with_protocol || 0, withRecording);
   const inc = incompleteRate.rows[0] || {};
   const ret = retention.rows[0] || {};
+  const eco = economics.rows[0] || {};
+  const totalCostUsd = eco.total_cost_usd || 0;
+  const totalAsrMinutes = eco.total_asr_minutes || 0;
 
   const deliveryByChannel = {};
   for (const row of delivery.rows) {
@@ -191,6 +213,18 @@ export async function getProductMetrics({ days = 30 } = {}) {
     deliveryByChannel,
     incompleteTaskSentRate: inc.confirmed ? Number((inc.sent / inc.confirmed).toFixed(3)) : null,
     retentionD14: ret.total_users ? Number((ret.retained_d14 / ret.total_users).toFixed(3)) : null,
+    // ADR-033 §2.7: экономика обработки.
+    economics: {
+      totalCostUsd: Number(totalCostUsd.toFixed(4)),
+      totalAsrMinutes: Number(totalAsrMinutes.toFixed(1)),
+      costPerMeetingMinute: totalAsrMinutes ? Number((totalCostUsd / totalAsrMinutes).toFixed(5)) : null,
+      costPerActivatedUser: activatedUsers ? Number((totalCostUsd / activatedUsers).toFixed(4)) : null,
+      quotaHitRate: (() => {
+        const blocks = eco.quota_hard_blocks || 0;
+        const attempts = blocks + (eco.processing_starts || 0);
+        return attempts ? Number((blocks / attempts).toFixed(3)) : null;
+      })(),
+    },
   };
 }
 

@@ -14,8 +14,15 @@ import { transcribeWithKimi } from './kimiDiarizer.js';
 import { transcribeWithAccuratePipeline } from './pipelineDiarizer.js';
 import { transcribeWithSpeech2Text, checkSpeech2TextStatus, fetchSpeech2TextResult, parseSpeech2TextResult } from './speech2textDiarizer.js';
 import { getUserDiarizationConfig } from './auth.js';
-import { summarizeRecording, purgeExpiredTrash } from './recordings.js';
+import { summarizeRecording, purgeExpiredTrash, enqueueRecording } from './recordings.js';
 import { track } from './analytics.js';
+import {
+  recordUsage,
+  minutesFromSeconds,
+  estimateCostUsd,
+  quotaConfig,
+  checkProcessingQuota,
+} from './quota.js';
 import { notifyRecordingEvent, notifyTaskOverdue, notifyMeetingReminder } from './notifications.js';
 import { pollCalendars } from './calendar.js';
 import { pollTelegramCallbacks } from './telegramCallbacks.js';
@@ -92,7 +99,7 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
 
   const recording = await query(
     `
-      select owner_id, title, original_filename, mime_type, file_size_bytes, storage_key, asr_hints
+      select owner_id, title, original_filename, mime_type, file_size_bytes, storage_key, asr_hints, duration_seconds
       from recordings
       where id = $1
     `,
@@ -100,8 +107,33 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
   );
   const title = recording.rows[0]?.title || 'recording';
   const file = recording.rows[0];
+  const asrMinutes = minutesFromSeconds(file?.duration_seconds);
 
   track('processing_started', { userId: file?.owner_id, recordingId, props: { resumed: alreadyTranscribed } });
+
+  // ADR-033 §2.5: cost-ceiling на одну встречу. Оцениваем стоимость по длительности
+  // и, если она выше потолка, поднимаем сигнал (не молчаливое сжигание бюджета).
+  // По умолчанию — мягко (событие + продолжаем); MEETING_COST_CEILING_HARD=1
+  // останавливает обработку с явным статусом. Полная деградация (дешевле модель /
+  // грубее чанкинг) — следующий шаг, здесь фиксируем сам факт превышения.
+  if (!alreadyTranscribed && asrMinutes > 0) {
+    const cfg = quotaConfig();
+    const estimatedUsd = estimateCostUsd({ asrMinutes });
+
+    if (cfg.meetingCostCeilingUsd > 0 && estimatedUsd > cfg.meetingCostCeilingUsd) {
+      track('processing_cost_exceeded', {
+        userId: file?.owner_id,
+        recordingId,
+        props: { estimatedUsd: Number(estimatedUsd.toFixed(4)), minutes: Math.round(asrMinutes) },
+      });
+
+      if (process.env.MEETING_COST_CEILING_HARD === '1') {
+        throw new UnrecoverableError(
+          `Встреча превышает потолок стоимости (${estimatedUsd.toFixed(2)}$ > ${cfg.meetingCostCeilingUsd}$)`,
+        );
+      }
+    }
+  }
 
   if (alreadyTranscribed) {
     await summarizeRecording(recordingId, file?.owner_id);
@@ -218,6 +250,18 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
       `,
       [recordingId, jobId, resolvedLanguage, finalText, JSON.stringify(finalSegments)],
     );
+  });
+
+  // ADR-033 §2.3: расход в usage_ledger. Пишем здесь, а не в точке завершения —
+  // ASR выполняется ровно один раз (контрольная точка выше уводит повторы сразу в
+  // резюме), поэтому минуты не задваиваются при ретраях. Токены LLM провайдеры
+  // отдают неединообразно → фиксируем минуты (основа стоимости §2.2), токены — 0.
+  await recordUsage({
+    recordingId,
+    userId: file?.owner_id,
+    asrMinutes,
+    provider: diarized ? diarizationMethod : 'openrouter',
+    model: diarizationConfig.model || null,
   });
 
   // Persist any speaker-identity guesses as pending suggestions (US-7.1) -
@@ -459,9 +503,43 @@ async function pollOverdueTasks() {
   }
 }
 
+// ADR-033: записи, отложенные хард-лимитом квоты (status='waiting_quota'), сами не
+// вернутся в очередь. Периодически проверяем: как только квота освободилась
+// (новые сутки/месяц, завершились параллельные задачи), ставим их в обработку.
+// Проверяем квоту ЗДЕСЬ и ставим только «зелёные», чтобы enqueueRecording не
+// пере-блокировал их снова и не спамил событиями quota_hard_block каждый тик.
+async function pollWaitingQuota() {
+  const waiting = await query(
+    `select id, owner_id, duration_seconds
+     from recordings
+     where status = 'waiting_quota' and owner_id is not null
+     order by updated_at asc
+     limit 20`,
+  );
+
+  for (const row of waiting.rows) {
+    try {
+      const planned = minutesFromSeconds(row.duration_seconds);
+      const quota = await checkProcessingQuota(row.owner_id, planned);
+
+      if (quota.decision !== 'hard') {
+        await enqueueRecording(row.id, row.owner_id);
+      }
+    } catch (error) {
+      console.warn(`Waiting-quota requeue failed for recording ${row.id}:`, error.message);
+    }
+  }
+}
+
+const WAITING_QUOTA_POLL_INTERVAL_MS = Number(process.env.WAITING_QUOTA_POLL_INTERVAL_MS || 5 * 60 * 1000);
+
 async function main() {
   await runMigrations();
   await ensureAudioBucket();
+
+  setInterval(() => {
+    pollWaitingQuota().catch((error) => console.warn('Waiting-quota poll loop error:', error.message));
+  }, WAITING_QUOTA_POLL_INTERVAL_MS);
 
   setInterval(() => {
     pollMeetingBotRecordings().catch((error) => console.warn('Meeting bot poll loop error:', error.message));

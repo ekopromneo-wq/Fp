@@ -4,6 +4,8 @@ import useUiStore from '../../store/uiStore.js';
 export default function MicrophoneSettingsPanel({ micDeviceId, setMicDeviceId }) {
   const startSoundEnabled = useUiStore((state) => state.startSoundEnabled);
   const setStartSoundEnabled = useUiStore((state) => state.setStartSoundEnabled);
+  const storageMode = useUiStore((state) => state.storageMode);
+  const setStorageMode = useUiStore((state) => state.setStorageMode);
   const [devices, setDevices] = useState([]);
   const [isTesting, setIsTesting] = useState(false);
   const [testLevel, setTestLevel] = useState(0);
@@ -143,6 +145,23 @@ export default function MicrophoneSettingsPanel({ micDeviceId, setMicDeviceId })
           />
           Звуковой сигнал в начале записи
         </label>
+
+        {/* US-3.5: где хранить новые записи. По умолчанию — облако. */}
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={storageMode === 'device'}
+            onChange={(event) => setStorageMode(event.target.checked ? 'device' : 'cloud')}
+          />
+          Хранить новые записи только на устройстве
+        </label>
+
+        {storageMode === 'device' ? (
+          <p className="settings-note critical-failure-banner">
+            Записи не выгружаются в облако: не будет расшифровки, протокола и задач, они не появятся
+            на других устройствах. Аудио шифруется на устройстве, но при удалении приложения — теряется.
+          </p>
+        ) : null}
       </div>
 
       <p className="settings-note">

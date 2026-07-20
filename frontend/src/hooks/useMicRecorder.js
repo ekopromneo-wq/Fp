@@ -494,6 +494,19 @@ export default function useMicRecorder(uploadRecordingFile, setStatus, micDevice
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [isMicRecording]);
 
+  // ADR-035 §4.3: держим глобальный флаг активной записи в синхроне с локальным
+  // состоянием рекордера, чтобы баннер обновления PWA откладывал перезагрузку до
+  // конца записи. isMicRecording покрывает все пути (старт/стоп/ошибка/onstop).
+  useEffect(() => {
+    useUiStore.getState().setRecordingActive(isMicRecording);
+
+    return () => {
+      // На размонтировании запись гарантированно останавливается (эффект выше) —
+      // снимаем и флаг, чтобы отложенное обновление могло примениться.
+      useUiStore.getState().setRecordingActive(false);
+    };
+  }, [isMicRecording]);
+
   // Guard against the most common real way a recording actually gets lost in
   // a browser tab: an accidental close/refresh/navigation. We cannot stop the
   // OS from discarding a backgrounded tab under memory pressure, but we can

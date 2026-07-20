@@ -9,6 +9,8 @@ const RECORDING_STATUS_LABELS = {
   processing: 'Расшифровываем',
   transcribing: 'Расшифровываем',
   summarizing: 'Создаём протокол и задачи',
+  // ADR-033: обработка отложена лимитом квоты — запись сохранена, ждёт квоты.
+  waiting_quota: 'Ожидает квоты',
   done: 'Готово',
   failed: 'Ошибка',
 };
