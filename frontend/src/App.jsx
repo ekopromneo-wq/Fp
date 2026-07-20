@@ -956,10 +956,20 @@ function App() {
 
     try {
       const title = file.name.replace(/\.[^.]+$/, '') || file.name;
-      const queueItem = await enqueueRecording(file, title, source);
+      // US-3.5: режим «только на устройстве» — запись не выгружается и не
+      // обрабатывается в облаке (осознанный выбор пользователя ради приватности).
+      const deviceOnly = useUiStore.getState().storageMode === 'device';
+      const queueItem = await enqueueRecording(file, title, source, { deviceOnly });
 
       setRecordings((current) => [toSyntheticRecording(queueItem), ...current]);
       setSelectedRecordingId(queueItem.localId);
+
+      if (deviceOnly) {
+        setStatus(`Сохранено только на устройстве — «${title}» не выгружается`);
+        // Намеренно НЕ запускаем синхронизацию: запись остаётся локальной.
+        return;
+      }
+
       setStatus(
         navigator.onLine
           ? `Сохранено, синхронизируем «${title}»...`

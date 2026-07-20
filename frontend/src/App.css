@@ -1098,6 +1098,12 @@ h3 {
   background: rgba(52, 211, 153, 0.14);
 }
 
+/* US-3.5: «только на устройстве» — приглушённый предупреждающий тон. */
+.sync-device-only {
+  color: var(--accent-warning, #fb923c);
+  background: rgba(251, 146, 60, 0.12);
+}
+
 /* US-3.2/US-3.4: панель несинхронизированных записей. */
 .sync-bar {
   display: flex;

@@ -29,6 +29,16 @@ function SyncPill({ syncState, syncProgress, syncError }) {
     );
   }
 
+  // US-3.5: запись «только на устройстве» — не выгружается, при удалении
+  // приложения теряется. Отдельная пилюля с предупреждающим тоном.
+  if (syncState === 'device-only') {
+    return (
+      <span className="sync-pill sync-device-only" title="Только на устройстве — не выгружается, при удалении приложения теряется">
+        🔒 только на устройстве
+      </span>
+    );
+  }
+
   if (syncState === 'syncing') {
     const percent = Math.round((syncProgress || 0) * 100);
     return (
