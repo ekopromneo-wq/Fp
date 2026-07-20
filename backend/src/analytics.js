@@ -166,13 +166,17 @@ export async function getProductMetrics({ days = 30 } = {}) {
       [],
     ),
     // ADR-033 §2.7: себестоимость и попадания в квоту. Стоимость/минуты — из
-    // usage_ledger (реальный расход); quota_hit — из событий хард-блока.
+    // usage_ledger (реальный расход). quota_hit_rate — доля попыток обработки,
+    // упёршихся в хард-лимит: hard_block / (hard_block + processing_started).
+    // Ограничена [0,1] и не зависит от того, как создавалась запись.
     query(
       `select
          coalesce((select sum(cost_usd) from usage_ledger where created_at >= ${since}), 0)::float as total_cost_usd,
          coalesce((select sum(asr_minutes) from usage_ledger where created_at >= ${since}), 0)::float as total_asr_minutes,
-         (select count(distinct user_id) from analytics_events
-            where event = 'quota_hard_block' and user_id is not null and created_at >= ${since})::int as users_quota_blocked`,
+         (select count(*) from analytics_events
+            where event = 'quota_hard_block' and created_at >= ${since})::int as quota_hard_blocks,
+         (select count(*) from analytics_events
+            where event = 'processing_started' and created_at >= ${since})::int as processing_starts`,
       [String(days)],
     ),
   ]);
@@ -215,7 +219,11 @@ export async function getProductMetrics({ days = 30 } = {}) {
       totalAsrMinutes: Number(totalAsrMinutes.toFixed(1)),
       costPerMeetingMinute: totalAsrMinutes ? Number((totalCostUsd / totalAsrMinutes).toFixed(5)) : null,
       costPerActivatedUser: activatedUsers ? Number((totalCostUsd / activatedUsers).toFixed(4)) : null,
-      quotaHitRate: withRecording ? Number(((eco.users_quota_blocked || 0) / withRecording).toFixed(3)) : null,
+      quotaHitRate: (() => {
+        const blocks = eco.quota_hard_blocks || 0;
+        const attempts = blocks + (eco.processing_starts || 0);
+        return attempts ? Number((blocks / attempts).toFixed(3)) : null;
+      })(),
     },
   };
 }

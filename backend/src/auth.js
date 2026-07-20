@@ -649,11 +649,13 @@ export function registerAuthRoutes(app) {
       return c.json({ error: 'Укажите корректный email' }, 400);
     }
 
-    // Забираем линк атомарно (delete-returning), заодно проверяя срок жизни.
+    // НЕ удаляем линк здесь: при коллизии email мы вернём needsPassword, и
+    // пользователь пришлёт этот же токен ещё раз уже с паролем. Токен потребляем
+    // только при УСПЕХЕ (ниже), иначе повтор с паролем падал бы «устарела».
     const pending = await query(
-      `delete from oauth_pending_links
-       where token = $1 and created_at > now() - interval '15 minutes'
-       returning provider, provider_user_id, provider_name`,
+      `select provider, provider_user_id, provider_name
+       from oauth_pending_links
+       where token = $1 and created_at > now() - interval '15 minutes'`,
       [token],
     );
 
@@ -673,7 +675,8 @@ export function registerAuthRoutes(app) {
     if (existing.rowCount) {
       const row = existing.rows[0];
 
-      // Привязка к чужому существующему аккаунту — только по доказательству владения.
+      // Привязка к чужому существующему аккаунту — только по доказательству
+      // владения. Токен НЕ потребляем — тот же токен вернётся с паролем.
       if (!row.password_hash || !verifyPassword(password, row.password_hash)) {
         return c.json(
           {
@@ -711,6 +714,8 @@ export function registerAuthRoutes(app) {
     }
 
     await linkOauthIdentity(provider, providerUserId, user.id, email);
+    // Успех — теперь потребляем линк (одноразовый).
+    await query('delete from oauth_pending_links where token = $1', [token]);
     const session = await createSession(user.id, { userAgent: c.req.header('User-Agent') || '', ip: clientIp(c) });
 
     c.header('Set-Cookie', session.cookie);
