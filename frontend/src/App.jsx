@@ -26,7 +26,7 @@ import useTasks from './hooks/useTasks.js';
 import useSpeakers from './hooks/useSpeakers.js';
 import useSending from './hooks/useSending.js';
 import { apiFetch, isProcessingStatus, track } from './lib/api.js';
-import { formatDate } from './lib/format.js';
+import { formatDate, pluralizeRu } from './lib/format.js';
 import {
   buildRecordingExport,
   buildProtocolDocxBlob,
@@ -606,6 +606,14 @@ function App() {
       loadRecordingDetail(selectedRecordingId);
     }
   }, [selectedRecordingId, currentUser?.id]);
+
+  // На мобильном деталь открывается на весь экран поверх списка — прокручиваем
+  // к началу, чтобы запись показалась с шапки, а не с позиции скролла списка.
+  useEffect(() => {
+    if (isMobile && selectedRecordingId) {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    }
+  }, [isMobile, selectedRecordingId]);
 
   useEffect(() => {
     if (currentUser && activePage === 'settings') {
@@ -1459,7 +1467,12 @@ function App() {
   }
 
   return (
-    <main className="app-shell" onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+    <main
+      className={`app-shell${isMobile && activePage === 'library' && selectedRecordingId ? ' app-shell--detail' : ''}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {isDragging ? (
         <div className="drop-overlay" aria-hidden="true">
           <div className="drop-overlay-inner">Отпустите файл, чтобы загрузить запись</div>
@@ -1517,7 +1530,7 @@ function App() {
       ) : activePage === 'projects' ? (
         <>
           <section className="status-line" aria-live="polite">
-            {status || `${projects.length} проектов`}
+            {status || `${projects.length} ${pluralizeRu(projects.length, ['проект', 'проекта', 'проектов'])}`}
           </section>
           <ProjectsPage projects={projects} projectsPage={projectsPage} onOpenRecording={openRecordingFromAnywhere} />
         </>
@@ -1575,7 +1588,7 @@ function App() {
           />
 
           <section className="status-line library-status" aria-live="polite">
-            <span>{status || (hasRecordings ? `${recordings.length} записей${trashMode ? ' в корзине' : ' в библиотеке'}` : trashMode ? 'Корзина пуста' : 'Записей пока нет')}</span>
+            <span>{status || (hasRecordings ? `${recordings.length} ${pluralizeRu(recordings.length, ['запись', 'записи', 'записей'])}${trashMode ? ' в корзине' : ' в библиотеке'}` : trashMode ? 'Корзина пуста' : 'Записей пока нет')}</span>
             {/* US-16.4: корзина — удалённое хранится неделю, потом удаляется навсегда. */}
             <button
               className="link-button"
@@ -1668,6 +1681,13 @@ function App() {
             </section>
 
             <aside className="detail-panel" aria-label="Детали записи">
+              {/* US: на мобильном деталь открывается на весь экран — кнопка возврата к списку. */}
+              {isMobile && selectedRecordingId ? (
+                <button className="detail-back" type="button" onClick={() => setSelectedRecordingId(null)}>
+                  ← К записям
+                </button>
+              ) : null}
+
               {!selectedRecordingId ? (
                 <div className="empty-state detail-empty">Выбери запись, чтобы увидеть детали.</div>
               ) : null}

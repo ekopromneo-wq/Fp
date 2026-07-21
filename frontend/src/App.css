@@ -87,6 +87,29 @@ textarea {
   font: inherit;
 }
 
+/* Нативные контролы — в бирюзовую тему (иначе браузерный синий выбивается из
+   палитры): чекбоксы, радио, ползунки, пикеры даты/цвета. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"],
+input[type="date"],
+input[type="datetime-local"],
+input[type="time"],
+input[type="color"] {
+  accent-color: var(--accent-primary);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] input[type="checkbox"],
+:root[data-theme="light"] input[type="radio"],
+:root[data-theme="light"] input[type="range"],
+:root[data-theme="light"] input[type="date"],
+:root[data-theme="light"] input[type="datetime-local"],
+:root[data-theme="light"] input[type="time"],
+:root[data-theme="light"] input[type="color"] {
+  color-scheme: light;
+}
+
 .auth-shell {
   display: grid;
   min-height: 100vh;
@@ -231,8 +254,22 @@ h3 {
 
 /* ===== Нижняя навигация (Bottom-Heavy / FABar) ===== */
 .app-shell {
-  /* место под фиксированную нижнюю навигацию */
-  padding-bottom: 96px;
+  /* место под фиксированную нижнюю навигацию (пилюля + приподнятый FAB) */
+  padding-bottom: 108px;
+}
+
+/* Плавное затухание контента у нижней навигации — чтобы прокрутка уходила «в туман»,
+   а не резко под плавающую пилюлю. На десктопе не нужно (навигация докнута баром). */
+body::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 92px;
+  background: linear-gradient(to top, var(--bg-base) 22%, transparent);
+  pointer-events: none;
+  z-index: 39;
 }
 
 .bottom-nav {
@@ -251,6 +288,30 @@ h3 {
   border-radius: 20px;
   background: var(--bg-elevated);
   box-shadow: var(--shadow-card);
+}
+
+/* ===== Десктоп: докнутый нижний бар вместо плавающей мобильной пилюли ===== */
+@media (min-width: 981px) {
+  body::after {
+    display: none;
+  }
+
+  .bottom-nav {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    transform: none;
+    width: 100%;
+    max-width: none;
+    grid-template-columns: repeat(5, minmax(0, 132px));
+    justify-content: center;
+    gap: 12px;
+    padding: 10px 24px calc(10px + env(safe-area-inset-bottom, 0px));
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    border-radius: 0;
+  }
 }
 
 .bottom-nav-item {
@@ -908,6 +969,45 @@ h3 {
   max-height: 70vh;
   overflow-y: auto;
   padding-right: 2px;
+}
+
+/* Кнопка возврата к списку в мобильной детали записи. */
+.detail-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Мобильный: деталь записи открывается на весь экран поверх списка. По умолчанию
+   панель детали скрыта (виден только список); при выборе записи App-shell получает
+   класс --detail — прячем список/фильтры и показываем деталь. */
+@media (max-width: 980px) {
+  .detail-panel {
+    display: none;
+  }
+
+  .recording-cards {
+    max-height: none;
+  }
+
+  .app-shell--detail .detail-panel {
+    display: block;
+  }
+
+  .app-shell--detail .library-controls,
+  .app-shell--detail .library-status,
+  .app-shell--detail .sync-bar,
+  .app-shell--detail .recording-list {
+    display: none;
+  }
 }
 
 .recording-card,

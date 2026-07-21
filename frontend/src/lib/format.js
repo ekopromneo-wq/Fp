@@ -21,6 +21,17 @@ export function formatDuration(totalSeconds) {
   return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${pad(minutes)}:${pad(secs)}`;
 }
 
+// Русское склонение числительных: pluralizeRu(1, ['проект','проекта','проектов']).
+// Возвращает только слово; число подставляйте отдельно.
+export function pluralizeRu(count, [one, few, many]) {
+  const n = Math.abs(count) % 100;
+  const n1 = n % 10;
+  if (n > 10 && n < 20) return many;
+  if (n1 > 1 && n1 < 5) return few;
+  if (n1 === 1) return one;
+  return many;
+}
+
 export function formatFileSize(bytes) {
   if (!bytes) {
     return 'без файла';
