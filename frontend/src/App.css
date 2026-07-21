@@ -3994,6 +3994,7 @@ a.bitrix-sent-badge {
 
 .step-title {
   font-weight: 700;
+  min-width: 0;
 }
 
 .is-locked .step-title,
@@ -4006,6 +4007,14 @@ a.bitrix-sent-badge {
 .step-summary {
   color: var(--text-secondary);
   font-size: 0.84rem;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* Итог у края, а не сразу за заголовком — чеврон встаёт вплотную после него. */
+.step-summary + .step-tail {
+  margin-left: 8px;
 }
 
 .step-tail {
