@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 const CONFIDENCE_LABELS = {
   high: 'высокая уверенность',
   medium: 'средняя уверенность',
@@ -23,14 +25,33 @@ export default function SpeakerRow({
   const hasMultipleCandidates = (match?.candidates?.length || 0) > 1;
   const hasMultipleContactCandidates = (contactMatch?.candidates?.length || 0) > 1;
   const hasPendingSuggestion = speaker.suggestionStatus === 'pending' && speaker.suggestedName;
+  // Раскрыт по умолчанию, только если есть AI-подсказка имени (её надо решить) —
+  // иначе список спикеров превращается в стену форм; правка по тапу.
+  const [expanded, setExpanded] = useState(hasPendingSuggestion);
 
   return (
-    <div className="speaker-row">
-      <div className="speaker-row-header">
-        <strong>{speaker.label}</strong>
-        <span>{speaker.id ? 'Сохранён' : 'Из стенограммы'}</span>
+    <div className={`speaker-row${expanded ? ' is-expanded' : ''}`}>
+      <div className="speaker-row-summary">
+        <button
+          type="button"
+          className="speaker-row-toggle"
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+        >
+          <span className="speaker-row-toggle-main">
+            <strong className="speaker-label-mini">{speaker.label}</strong>
+            <span className="speaker-name-mini">
+              {draft.displayName || speaker.displayName || 'имя не задано'}
+              {speaker.id ? '' : ' · из стенограммы'}
+            </span>
+          </span>
+          {hasPendingSuggestion ? <span className="speaker-suggest-badge">✨ {speaker.suggestedName}</span> : null}
+          <span className="speaker-row-chevron" aria-hidden="true">{expanded ? '⌃' : '⌄'}</span>
+        </button>
       </div>
 
+      {expanded ? (
+      <div className="speaker-row-body">
       {hasPendingSuggestion ? (
         <div className="speaker-suggestion">
           <p>
@@ -150,6 +171,8 @@ export default function SpeakerRow({
             ))}
           </select>
         </label>
+      ) : null}
+      </div>
       ) : null}
     </div>
   );

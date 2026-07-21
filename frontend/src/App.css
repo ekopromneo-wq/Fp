@@ -1716,6 +1716,14 @@ body::after {
 audio {
   width: 100%;
   height: 40px;
+  /* Нативный аудиоплеер по умолчанию светлый — переводим в тёмную тему, чтобы не
+     выбивался белым пятном из интерфейса. */
+  color-scheme: dark;
+  border-radius: 10px;
+}
+
+:root[data-theme="light"] audio {
+  color-scheme: light;
 }
 
 .transcript-text {
@@ -4157,4 +4165,101 @@ a.bitrix-sent-badge {
 @media (prefers-reduced-motion: reduce) {
   .step-body { animation: none; }
   .step-card, .step-tail { transition: none; }
+}
+
+/* ===== Сворачиваемые строки задач и спикеров (компактный вид + правка по тапу) ===== */
+.task-row-summary,
+.speaker-row-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.task-row-toggle,
+.speaker-row-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  padding: 4px 0;
+  font: inherit;
+}
+
+.task-row-toggle-main,
+.speaker-row-toggle-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.task-row-desc {
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.task-row-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.task-assignee-chip {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.task-status-mini {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.speaker-label-mini {
+  color: var(--accent-primary);
+}
+
+.speaker-name-mini {
+  font-size: 0.86rem;
+  color: var(--text-secondary);
+}
+
+.task-row-chevron,
+.speaker-row-chevron {
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.speaker-suggest-badge {
+  flex: 0 0 auto;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 32%, transparent);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.task-row-body,
+.speaker-row-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
 }

@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { formatDate } from '../lib/format.js';
 import { TASK_STATUS_LABELS as STATUS_LABELS } from '../lib/statusLabels.js';
 import TaskForm from './TaskForm.jsx';
 
@@ -32,19 +31,37 @@ export default function TaskRow({
   onToggleSelect,
 }) {
   const [emailDraft, setEmailDraft] = useState(assigneeMatch?.autoMatch?.email || '');
+  const [expanded, setExpanded] = useState(false);
   const hasMultipleCandidates = (assigneeMatch?.candidates?.length || 0) > 1;
 
   return (
-    <div className={`task-row task-status-${task.status}`}>
-      <div className="task-row-header">
+    <div className={`task-row task-status-${task.status}${expanded ? ' is-expanded' : ''}`}>
+      {/* Компактная строка: чекбокс + суть задачи + исполнитель/статус. Правка и
+          действия раскрываются по тапу — иначе список задач превращается в стену форм. */}
+      <div className="task-row-summary">
         <label className="task-row-select">
           <input type="checkbox" checked={Boolean(isSelected)} onChange={() => onToggleSelect?.(task)} />
         </label>
-        <strong>{STATUS_LABELS[task.status] || task.status}</strong>
-        <span>{formatDate(task.updatedAt)}</span>
+        <button
+          type="button"
+          className="task-row-toggle"
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+        >
+          <span className="task-row-toggle-main">
+            <span className="task-row-desc">{draft.description || task.description || 'Без описания'}</span>
+            <span className="task-row-tags">
+              <span className="task-assignee-chip">{draft.assignee || task.assignee || 'без исполнителя'}</span>
+              <span className="task-status-mini">{STATUS_LABELS[task.status] || task.status}</span>
+            </span>
+          </span>
+          <span className="task-row-chevron" aria-hidden="true">{expanded ? '⌃' : '⌄'}</span>
+        </button>
       </div>
 
-      <TaskForm draft={draft} onFieldChange={(field, value) => onFieldChange(task, field, value)} dueDate={task.dueDate} />
+      {expanded ? (
+        <div className="task-row-body">
+          <TaskForm draft={draft} onFieldChange={(field, value) => onFieldChange(task, field, value)} dueDate={task.dueDate} />
 
       {task.assigneeExternal ? (
         <div className="task-external-assignee">
@@ -228,6 +245,8 @@ export default function TaskRow({
               )}
             </>
           ) : null}
+        </div>
+      ) : null}
         </div>
       ) : null}
     </div>
