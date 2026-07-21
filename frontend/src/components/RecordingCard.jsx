@@ -103,6 +103,12 @@ export default function RecordingCard({ recording, isSelected, onSelect, onDelet
                 </span>
               ))}
             </div>
+
+            {/* Причину сбоя выгрузки показываем прямо на карточке — на мобильном
+                tooltip недоступен, а без причины непонятно, лечится ли повтором. */}
+            {recording.syncState === 'sync-failed' && recording.syncError ? (
+              <p className="sync-error-detail">Причина: {recording.syncError}. Нажмите «Синхронизировать», чтобы повторить.</p>
+            ) : null}
           </div>
 
           <button
