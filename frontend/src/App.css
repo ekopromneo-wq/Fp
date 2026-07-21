@@ -4090,3 +4090,71 @@ a.bitrix-sent-badge {
   line-height: 1.35;
   color: var(--accent-danger);
 }
+
+/* ===== Ф3: полировка мастера ===== */
+
+/* Плавное раскрытие тела шага (без держания тяжёлого контента в DOM: анимируем
+   появление при монтировании). */
+.step-body {
+  animation: step-reveal 180ms ease;
+}
+
+@keyframes step-reveal {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.step-card {
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.step-tail {
+  transition: transform 160ms ease;
+}
+
+/* Липкий CTA «Что дальше» на мобильном — остаётся на виду при прокрутке шагов. */
+@media (max-width: 980px) {
+  .detail-next {
+    position: sticky;
+    top: 8px;
+    z-index: 20;
+  }
+}
+
+/* Онбординг первого запуска. */
+.detail-onboarding {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 34%, var(--border-subtle));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-primary) 7%, var(--bg-elevated));
+}
+
+.detail-onboarding-body {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.detail-onboarding-body strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.detail-onboarding-body p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.detail-onboarding .button {
+  flex: 0 0 auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-body { animation: none; }
+  .step-card, .step-tail { transition: none; }
+}

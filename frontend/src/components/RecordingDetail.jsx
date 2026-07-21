@@ -64,6 +64,23 @@ function RecordingDetail({
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
+  // Онбординг первого запуска — показываем один раз (флаг в localStorage).
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    try {
+      return !localStorage.getItem('stenogram-detail-onboarded');
+    } catch {
+      return false;
+    }
+  });
+  function dismissOnboarding() {
+    try {
+      localStorage.setItem('stenogram-detail-onboarded', '1');
+    } catch {
+      // localStorage может быть недоступен (приватный режим) — не критично.
+    }
+    setShowOnboarding(false);
+  }
+
   const hasTranscript = Boolean(recording.transcript);
   const hasSummary = Boolean(recording.summary);
   const hasTasks = Boolean(recording.tasks?.length);
@@ -315,6 +332,19 @@ function RecordingDetail({
             {isSavingRecording ? 'Сохраняем...' : 'Сохранить запись'}
           </button>
         </section>
+      ) : null}
+
+      {/* Онбординг первого запуска — как читать пошаговый экран. */}
+      {showOnboarding ? (
+        <div className="detail-onboarding" role="note">
+          <div className="detail-onboarding-body">
+            <strong>Запись — по шагам</strong>
+            <p>Идите сверху вниз: «Обработать» → стенограмма → протокол → задачи → отправка. Готовые шаги сворачиваются с ✓, ненужные — просто пропускайте. Настройки записи — под шестерёнкой.</p>
+          </div>
+          <button className="button button-secondary" type="button" onClick={dismissOnboarding}>
+            Понятно
+          </button>
+        </div>
       ) : null}
 
       {/* «Что дальше» — единственное крупное следующее действие. */}
