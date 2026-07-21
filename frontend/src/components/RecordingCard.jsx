@@ -106,17 +106,17 @@ export default function RecordingCard({ recording, isSelected, onSelect, onDelet
           </div>
 
           <button
-            className="button button-danger icon-button recording-card-delete"
+            className="recording-card-delete"
             type="button"
             onClick={(event) => {
               event.stopPropagation();
               onDelete(recording);
             }}
             disabled={isDeleting}
-            aria-label="Удалить"
+            aria-label="Удалить запись"
             title="Удалить"
           >
-            {isDeleting ? '...' : '✕'}
+            {isDeleting ? '…' : '✕'}
           </button>
         </div>
       </div>

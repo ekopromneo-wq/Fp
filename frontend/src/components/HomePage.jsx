@@ -188,9 +188,11 @@ export default function HomePage({
                   <span className="muted-text">
                     {task.assignee || 'без исполнителя'}
                     {task.dueText ? ` · ${task.dueText}` : ''}
-                    {isOverdue(task) ? ' · просрочена' : ''}
                   </span>
-                  <span className="status-pill">{getTaskStatusLabel(task.status)}</span>
+                  <span className="home-card-badges">
+                    {isOverdue(task) ? <span className="overdue-pill">Просрочена</span> : null}
+                    <span className="status-pill">{getTaskStatusLabel(task.status)}</span>
+                  </span>
                 </button>
               ))}
             </div>

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { formatDate } from '../lib/format.js';
 import { getStatusLabel, getTaskStatusLabel } from '../lib/statusLabels.js';
 
@@ -28,12 +29,16 @@ function ProjectsPage({ projects, projectsPage, onOpenRecording }) {
     handleToggleSummary,
   } = projectsPage;
 
+  const [showCreate, setShowCreate] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState(null);
+
   const activeProjects = projects.filter((project) => !project.isArchived);
   const archivedProjects = projects.filter((project) => project.isArchived);
 
   function renderProject(project) {
     const draft = getProjectDraft(project);
     const isExpanded = expandedProjectId === project.id;
+    const isEditing = editingProjectId === project.id;
 
     return (
       <article className={`project-card ${project.isArchived ? 'is-archived' : ''}`} key={project.id}>
@@ -53,48 +58,64 @@ function ProjectsPage({ projects, projectsPage, onOpenRecording }) {
           <p className="muted-text project-card-members">Участники: {project.members.map((member) => member.name).join(', ')}</p>
         ) : null}
 
-        <div className="project-card-edit">
-          <label>
-            Тема
-            <input value={draft.name} onChange={(event) => updateProjectDraft(project, 'name', event.target.value)} />
-          </label>
-          <label>
-            Цвет
-            <input
-              className="project-color-input"
-              type="color"
-              value={draft.color}
-              onChange={(event) => updateProjectDraft(project, 'color', event.target.value)}
-              aria-label="Цвет проекта"
-            />
-          </label>
-          <label>
-            Описание
-            <input
-              value={draft.description}
-              onChange={(event) => updateProjectDraft(project, 'description', event.target.value)}
-              placeholder="Необязательно"
-            />
-          </label>
-          <label>
-            Участники
-            <input
-              value={draft.participants}
-              onChange={(event) => updateProjectDraft(project, 'participants', event.target.value)}
-              placeholder="Имена через запятую"
-            />
-          </label>
-        </div>
+        {isEditing ? (
+          <div className="project-card-edit">
+            <label>
+              Тема
+              <input value={draft.name} onChange={(event) => updateProjectDraft(project, 'name', event.target.value)} />
+            </label>
+            <label>
+              Цвет
+              <input
+                className="project-color-input"
+                type="color"
+                value={draft.color}
+                onChange={(event) => updateProjectDraft(project, 'color', event.target.value)}
+                aria-label="Цвет проекта"
+              />
+            </label>
+            <label>
+              Описание
+              <input
+                value={draft.description}
+                onChange={(event) => updateProjectDraft(project, 'description', event.target.value)}
+                placeholder="Необязательно"
+              />
+            </label>
+            <label>
+              Участники
+              <input
+                value={draft.participants}
+                onChange={(event) => updateProjectDraft(project, 'participants', event.target.value)}
+                placeholder="Имена через запятую"
+              />
+            </label>
+          </div>
+        ) : null}
 
         <div className="project-card-actions">
-          <button
-            className="button button-secondary"
-            type="button"
-            onClick={() => handleSaveProject(project)}
-            disabled={savingProjectId === project.id}
-          >
-            {savingProjectId === project.id ? 'Сохраняем...' : 'Сохранить'}
-          </button>
+          {isEditing ? (
+            <>
+              <button
+                className="button button-primary"
+                type="button"
+                onClick={() => {
+                  handleSaveProject(project);
+                  setEditingProjectId(null);
+                }}
+                disabled={savingProjectId === project.id}
+              >
+                {savingProjectId === project.id ? 'Сохраняем...' : 'Сохранить'}
+              </button>
+              <button className="button button-secondary" type="button" onClick={() => setEditingProjectId(null)}>
+                Отмена
+              </button>
+            </>
+          ) : (
+            <button className="button button-secondary" type="button" onClick={() => setEditingProjectId(project.id)}>
+              Изменить
+            </button>
+          )}
           <button className="button button-secondary" type="button" onClick={() => handleToggleSummary(project)}>
             {isExpanded ? 'Скрыть сводку' : 'Сводка'}
           </button>
@@ -195,6 +216,16 @@ function ProjectsPage({ projects, projectsPage, onOpenRecording }) {
 
   return (
     <section className="projects-page" aria-label="Проекты">
+      <button
+        className="button button-primary add-toggle"
+        type="button"
+        onClick={() => setShowCreate((current) => !current)}
+        aria-expanded={showCreate}
+      >
+        {showCreate ? 'Свернуть' : '＋ Новый проект'}
+      </button>
+
+      {showCreate ? (
       <form className="project-create-panel" onSubmit={handleCreateProject}>
         <h3>Новый проект</h3>
         <div className="project-create-fields">
@@ -237,6 +268,7 @@ function ProjectsPage({ projects, projectsPage, onOpenRecording }) {
           {isCreatingProject ? 'Создаём...' : 'Создать проект'}
         </button>
       </form>
+      ) : null}
 
       {projects.length === 0 ? <p className="muted-text">Проектов пока нет — создай первый, чтобы объединять встречи по темам.</p> : null}
 

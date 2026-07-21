@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 function ContactRow({ contact, draft, isSaving, isDeleting, onDraftChange, onSave, onDelete }) {
   return (
     <div className="contact-row">
@@ -68,10 +70,22 @@ export default function ContactsPage({
   onImportFile,
   onImportBitrix,
 }) {
+  const [showCreate, setShowCreate] = useState(false);
+
   return (
     <section className="contacts-page" aria-label="Контакты">
       <section className="contacts-panel">
-        <h2>Новый контакт</h2>
+        <button
+          className="button button-primary add-toggle"
+          type="button"
+          onClick={() => setShowCreate((current) => !current)}
+          aria-expanded={showCreate}
+        >
+          {showCreate ? 'Свернуть' : '＋ Новый контакт'}
+        </button>
+
+        {showCreate ? (
+        <>
         <form className="contact-form" onSubmit={onCreateContact}>
           <label>
             Имя
@@ -155,6 +169,8 @@ export default function ContactsPage({
               </button>
             </div>
           </div>
+        ) : null}
+        </>
         ) : null}
       </section>
 

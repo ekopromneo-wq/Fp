@@ -37,6 +37,7 @@ function LibraryControls({
   onJoinMeeting,
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showBot, setShowBot] = useState(false);
   const activeExtraCount = Object.values(filters).filter(Boolean).length;
 
   function setFilter(key, value) {
@@ -45,55 +46,70 @@ function LibraryControls({
 
   return (
     <section className="library-controls" aria-label="Фильтры библиотеки">
-      <label>
-        Поиск
-        <span className="search-input-group">
-          <input
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Название, файл, проект или текст стенограммы"
-          />
-          <VoiceInputButton onDictate={onDictate} onText={setSearchQuery} setStatus={setStatus} title="Голосовой поиск" />
-        </span>
-      </label>
+      <div className="library-controls-row">
+        <label>
+          Поиск
+          <span className="search-input-group">
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Название, файл, проект или текст стенограммы"
+            />
+            <VoiceInputButton onDictate={onDictate} onText={setSearchQuery} setStatus={setStatus} title="Голосовой поиск" />
+          </span>
+        </label>
 
-      <label>
-        Проект
-        <select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}>
-          <option value="">Все проекты</option>
-          {projectOptions.map((project) => (
-            <option value={project.id} key={project.id}>
-              {project.name}
-              {project.isArchived ? ' (архив)' : ''}
-            </option>
-          ))}
-        </select>
-      </label>
+        <label>
+          Проект
+          <select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}>
+            <option value="">Все проекты</option>
+            {projectOptions.map((project) => (
+              <option value={project.id} key={project.id}>
+                {project.name}
+                {project.isArchived ? ' (архив)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
 
-      <form className="meeting-bot-form" onSubmit={onJoinMeeting}>
-        <input
-          value={meetingBotDraft.meetingUrl}
-          onChange={(event) => setMeetingBotDraft((current) => ({ ...current, meetingUrl: event.target.value }))}
-          placeholder="Ссылка на встречу (Zoom, Meet, Телемост...)"
-        />
-        <input
-          value={meetingBotDraft.title}
-          onChange={(event) => setMeetingBotDraft((current) => ({ ...current, title: event.target.value }))}
-          placeholder="Название встречи (необязательно)"
-        />
-        <button className="button button-secondary" type="submit" disabled={isJoiningMeeting}>
-          {isJoiningMeeting ? 'Отправляем...' : 'Пригласить бота'}
+      <div className="library-controls-actions">
+        <button
+          className="button button-secondary"
+          type="button"
+          onClick={() => setShowBot((current) => !current)}
+          aria-expanded={showBot}
+        >
+          {showBot ? 'Скрыть приглашение' : '＋ Пригласить бота на встречу'}
         </button>
-      </form>
 
-      <button
-        className="button button-secondary library-filters-toggle"
-        type="button"
-        onClick={() => setIsExpanded((current) => !current)}
-        aria-expanded={isExpanded}
-      >
-        {isExpanded ? 'Скрыть фильтры' : `Ещё фильтры${activeExtraCount ? ` (${activeExtraCount})` : ''}`}
-      </button>
+        <button
+          className="button button-secondary"
+          type="button"
+          onClick={() => setIsExpanded((current) => !current)}
+          aria-expanded={isExpanded}
+        >
+          {isExpanded ? 'Скрыть фильтры' : `Ещё фильтры${activeExtraCount ? ` (${activeExtraCount})` : ''}`}
+        </button>
+      </div>
+
+      {showBot ? (
+        <form className="meeting-bot-form" onSubmit={onJoinMeeting}>
+          <input
+            value={meetingBotDraft.meetingUrl}
+            onChange={(event) => setMeetingBotDraft((current) => ({ ...current, meetingUrl: event.target.value }))}
+            placeholder="Ссылка на встречу (Zoom, Meet, Телемост...)"
+          />
+          <input
+            value={meetingBotDraft.title}
+            onChange={(event) => setMeetingBotDraft((current) => ({ ...current, title: event.target.value }))}
+            placeholder="Название встречи (необязательно)"
+          />
+          <button className="button button-secondary" type="submit" disabled={isJoiningMeeting}>
+            {isJoiningMeeting ? 'Отправляем...' : 'Пригласить бота'}
+          </button>
+        </form>
+      ) : null}
 
       {isExpanded ? (
         <div className="library-extra-filters">

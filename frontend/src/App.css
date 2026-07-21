@@ -665,11 +665,30 @@ body::after {
 }
 
 .library-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 0 4px;
+}
+
+/* Ряд с ядром фильтров — поиск и проект (остальное свёрнуто в кнопки). */
+.library-controls-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(160px, 220px) minmax(280px, 360px);
+  grid-template-columns: 1fr;
   gap: 10px;
   align-items: end;
-  padding: 16px 0 4px;
+}
+
+@media (min-width: 720px) {
+  .library-controls-row {
+    grid-template-columns: minmax(220px, 1fr) minmax(160px, 260px);
+  }
+}
+
+.library-controls-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .library-controls label,
@@ -720,10 +739,14 @@ body::after {
   margin-top: 18px;
 }
 
-/* Вкладки настроек вместо одного длинного скролла. */
+/* Вкладки настроек вместо одного длинного скролла. Горизонтальный скролл вместо
+   переноса на 2 строки — держат одну ровную линию на любой ширине. */
 .settings-tabs {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
   gap: 6px;
   padding: 6px;
   border: 1px solid var(--border-subtle);
@@ -734,8 +757,13 @@ body::after {
   z-index: 10;
 }
 
+.settings-tabs::-webkit-scrollbar {
+  display: none;
+}
+
 .settings-tab {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
   min-height: 40px;
   padding: 0 14px;
   border: none;
@@ -1069,9 +1097,37 @@ body::after {
   white-space: nowrap;
 }
 
+/* Приглушённая кнопка удаления — не кричит красным на каждой карточке, краснеет
+   при наведении/фокусе. На мобильном дублируется свайпом влево. */
 .recording-card-content .recording-card-delete {
   flex: 0 0 auto;
-  width: 40px;
+  width: 32px;
+  height: 32px;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: color 0.15s ease, background 0.15s ease, opacity 0.15s ease, border-color 0.15s ease;
+}
+
+.recording-card-content .recording-card-delete:hover:not(:disabled),
+.recording-card-content .recording-card-delete:focus-visible {
+  opacity: 1;
+  color: var(--accent-danger);
+  background: color-mix(in srgb, var(--accent-danger) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent-danger) 32%, transparent);
+}
+
+.recording-card-content .recording-card-delete:disabled {
+  cursor: default;
+  opacity: 0.4;
 }
 
 .status-pill {
@@ -3269,11 +3325,27 @@ a.bitrix-sent-badge {
 
 /* US-13.1: просроченные — красным. */
 .home-card-overdue {
-  border-color: var(--accent-danger);
+  border-color: color-mix(in srgb, var(--accent-danger) 55%, var(--border-subtle));
 }
 
-.home-card-overdue strong {
+/* Просрочка помечается компактной красной пилюлей, а не красным заголовком —
+   заголовок остаётся читаемым, статус читается «с одного взгляда». */
+.overdue-pill {
+  align-self: flex-start;
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 0.72rem;
+  font-weight: 800;
   color: var(--accent-danger);
+  background: color-mix(in srgb, var(--accent-danger) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-danger) 34%, transparent);
+}
+
+.home-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 
 /* US-13.2: надиктовка описания задачи. */
@@ -3621,4 +3693,10 @@ a.bitrix-sent-badge {
   display: flex;
   justify-content: center;
   min-height: 40px;
+}
+
+/* Кнопка-тумблер «＋ Добавить» для сворачиваемых форм создания (проекты/контакты). */
+.add-toggle {
+  justify-self: start;
+  align-self: start;
 }
