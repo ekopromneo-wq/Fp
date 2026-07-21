@@ -129,7 +129,7 @@ function RecordingDetail({
       {/* Действия сгруппированы: обработка, протокол, экспорт — вместо стены
           кнопок в один ряд. */}
       <div className="detail-actions">
-        <div className="detail-action-group">
+        <div className="detail-action-group detail-primary-actions">
           <button
             className="button button-primary"
             type="button"

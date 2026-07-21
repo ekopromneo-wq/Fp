@@ -1403,10 +1403,16 @@ body::after {
   padding-bottom: 2px;
 }
 
+.detail-header > div {
+  min-width: 0;
+}
+
 .detail-header h2 {
-  overflow-wrap: anywhere;
   color: var(--text-primary);
   font-size: 1.15rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .detail-header-status {
@@ -1429,6 +1435,19 @@ body::after {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+/* Основные действия — по две кнопки в ряд (запустить обработку + добавить фрагмент
+   и т.д.), а не вертикальной стопкой. */
+.detail-primary-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.detail-primary-actions .button {
+  width: 100%;
 }
 
 /* Группа протокола: подписанный переключатель детализации + кнопка. */
