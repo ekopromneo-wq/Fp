@@ -4263,3 +4263,12 @@ a.bitrix-sent-badge {
   gap: 12px;
   margin-top: 10px;
 }
+
+/* Поля массовых действий над задачами — гибкие, чтобы инпут+кнопка не клиппились. */
+.task-bulk-field {
+  flex: 1 1 200px;
+}
+.task-bulk-field input {
+  flex: 1;
+  min-width: 0;
+}
