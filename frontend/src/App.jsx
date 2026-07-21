@@ -427,7 +427,10 @@ function App() {
       const merged = await withQueuedRecordings(serverRecordings);
       setRecordings(merged);
 
-      const fallbackId = merged[0]?.id || null;
+      // На мобильном деталь открывается на весь экран, поэтому запись не выбираем
+      // автоматически (иначе список сразу подменяется деталью) — только по тапу.
+      // На десктопе мастер-детейл показывает первую запись как раньше.
+      const fallbackId = isMobile ? null : (merged[0]?.id || null);
       const existingId = merged.some((recording) => recording.id === nextSelectedId) ? nextSelectedId : fallbackId;
       setSelectedRecordingId(existingId);
       setStatus('');
@@ -439,7 +442,7 @@ function App() {
         const merged = await withQueuedRecordings(cached);
         setRecordings(merged);
 
-        const fallbackId = merged[0]?.id || null;
+        const fallbackId = isMobile ? null : (merged[0]?.id || null);
         const existingId = merged.some((recording) => recording.id === nextSelectedId) ? nextSelectedId : fallbackId;
         setSelectedRecordingId(existingId);
         setStatus(merged.length ? 'Офлайн — показаны сохранённые записи' : 'Офлайн, сохранённых записей ещё нет');
