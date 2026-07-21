@@ -21,6 +21,14 @@ const STATUS_OPTIONS = [
   { value: 'failed', label: 'Ошибка' },
 ];
 
+function FilterIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 5h18l-7 8v5l-4 2v-7z" />
+    </svg>
+  );
+}
+
 function LibraryControls({
   searchQuery,
   setSearchQuery,
@@ -31,13 +39,10 @@ function LibraryControls({
   setFilters,
   onDictate,
   setStatus,
-  meetingBotDraft,
-  setMeetingBotDraft,
-  isJoiningMeeting,
-  onJoinMeeting,
+  trashMode,
+  onToggleTrash,
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [showBot, setShowBot] = useState(false);
   const activeExtraCount = Object.values(filters).filter(Boolean).length;
 
   function setFilter(key, value) {
@@ -74,42 +79,22 @@ function LibraryControls({
       </div>
 
       <div className="library-controls-actions">
-        <button
-          className="button button-secondary"
-          type="button"
-          onClick={() => setShowBot((current) => !current)}
-          aria-expanded={showBot}
-        >
-          {showBot ? 'Скрыть приглашение' : '＋ Пригласить бота на встречу'}
+        <button className="button button-secondary" type="button" onClick={onToggleTrash}>
+          {trashMode ? '← В библиотеку' : 'Корзина'}
         </button>
 
         <button
-          className="button button-secondary"
+          className={`button button-secondary icon-button library-filter-toggle${isExpanded || activeExtraCount ? ' is-active' : ''}`}
           type="button"
           onClick={() => setIsExpanded((current) => !current)}
           aria-expanded={isExpanded}
+          aria-label={isExpanded ? 'Скрыть фильтры' : 'Фильтры'}
+          title={isExpanded ? 'Скрыть фильтры' : 'Фильтры'}
         >
-          {isExpanded ? 'Скрыть фильтры' : `Ещё фильтры${activeExtraCount ? ` (${activeExtraCount})` : ''}`}
+          <FilterIcon />
+          {activeExtraCount ? <span className="filter-badge">{activeExtraCount}</span> : null}
         </button>
       </div>
-
-      {showBot ? (
-        <form className="meeting-bot-form" onSubmit={onJoinMeeting}>
-          <input
-            value={meetingBotDraft.meetingUrl}
-            onChange={(event) => setMeetingBotDraft((current) => ({ ...current, meetingUrl: event.target.value }))}
-            placeholder="Ссылка на встречу (Zoom, Meet, Телемост...)"
-          />
-          <input
-            value={meetingBotDraft.title}
-            onChange={(event) => setMeetingBotDraft((current) => ({ ...current, title: event.target.value }))}
-            placeholder="Название встречи (необязательно)"
-          />
-          <button className="button button-secondary" type="submit" disabled={isJoiningMeeting}>
-            {isJoiningMeeting ? 'Отправляем...' : 'Пригласить бота'}
-          </button>
-        </form>
-      ) : null}
 
       {isExpanded ? (
         <div className="library-extra-filters">

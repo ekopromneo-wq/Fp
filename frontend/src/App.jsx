@@ -1584,25 +1584,15 @@ function App() {
             setFilters={setLibraryFilters}
             onDictate={handleDictateVoiceNote}
             setStatus={setStatus}
-            meetingBotDraft={meetingBotDraft}
-            setMeetingBotDraft={setMeetingBotDraft}
-            isJoiningMeeting={isJoiningMeeting}
-            onJoinMeeting={handleJoinMeeting}
+            trashMode={trashMode}
+            onToggleTrash={() => {
+              setSelectedRecordingId(null);
+              setTrashMode((v) => !v);
+            }}
           />
 
           <section className="status-line library-status" aria-live="polite">
             <span>{status || (hasRecordings ? `${recordings.length} ${pluralizeRu(recordings.length, ['запись', 'записи', 'записей'])}${trashMode ? ' в корзине' : ' в библиотеке'}` : trashMode ? 'Корзина пуста' : 'Записей пока нет')}</span>
-            {/* US-16.4: корзина — удалённое хранится неделю, потом удаляется навсегда. */}
-            <button
-              className="link-button"
-              type="button"
-              onClick={() => {
-                setSelectedRecordingId(null);
-                setTrashMode((v) => !v);
-              }}
-            >
-              {trashMode ? '← В библиотеку' : 'Корзина'}
-            </button>
           </section>
 
           {/* US-3.2/US-3.4: несинхронизированные записи + ручной запуск синхры и
