@@ -3884,3 +3884,163 @@ a.bitrix-sent-badge {
 .modal-actions .button {
   flex: 1 1 0;
 }
+
+/* ===== Пошаговый мастер детали записи (Фаза 1) ===== */
+.detail-settings-toggle.is-active {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+/* «Что дальше» — единственное крупное следующее действие. */
+.detail-next {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 42%, var(--border-subtle));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-elevated));
+  margin-bottom: 6px;
+}
+
+.detail-next-eyebrow {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent-primary);
+}
+
+.detail-next-cta {
+  justify-self: start;
+  min-height: 46px;
+  padding: 0 24px;
+  font-size: 1rem;
+}
+
+.detail-next-hint {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.detail-stepper {
+  display: grid;
+  gap: 10px;
+}
+
+.step-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.step-card.is-current {
+  border-color: color-mix(in srgb, var(--accent-primary) 48%, var(--border-subtle));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-primary) 22%, transparent);
+}
+
+.step-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 15px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.step-head:disabled {
+  cursor: default;
+}
+
+.step-marker {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 800;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}
+
+.is-done .step-marker {
+  background: color-mix(in srgb, var(--accent-success) 18%, transparent);
+  color: var(--accent-success);
+  border-color: color-mix(in srgb, var(--accent-success) 42%, transparent);
+}
+
+.is-current .step-marker {
+  background: var(--accent-primary);
+  color: var(--bg-base);
+  border-color: var(--accent-primary);
+}
+
+.step-n {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.step-title {
+  font-weight: 700;
+}
+
+.is-locked .step-title,
+.is-locked .step-n,
+.is-locked .step-marker {
+  color: var(--text-secondary);
+  opacity: 0.8;
+}
+
+.step-summary {
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+}
+
+.step-tail {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.step-body {
+  padding: 0 15px 16px;
+  display: grid;
+  gap: 14px;
+}
+
+/* Служебное — свёрнутый блок внизу. */
+.detail-extras {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  padding: 0 15px;
+}
+
+.detail-extras > summary {
+  padding: 13px 0;
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.detail-extras[open] > summary {
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 12px;
+}
+
+.detail-extras > *:not(summary) {
+  margin-bottom: 12px;
+}
