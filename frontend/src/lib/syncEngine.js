@@ -201,6 +201,12 @@ export async function processQueue(apiFetch, callbacks = {}, options = {}) {
         continue;
       }
 
+      // Тупиковый сбой (сервер отклонил файл, 4xx) — повтор бессмыслен, не дёргаем
+      // авто/ручной синк. Разрешается только удалением записи пользователем.
+      if (item.syncState === 'sync-failed' && item.syncPermanent) {
+        continue;
+      }
+
       // eslint-disable-next-line no-await-in-loop
       await syncOneItem(apiFetch, item, callbacks);
     }

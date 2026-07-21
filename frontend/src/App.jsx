@@ -320,7 +320,10 @@ function App() {
   }
 
   async function handleLogout() {
-    const pending = await getQueueSnapshot();
+    const snapshot = await getQueueSnapshot();
+    // Тупиковые сбои не выгрузить — они не должны вечно блокировать выход
+    // «дождитесь синхронизации»; их можно только удалить.
+    const pending = snapshot.filter((item) => !(item.syncState === 'sync-failed' && item.syncPermanent));
 
     if (pending.length > 0) {
       // The write queue can hold audio that only exists on this device -
@@ -929,7 +932,10 @@ function App() {
   async function refreshUnsyncedCount() {
     try {
       const items = await getQueueSnapshot();
-      setUnsyncedCount(items.length);
+      // Тупиковые сбои (сервер отклонил файл) не «ждут синхронизации» — их не
+      // выгрузить, только удалить, поэтому в счётчик несинхронизированных не берём.
+      const pending = items.filter((item) => !(item.syncState === 'sync-failed' && item.syncPermanent));
+      setUnsyncedCount(pending.length);
     } catch {
       // Снимок очереди — вспомогательный счётчик, его сбой не критичен.
     }
