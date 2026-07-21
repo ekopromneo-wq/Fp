@@ -7,7 +7,6 @@ const EMPTY_DRAFT = {
   recipients: '',
   chatId: '',
   cc: '',
-  bcc: '',
   message: '',
   attachDocx: true,
 };
@@ -82,7 +81,7 @@ export default function useSending({ recordingId, sendConfig, setStatus, default
   // Смена записи начинает отправку с чистого листа: получатели — почты спикеров
   // этой встречи, черновик прошлой записи не переносится.
   useEffect(() => {
-    setDraft((current) => ({ ...current, recipients: defaultRecipients, cc: '', bcc: '', message: '' }));
+    setDraft((current) => ({ ...current, recipients: defaultRecipients, cc: '', message: '' }));
     setPreview(null);
     setFailure(null);
     loadDeliveries();
@@ -128,7 +127,7 @@ export default function useSending({ recordingId, sendConfig, setStatus, default
           payloadKind: draft.payloadKind,
           message: draft.message,
           ...(draft.channel === 'email'
-            ? { recipients: draft.recipients, cc: draft.cc, bcc: draft.bcc, attachDocx: draft.attachDocx }
+            ? { recipients: draft.recipients, cc: draft.cc, attachDocx: draft.attachDocx }
             : { chatId: draft.chatId }),
         }),
       });

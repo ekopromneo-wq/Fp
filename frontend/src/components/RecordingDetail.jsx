@@ -190,42 +190,51 @@ function RecordingDetail({
           ) : null}
         </div>
 
-        <div className="detail-action-group">
-          <div className="summary-length-toggle" role="group" aria-label="Длина резюме">
-            {[
-              { value: 'brief', label: 'Кратко' },
-              { value: 'medium', label: 'Средне' },
-              { value: 'long', label: 'Подробно' },
-            ].map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={`summary-length-option${summaryLength === option.value ? ' active' : ''}`}
-                onClick={() => setSummaryLength(option.value)}
-                disabled={isSummarizing}
-                aria-pressed={summaryLength === option.value}
-              >
-                {option.label}
-              </button>
-            ))}
+        {/* Протокол доступен только после стенограммы — до неё не показываем
+            (иначе кнопка и переключатель висят задизейбленными «в разнобой»).
+            Переключатель подписан — видно, что он задаёт детализацию протокола. */}
+        {recording.transcript ? (
+          <div className="detail-action-group detail-protocol-group">
+            <div className="protocol-length">
+              <span className="protocol-length-caption">Детализация протокола</span>
+              <div className="summary-length-toggle" role="group" aria-label="Детализация протокола">
+                {[
+                  { value: 'brief', label: 'Кратко' },
+                  { value: 'medium', label: 'Средне' },
+                  { value: 'long', label: 'Подробно' },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`summary-length-option${summaryLength === option.value ? ' active' : ''}`}
+                    onClick={() => setSummaryLength(option.value)}
+                    disabled={isSummarizing}
+                    aria-pressed={summaryLength === option.value}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button
+              className="button button-primary"
+              type="button"
+              onClick={() => onSummarize(recording)}
+              disabled={isSummarizing}
+            >
+              {isSummarizing ? 'Готовим...' : recording.summary ? 'Переделать протокол' : 'Сделать протокол'}
+            </button>
           </div>
-          <button
-            className="button button-secondary"
-            type="button"
-            onClick={() => onSummarize(recording)}
-            disabled={!recording.transcript || isSummarizing}
-          >
-            {isSummarizing ? 'Готовим...' : 'Сделать протокол'}
-          </button>
-        </div>
+        ) : null}
 
-        {/* Экспорт свёрнут в меню, чтобы три кнопки не растягивали ряд. */}
+        {/* Экспорт — только когда есть что экспортировать (иначе кнопка висит
+            задизейбленной и добавляет шума). Свёрнут в меню. */}
+        {canExport ? (
         <div className="detail-export">
           <button
             className="button button-secondary"
             type="button"
             onClick={() => setIsExportOpen((value) => !value)}
-            disabled={!canExport}
             aria-expanded={isExportOpen}
           >
             Экспорт ▾
@@ -250,6 +259,7 @@ function RecordingDetail({
             </div>
           ) : null}
         </div>
+        ) : null}
       </div>
 
       <section className="recording-edit-panel" aria-label="Редактирование записи">

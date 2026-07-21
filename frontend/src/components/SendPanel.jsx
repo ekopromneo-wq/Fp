@@ -166,24 +166,14 @@ export default function SendPanel({
               </div>
             ) : null}
 
-            <div className="send-form-row">
-              <label>
-                Копия (CC)
-                <input
-                  value={draft.cc}
-                  onChange={(event) => setDraft((current) => ({ ...current, cc: event.target.value }))}
-                  placeholder="необязательно"
-                />
-              </label>
-              <label>
-                Скрытая копия (BCC)
-                <input
-                  value={draft.bcc}
-                  onChange={(event) => setDraft((current) => ({ ...current, bcc: event.target.value }))}
-                  placeholder="необязательно"
-                />
-              </label>
-            </div>
+            <label>
+              Копия (CC)
+              <input
+                value={draft.cc}
+                onChange={(event) => setDraft((current) => ({ ...current, cc: event.target.value }))}
+                placeholder="необязательно"
+              />
+            </label>
 
             <label className="send-checkbox">
               <input

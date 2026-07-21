@@ -1429,8 +1429,28 @@ body::after {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding-right: 12px;
-  border-right: 1px solid var(--border-subtle);
+}
+
+/* Группа протокола: подписанный переключатель детализации + кнопка. */
+.detail-protocol-group {
+  align-items: flex-end;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+}
+
+.protocol-length {
+  display: grid;
+  gap: 5px;
+}
+
+.protocol-length-caption {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
 }
 
 .detail-action-group:last-of-type {
@@ -1995,7 +2015,9 @@ audio {
   background: rgba(129, 216, 208, 0.06);
 }
 
-.task-create-form .button {
+/* Полноширинной делаем только основную кнопку формы, не иконку-микрофон в поле
+   «Что сделать» (иначе она растягивается и схлопывает textarea). */
+.task-create-form .button:not(.icon-button) {
   width: 100%;
 }
 
@@ -3608,9 +3630,15 @@ a.bitrix-sent-badge {
 }
 
 .feedback-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.feedback-actions .button {
+  width: 100%;
+  padding: 0 10px;
+  text-align: center;
 }
 
 .feedback-form {
