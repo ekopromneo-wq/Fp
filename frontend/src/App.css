@@ -970,14 +970,21 @@ body::after {
 
 .workspace {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   align-items: start;
 }
 
+/* Треки/панели должны сжиматься, иначе однострочное название с nowrap растягивает
+   панель детали шире экрана (горизонтальный вылет). */
+.recording-list,
+.detail-panel {
+  min-width: 0;
+}
+
 @media (min-width: 981px) {
   .workspace {
-    grid-template-columns: minmax(320px, 400px) 1fr;
+    grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
   }
 
   .detail-panel {
