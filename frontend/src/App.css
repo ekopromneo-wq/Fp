@@ -496,10 +496,12 @@ body::after {
   gap: 8px;
   border: 1px solid transparent;
   border-radius: 8px;
-  padding: 0 14px;
+  padding: 8px 14px;
   color: var(--text-primary);
   background: var(--bg-surface);
   font-weight: 700;
+  text-align: center;
+  line-height: 1.2;
   cursor: pointer;
   transition:
     background 160ms ease,
@@ -1010,15 +1012,23 @@ body::after {
 .detail-back {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   margin-bottom: 12px;
-  padding: 8px 14px;
+  padding: 8px 16px;
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
   background: var(--bg-surface);
   color: var(--text-primary);
   font-weight: 600;
+  line-height: 1;
   cursor: pointer;
+}
+
+.detail-back::before {
+  content: "←";
+  font-size: 1.05em;
+  line-height: 1;
 }
 
 /* Мобильный: деталь записи открывается на весь экран поверх списка. По умолчанию

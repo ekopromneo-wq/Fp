@@ -1687,7 +1687,7 @@ function App() {
               {/* US: на мобильном деталь открывается на весь экран — кнопка возврата к списку. */}
               {isMobile && selectedRecordingId ? (
                 <button className="detail-back" type="button" onClick={() => setSelectedRecordingId(null)}>
-                  ← К записям
+                  К записям
                 </button>
               ) : null}
 
