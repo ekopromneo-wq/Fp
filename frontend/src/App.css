@@ -826,8 +826,11 @@ body::after {
   text-transform: uppercase;
 }
 
-.settings-form input {
+.settings-form input,
+.settings-form select {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 42px;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
@@ -837,11 +840,21 @@ body::after {
   text-transform: none;
 }
 
+/* Длинные варианты в select не должны распирать раздел по горизонтали. */
+.settings-form select {
+  text-overflow: ellipsis;
+}
+
+.settings-form label {
+  min-width: 0;
+}
+
 .settings-toggle {
-  align-content: end;
+  align-content: center;
   grid-template-columns: auto 1fr;
   align-items: center;
-  min-height: 68px;
+  gap: 10px;
+  min-height: 0;
   text-transform: none !important;
 }
 
@@ -3354,6 +3367,35 @@ a.bitrix-sent-badge {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+/* «Все задачи» — компактная кнопка-пилюля со стрелкой вместо текстовой ссылки. */
+.home-see-all {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.home-see-all::after {
+  content: "→";
+  font-size: 1.05em;
+  line-height: 1;
+}
+
+.home-see-all:hover,
+.home-see-all:focus-visible {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
 }
 
 .home-cards {

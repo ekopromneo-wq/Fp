@@ -171,8 +171,8 @@ export default function HomePage({
         <section className="home-block" aria-label="Задачи">
           <div className="home-block-head">
             <h3>Задачи</h3>
-            <button className="link-button" type="button" onClick={() => setActivePage('tasksearch')}>
-              Все задачи →
+            <button className="home-see-all" type="button" onClick={() => setActivePage('tasksearch')}>
+              Все задачи
             </button>
           </div>
           {openTasks.length ? (
