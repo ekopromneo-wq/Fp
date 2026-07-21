@@ -414,7 +414,7 @@ function finalSegmentsCountLabel(statusCode) {
   return statusCode === 200 ? 'transcript ingested' : 'no speech detected';
 }
 
-async function failMeeting(recording, message) {
+async function failMeeting(recording, message, { event = 'poll_failed' } = {}) {
   await transaction(async (client) => {
     await client.query(
       `update processing_jobs set status = 'failed', error = $2, updated_at = now()
@@ -425,7 +425,7 @@ async function failMeeting(recording, message) {
   });
 
   await notifyRecordingEvent(recording.id, recording.owner_id, 'failed');
-  logBotEvent(recording.id, { engine: 'speech2text', event: 'poll_failed', detail: { error: message } });
+  logBotEvent(recording.id, { engine: 'speech2text', event, detail: { error: message } });
   console.warn(`Meeting bot recording ${recording.id} failed: ${message}`);
 }
 
@@ -459,8 +459,18 @@ async function pollMeetingBotRecordings() {
         await ingestCompletedMeeting({ ...row, apiKey }, statusBody);
       } else if (value === 'error') {
         await failMeeting(row, statusBody?.status?.description || 'Speech2Text meeting task failed');
+      } else if (value === 'paused') {
+        // status.code 102 — тарифных минут не хватило, сервис поставил запись на
+        // паузу и сам её не возобновит (нужно пополнить тариф/доплатить). Раньше
+        // мы оставляли такую запись в processing — она висела бесконечно. Теперь
+        // честно закрываем с внятным сообщением, отметив в журнале подключений.
+        await failMeeting(
+          row,
+          statusBody?.status?.description || 'Запись приостановлена: исчерпан лимит минут по тарифу Speech2Text',
+          { event: 'paused' },
+        );
       }
-      // 'queued' (bot joining/recording) and 'paused' (minute limit) are left as-is.
+      // 'queued' (bot joining/recording) is left as-is until it resolves.
     } catch (error) {
       console.warn(`Meeting bot poll failed for recording ${row.id}:`, error.message);
     }

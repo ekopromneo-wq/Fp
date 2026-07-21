@@ -22,6 +22,7 @@ export const BOT_EVENTS = Object.freeze([
   'ended_error', // завершилось ошибкой
   'ingested', // Speech2Text: транскрипт получен и внесён
   'poll_failed', // Speech2Text: ошибка опроса задачи
+  'paused', // Speech2Text: задача приостановлена — исчерпан лимит минут по тарифу
 ]);
 
 const ALLOWED = new Set(BOT_EVENTS);

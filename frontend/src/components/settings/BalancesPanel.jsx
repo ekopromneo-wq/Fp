@@ -8,8 +8,17 @@ const STATUS_LABELS = {
   error: 'Не удалось проверить',
 };
 
-function formatMoney(value, unit) {
-  return unit === 'USD' ? `$${value.toFixed(2)}` : `${value.toFixed(2)} ${unit}`;
+function formatAmount(value, unit) {
+  if (unit === 'USD') {
+    return `$${value.toFixed(2)}`;
+  }
+
+  // Минуты сервисы отдают целыми — дробная часть тут только зашумляет карточку.
+  if (unit === 'мин') {
+    return `${Math.round(value)} мин`;
+  }
+
+  return `${value.toFixed(2)} ${unit}`;
 }
 
 function BalanceCard({ balance }) {
@@ -28,9 +37,9 @@ function BalanceCard({ balance }) {
 
       {amount ? (
         <div className="balance-amount">
-          <span className="balance-remaining">{formatMoney(amount.remaining, amount.unit)}</span>
+          <span className="balance-remaining">{formatAmount(amount.remaining, amount.unit)}</span>
           <span className="muted-text">
-            осталось из {formatMoney(amount.total, amount.unit)} · потрачено {formatMoney(amount.used, amount.unit)}
+            осталось из {formatAmount(amount.total, amount.unit)} · потрачено {formatAmount(amount.used, amount.unit)}
           </span>
         </div>
       ) : null}
@@ -46,10 +55,10 @@ function BalanceCard({ balance }) {
 }
 
 /**
- * Баланс облачных сервисов на странице настроек. Числом его отдаёт только
- * OpenRouter — у Shopot и Speech2Text метода баланса в API нет, поэтому там
- * показывается состояние («хватает / исчерпан / ключ отклонён») и ссылка в
- * личный кабинет за точной цифрой.
+ * Баланс облачных сервисов на странице настроек. Числом его отдают OpenRouter
+ * (кредиты в USD) и Speech2Text (минуты по тарифу). У Shopot метода баланса в
+ * API нет — там показывается только состояние («хватает / исчерпан / ключ
+ * отклонён») и ссылка в личный кабинет за точной цифрой.
  */
 export default function BalancesPanel({ balances, isLoading, onRefresh, checkedAt }) {
   return (
@@ -75,8 +84,9 @@ export default function BalancesPanel({ balances, isLoading, onRefresh, checkedA
       )}
 
       <p className="settings-note">
-        Точную цифру по API отдаёт только OpenRouter. Shopot и Speech2Text баланс не публикуют — для них видно лишь,
-        принимает ли сервис ключ и хватает ли средств; сколько именно осталось, смотрите в личном кабинете.
+        Точную цифру по API отдают OpenRouter (кредиты) и Speech2Text (минуты по тарифу). Shopot баланс не публикует —
+        для него видно лишь, принимает ли сервис ключ и хватает ли средств; сколько именно осталось, смотрите в личном
+        кабинете.
         {checkedAt ? ` Проверено: ${formatDate(checkedAt)}.` : ''}
       </p>
     </section>

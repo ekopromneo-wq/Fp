@@ -73,23 +73,37 @@ async function checkShopot(apiKey) {
 }
 
 /**
- * Speech2Text баланс по API тоже не отдаёт: методов вида /api/balance у него
- * нет. Проверяем хотя бы, принимает ли сервис ключ.
+ * Speech2Text отдаёт баланс числом — /api/user/amounts:
+ * `{"minutes":{"available":300,"used":0},"amount":0}`. Основная валюта
+ * распознавания — минуты по тарифу; `amount` — рубли на лицевом счёте, с
+ * которого доплачиваются задачи сверх тарифных минут (/price + /pay).
+ * `total` считаем как available + used: отдельного «размера тарифа» в ответе
+ * нет, а панели нужна база для индикатора «осталось мало».
  */
 async function checkSpeech2Text(apiKey) {
-  const response = await fetch(`${SPEECH2TEXT_API_URL}/api/recognitions?api-key=${encodeURIComponent(apiKey)}`, {
+  const response = await fetch(`${SPEECH2TEXT_API_URL}/api/user/amounts?api-key=${encodeURIComponent(apiKey)}`, {
     signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
   });
+  const body = await response.json().catch(() => null);
 
   if (response.status === 401 || response.status === 403) {
     return { status: 'invalid_key', message: 'Ключ отклонён' };
   }
 
   if (!response.ok) {
-    return { status: 'error', message: `Speech2Text ответил ${response.status}` };
+    return { status: 'error', message: body?.message || `Speech2Text ответил ${response.status}` };
   }
 
-  return { status: 'ok', message: 'Ключ принят (баланс сервис по API не сообщает)' };
+  const available = Number(body?.minutes?.available ?? 0);
+  const used = Number(body?.minutes?.used ?? 0);
+  const account = Number(body?.amount ?? 0);
+  const accountNote = `На лицевом счёте ${account.toFixed(2)} ₽ — с него доплачиваются задачи сверх тарифных минут.`;
+
+  return {
+    status: available > 0 ? 'ok' : 'insufficient',
+    amount: { remaining: available, total: available + used, used, unit: 'мин' },
+    message: available > 0 ? accountNote : `Тарифные минуты исчерпаны — новые задачи встанут в паузу. ${accountNote}`,
+  };
 }
 
 const SERVICES = [

@@ -76,6 +76,13 @@ async function pollSpeech2TextJob(taskId, apiKey) {
 
     const statusCode = body?.status?.code;
 
+    // 102 = задача поставлена на паузу: тарифных минут не хватило на её
+    // длительность. Сама она не возобновится (нужно пополнить тариф или
+    // доплатить через /pay), поэтому ждать до таймаута бессмысленно.
+    if (statusCode === 102) {
+      throw new Error(`Speech2Text paused task ${taskId}: доступные минуты по тарифу исчерпаны`);
+    }
+
     if (statusCode === 501) {
       throw new Error(`Speech2Text recognition failed for task ${taskId}: ${body?.status?.description || 'unknown error'}`);
     }
