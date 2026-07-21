@@ -3,7 +3,7 @@
  * со статусом (✓ готов / ● текущий / ○ позже) и раскрываемым телом. Заблокированный
  * шаг (нет предусловия, напр. нет стенограммы) не раскрывается и показывает подсказку.
  */
-export default function StepCard({ n, title, state, summaryText, open, onToggle, lockedHint, children }) {
+export default function StepCard({ n, title, state, summaryText, warnText, open, onToggle, lockedHint, children }) {
   const locked = state === 'locked';
   const marker = state === 'done' ? '✓' : state === 'current' ? '●' : '○';
 
@@ -19,7 +19,11 @@ export default function StepCard({ n, title, state, summaryText, open, onToggle,
         <span className="step-marker" aria-hidden="true">{marker}</span>
         <span className="step-n">{n}</span>
         <span className="step-title">{title}</span>
-        {summaryText ? <span className="step-summary">{summaryText}</span> : null}
+        {warnText ? (
+          <span className="step-warn">⚠ {warnText}</span>
+        ) : summaryText ? (
+          <span className="step-summary">{summaryText}</span>
+        ) : null}
         <span className="step-tail">{locked ? (lockedHint || 'позже') : open ? '⌃' : '⌄'}</span>
       </button>
       {open && !locked ? <div className="step-body">{children}</div> : null}

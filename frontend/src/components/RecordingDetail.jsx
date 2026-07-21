@@ -70,6 +70,10 @@ function RecordingDetail({
   const processing = isProcessingStatus(recording.status);
   const speakerCount = recording.speakers?.length || 0;
   const taskCount = recording.tasks?.length || 0;
+  // «Требует внимания» — что стоит доделать, показываем бейджем в свёрнутом шаге.
+  const unnamedSpeakers = (recording.speakers || []).filter((speaker) => !speaker.displayName).length;
+  const tasksNoAssignee = (recording.tasks || []).filter((task) => !task.assignee).length;
+  const [shareSkipped, setShareSkipped] = useState(false);
 
   // Текущий шаг — по достигнутому результату. Он раскрывается автоматически.
   const activeStep = hasSummary ? 3 : hasTranscript ? 2 : 1;
@@ -81,6 +85,13 @@ function RecordingDetail({
     setOpenStep(activeStep);
   }, [activeStep]);
   const toggleStep = (n) => setOpenStep((current) => (current === n ? null : n));
+
+  // Открыл «Поделиться» заново — снимаем отметку «пропущено».
+  useEffect(() => {
+    if (openStep === 5) {
+      setShareSkipped(false);
+    }
+  }, [openStep]);
 
   function stepState(n) {
     const locked = ((n >= 2 && n <= 4) && !hasTranscript) || (n === 5 && !canExport);
@@ -393,6 +404,7 @@ function RecordingDetail({
           title="Стенограмма и спикеры"
           state={stepState(2)}
           summaryText={hasTranscript && speakerCount ? `${speakerCount} ${pluralizeRu(speakerCount, ['спикер', 'спикера', 'спикеров'])}` : null}
+          warnText={hasTranscript && unnamedSpeakers ? `${unnamedSpeakers} ${pluralizeRu(unnamedSpeakers, ['спикер', 'спикера', 'спикеров'])} без имени` : null}
           open={openStep === 2}
           onToggle={() => toggleStep(2)}
           lockedHint="после обработки"
@@ -493,6 +505,7 @@ function RecordingDetail({
           title="Задачи"
           state={stepState(4)}
           summaryText={hasTasks ? `${taskCount} ${pluralizeRu(taskCount, ['задача', 'задачи', 'задач'])}` : null}
+          warnText={hasTasks && tasksNoAssignee ? `${tasksNoAssignee} без исполнителя` : null}
           open={openStep === 4}
           onToggle={() => toggleStep(4)}
           lockedHint="после стенограммы"
@@ -590,6 +603,7 @@ function RecordingDetail({
           n="5"
           title="Поделиться"
           state={stepState(5)}
+          summaryText={shareSkipped ? 'пропущено' : null}
           open={openStep === 5}
           onToggle={() => toggleStep(5)}
           lockedHint="когда есть результат"
@@ -625,6 +639,19 @@ function RecordingDetail({
           </div>
 
           <SendPanel sending={sending} sendConfig={sendConfig} canSend={canExport} onCopyShareLink={onCopyShareLink} />
+
+          <div className="step-skip-row">
+            <button
+              className="link-button step-skip"
+              type="button"
+              onClick={() => {
+                setShareSkipped(true);
+                setOpenStep(null);
+              }}
+            >
+              Пропустить этот шаг
+            </button>
+          </div>
         </StepCard>
       </div>
 

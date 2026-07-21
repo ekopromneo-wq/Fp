@@ -4053,3 +4053,32 @@ a.bitrix-sent-badge {
 .detail-extras > *:not(summary) {
   margin-bottom: 12px;
 }
+
+/* Ф2: бейдж «требует внимания» в заголовке шага + «Пропустить». */
+.step-warn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--accent-warning);
+  background: color-mix(in srgb, var(--accent-warning) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-warning) 36%, transparent);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+
+.step-warn + .step-tail {
+  margin-left: 8px;
+}
+
+.step-skip-row {
+  display: flex;
+  justify-content: center;
+  padding-top: 2px;
+}
+
+.step-skip {
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+}
