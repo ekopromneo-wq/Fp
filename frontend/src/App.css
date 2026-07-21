@@ -3365,13 +3365,13 @@ a.bitrix-sent-badge {
   gap: 10px;
 }
 
-/* Обе CTA одинаковой высоты, текст переносится внутри без раздувания. */
-.home-record-button,
-.home-upload-button {
-  min-height: 48px;
-  padding: 6px 20px;
-  font-size: 1rem;
-  line-height: 1.2;
+/* Компактные CTA (загрузить / пригласить бота) — вдвое ниже прежней записи;
+   основная запись — микрофон в нижней навигации. */
+.home-hero-action {
+  min-height: 34px;
+  padding: 4px 16px;
+  font-size: 0.9rem;
+  line-height: 1.15;
   text-align: center;
 }
 
@@ -3501,8 +3501,7 @@ a.bitrix-sent-badge {
   }
 
   /* На мобильном обе CTA — в ряд, равной ширины и высоты. */
-  .home-hero-actions .home-record-button,
-  .home-hero-actions .home-upload-button {
+  .home-hero-actions .home-hero-action {
     flex: 1 1 0;
   }
 }
@@ -3833,4 +3832,55 @@ a.bitrix-sent-badge {
 .add-toggle {
   justify-self: start;
   align-self: start;
+}
+
+/* ===== Модальное окно (напр. приглашение бота с главной) ===== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: var(--bg-overlay);
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  width: min(460px, 100%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-card);
+  padding: 20px;
+}
+
+.modal h3 {
+  margin: 0 0 14px;
+  color: var(--text-primary);
+}
+
+.modal-form {
+  display: grid;
+  gap: 10px;
+}
+
+.modal-form input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  padding: 9px 10px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.modal-actions .button {
+  flex: 1 1 0;
 }

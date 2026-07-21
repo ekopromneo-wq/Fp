@@ -37,10 +37,16 @@ export default function HomePage({
   setActivePage,
   hiddenBlocks,
   onToggleBlock,
+  onUploadFile,
+  meetingBotDraft,
+  setMeetingBotDraft,
+  onJoinMeeting,
+  isJoiningMeeting,
 }) {
   const [tasks, setTasks] = useState(null); // null = ещё грузятся
   const [upcoming, setUpcoming] = useState([]);
   const [isConfiguring, setIsConfiguring] = useState(false);
+  const [showBotModal, setShowBotModal] = useState(false);
 
   // Задачи по всем встречам — тем же поиском, что и страница «Поиск задач»;
   // сортировка по сроку уже на сервере, просроченные окажутся первыми.
@@ -114,15 +120,63 @@ export default function HomePage({
             ⚙
           </button>
         </div>
+        {/* Запись — центральная кнопка-микрофон внизу; на главной оставляем только
+            загрузку файла и приглашение бота, компактными кнопками. */}
         <div className="home-hero-actions">
-          <button className="button button-primary home-record-button" type="button" onClick={onStartRecording}>
-            {isMicRecording ? '■ Остановить запись' : '● Записать'}
-          </button>
-          <button className="button button-secondary home-upload-button" type="button" onClick={() => setActivePage('library')}>
-            Загрузить или пригласить бота
+          <label className="button button-secondary home-hero-action">
+            Загрузить
+            <input
+              type="file"
+              accept="audio/*,video/*,.webm,.mp3,.wav,.m4a,.ogg,.mp4,.mov,.mkv"
+              hidden
+              onChange={onUploadFile}
+            />
+          </label>
+          <button
+            className="button button-secondary home-hero-action"
+            type="button"
+            onClick={() => setShowBotModal(true)}
+          >
+            Пригласить бота
           </button>
         </div>
       </div>
+
+      {showBotModal ? (
+        <div className="modal-overlay" onClick={() => setShowBotModal(false)}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label="Пригласить бота на встречу" onClick={(event) => event.stopPropagation()}>
+            <h3>Пригласить бота на встречу</h3>
+            <form
+              className="modal-form"
+              onSubmit={(event) => {
+                onJoinMeeting(event);
+                setShowBotModal(false);
+                setActivePage('library');
+              }}
+            >
+              <input
+                autoFocus
+                value={meetingBotDraft.meetingUrl}
+                onChange={(event) => setMeetingBotDraft((current) => ({ ...current, meetingUrl: event.target.value }))}
+                placeholder="Ссылка на встречу (Zoom, Meet, Телемост...)"
+              />
+              <input
+                value={meetingBotDraft.title}
+                onChange={(event) => setMeetingBotDraft((current) => ({ ...current, title: event.target.value }))}
+                placeholder="Название встречи (необязательно)"
+              />
+              <div className="modal-actions">
+                <button className="button button-primary" type="submit" disabled={isJoiningMeeting}>
+                  {isJoiningMeeting ? 'Отправляем...' : 'Пригласить'}
+                </button>
+                <button className="button button-secondary" type="button" onClick={() => setShowBotModal(false)}>
+                  Отмена
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
 
       {isConfiguring ? (
         <div className="home-config">

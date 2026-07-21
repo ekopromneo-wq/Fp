@@ -1527,6 +1527,14 @@ function App() {
           setActivePage={setActivePage}
           hiddenBlocks={hiddenHomeBlocks}
           onToggleBlock={toggleHomeBlock}
+          onUploadFile={(event) => {
+            handleFileChange(event);
+            setActivePage('library');
+          }}
+          meetingBotDraft={meetingBotDraft}
+          setMeetingBotDraft={setMeetingBotDraft}
+          onJoinMeeting={handleJoinMeeting}
+          isJoiningMeeting={isJoiningMeeting}
         />
       ) : activePage === 'settings' ? (
         <SettingsPage settings={settings} micDeviceId={micDeviceId} setMicDeviceId={setMicDeviceId} status={status} currentUser={currentUser} onLoggedOut={handleLoggedOut} setStatus={setStatus} />
