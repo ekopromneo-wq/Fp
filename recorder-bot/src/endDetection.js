@@ -1,5 +1,9 @@
 const POLL_INTERVAL_MS = Number(process.env.END_DETECTION_POLL_MS || 3000);
-const RTC_DISCONNECT_DEBOUNCE_MS = Number(process.env.END_DETECTION_RTC_DEBOUNCE_MS || 15000);
+// US-15.1 (a): разрыв WebRTC трактуется как ПАУЗА, а не конец встречи. Даём боту
+// окно на переподключение (webrtcMonitor чистит rtcState при восстановлении) и
+// завершаем только если связь не вернулась за это время. Раньше окно было 15с —
+// коротко для реального переподключения, поэтому увеличено до 2 минут.
+const RTC_RECONNECT_GRACE_MS = Number(process.env.END_DETECTION_RTC_RECONNECT_GRACE_MS || 120000);
 const SILENCE_END_MS = Number(process.env.END_DETECTION_SILENCE_MS || 90000);
 const MIN_CALL_DURATION_MS = Number(process.env.END_DETECTION_MIN_CALL_MS || 45000);
 const MAX_MEETING_DURATION_MS = Number(process.env.END_DETECTION_MAX_MEETING_MS || 4 * 60 * 60 * 1000);
@@ -59,14 +63,34 @@ export async function waitForMeetingEnd({ page, signal, adapter, capture, rtcSta
           return finish('page_closed');
         }
 
-        if (rtcState.disconnectedSince && Date.now() - rtcState.disconnectedSince > RTC_DISCONNECT_DEBOUNCE_MS) {
-          return finish('webrtc_disconnected');
+        // US-15.1 (a): пока WebRTC в разрыве — это пауза с попыткой переподключения.
+        // Не завершаем встречу и не считаем это «тишиной» (аудио молчит именно из-за
+        // разрыва, а не потому, что встреча закончилась). Завершаем только если связь
+        // не восстановилась за отведённое окно.
+        if (rtcState.disconnectedSince) {
+          silenceSince = null;
+
+          if (Date.now() - rtcState.disconnectedSince > RTC_RECONNECT_GRACE_MS) {
+            return finish('webrtc_reconnect_timeout');
+          }
+
+          return;
         }
 
         const callDurationMs = Date.now() - joinedAt;
 
         if (silenceSince && callDurationMs > MIN_CALL_DURATION_MS && Date.now() - silenceSince > SILENCE_END_MS) {
           return finish('prolonged_silence');
+        }
+
+        // US-15.1 (e): бота удалили из встречи — отдельная причина завершения,
+        // проверяется раньше обычного «встреча завершена», чтобы различать их.
+        if (adapter.matchesRemovedText) {
+          const removed = await adapter.matchesRemovedText(page).catch(() => false);
+
+          if (removed) {
+            return finish('removed_from_meeting');
+          }
         }
 
         if (adapter.matchesEndText) {

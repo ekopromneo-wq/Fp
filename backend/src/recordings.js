@@ -12,6 +12,7 @@ import {
 import { query, transaction } from './db.js';
 import { track } from './analytics.js';
 import { logBotEvent, getBotEvents, isKnownBotEvent } from './botLog.js';
+import { notifyBotRemoved } from './notifications.js';
 import { checkProcessingQuota, minutesFromSeconds } from './quota.js';
 import { constantTimeEqual } from './oauth.js';
 import { sendRecordingEmail, sendTaskEmail } from './email.js';
@@ -2555,6 +2556,18 @@ export function registerRecordingRoutes(app) {
       event: body.event,
       detail: body.detail && typeof body.detail === 'object' ? body.detail : {},
     });
+
+    // US-15.1 (e): бота удалили из встречи — помимо записи в журнале шлём владельцу
+    // уведомление (запись могла оборваться). Fire-and-forget: сбой доставки не должен
+    // ронять приём события.
+    if (body.event === 'removed') {
+      try {
+        const owner = await query('select owner_id from recordings where id = $1', [body.recordingId]);
+        await notifyBotRemoved(body.recordingId, owner.rows[0]?.owner_id);
+      } catch (error) {
+        console.warn(`bot removed notification failed for ${body.recordingId}:`, error.message);
+      }
+    }
 
     return c.json({ ok: true });
   });

@@ -119,6 +119,26 @@ export async function notifyRecordingEvent(recordingId, ownerId, type) {
   }
 }
 
+// US-15.1 (e): бота удалили/исключили из встречи. Отдельное уведомление владельцу —
+// запись могла оборваться на середине, поэтому важно сообщить сразу (не дожидаясь
+// обычного «готово/сбой»). Пишем in-app + рассылаем по выбранным каналам.
+export async function notifyBotRemoved(recordingId, ownerId) {
+  if (!ownerId) {
+    return;
+  }
+
+  const recordingResult = await query('select title from recordings where id = $1', [recordingId]);
+  const recordingTitle = recordingResult.rows[0]?.title || 'встреча';
+
+  await deliverNotification(
+    ownerId,
+    recordingId,
+    'bot_removed',
+    'Бота удалили из встречи',
+    `Бота-ассистента удалили из встречи «${recordingTitle}». Запись остановлена — обработается то, что успело записаться.`,
+  );
+}
+
 // US-9.3: "Просроченная дата → уведомление". Separate from
 // notifyRecordingEvent because the message needs the task's own text, not
 // just the recording title - reuses the same insert+fanout mechanics via

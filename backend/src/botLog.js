@@ -14,8 +14,11 @@ export const BOT_EVENTS = Object.freeze([
   'joining', // recorder-bot: открывает страницу конференции
   'waiting_room', // recorder-bot: в зале ожидания
   'in_meeting', // recorder-bot: вошёл, идёт запись
-  'rtc_disconnected', // recorder-bot: разрыв WebRTC
+  'recording_announced', // recorder-bot: бот объявил о записи в чате встречи
+  'rtc_disconnected', // recorder-bot: разрыв WebRTC (пауза, ждём переподключения)
   'rtc_reconnected', // recorder-bot: соединение восстановилось
+  'rtc_reconnect_timeout', // recorder-bot: переподключение не удалось за отведённое время — завершаем
+  'removed', // recorder-bot: бота удалили/исключили из встречи
   'stopped_by_user', // владелец остановил
   'callback_received', // бэкенд получил финальный callback recorder-bot
   'ended', // recorder-bot: встреча завершилась (reason в detail)

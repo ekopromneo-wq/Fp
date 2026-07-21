@@ -39,7 +39,7 @@ export async function joinMeeting(input, apiKey) {
       title: input.title || undefined,
       lang: input.lang || process.env.SPEECH2TEXT_LANGUAGE || 'ru',
       speakers: input.speakers || undefined,
-      bot_name: input.botName || 'Stenogram',
+      bot_name: input.botName || 'Бот-ассистент',
       access_code: input.accessCode || undefined,
     }),
   });

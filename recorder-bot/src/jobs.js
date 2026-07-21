@@ -9,6 +9,11 @@ import { installWebrtcMonitor } from './webrtcMonitor.js';
 // running additional recorder-bot replicas if concurrent meetings are needed.
 let currentJob = null;
 
+// US-15.1: текст объявления о записи, которое бот пишет в чат встречи.
+const RECORDING_NOTICE =
+  process.env.RECORDING_NOTICE ||
+  'Идёт запись и стенографирование встречи (Бот-ассистент). Итоги и задачи получит организатор.';
+
 export function getCurrentJob() {
   return currentJob;
 }
@@ -101,8 +106,28 @@ async function runJob({ jobId, recordingId, meetingUrl, botName, adapter, signal
     // Вошёл в конференцию, идёт запись.
     report('in_meeting');
 
+    // US-15.1: бот объявляет о записи в чате встречи (best-effort). Даже если
+    // сообщение отправить не удалось (чат недоступен/сменились селекторы) — запись
+    // продолжается, а факт попытки фиксируется в журнале подключений.
+    if (typeof adapter.announce === 'function') {
+      const announced = await adapter
+        .announce({ page, message: RECORDING_NOTICE })
+        .catch(() => false);
+      report('recording_announced', { via: 'chat', ok: !!announced });
+    }
+
     const reason = await waitForMeetingEnd({ page, signal, adapter, capture, rtcState });
     console.log(`[job ${jobId}] ending (${reason})`);
+    // US-15.1 (a): встреча завершилась из-за того, что WebRTC не переподключился
+    // за отведённое окно — отдельное событие журнала, отличное от штатного конца.
+    if (reason === 'webrtc_reconnect_timeout') {
+      report('rtc_reconnect_timeout');
+    }
+    // US-15.1 (e): бота удалили из встречи — событие журнала триггерит уведомление
+    // владельцу на стороне бэкенда. Отправляем до финального callback с (частичным) аудио.
+    if (reason === 'removed_from_meeting') {
+      report('removed');
+    }
     report('ended', { reason });
 
     await capture.stop();

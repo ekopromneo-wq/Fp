@@ -1,4 +1,4 @@
-import { clickFirstMatch, fillFirstMatch } from './domHelpers.js';
+import { clickFirstMatch, fillFirstMatch, announceViaChat } from './domHelpers.js';
 
 // #input-for-name is Zoom's real web-client field (confirmed against a live
 // meeting) - it must come before the generic fallbacks, since the page also
@@ -22,6 +22,17 @@ const HARD_FAIL_TEXTS = [
   /authentication.*required/i,
 ];
 const END_TEXT_PATTERNS = [/this meeting has been ended by host/i, /meeting ended/i];
+// US-15.1 (e): признаки того, что бота именно УДАЛИЛИ/исключили (в отличие от
+// штатного завершения встречи хостом) — тогда шлём отдельное событие и уведомление.
+const REMOVED_TEXT_PATTERNS = [
+  /you (have )?(been )?removed/i,
+  /removed (you )?from the meeting/i,
+  /host has removed you/i,
+  /the host removed you/i,
+  /вас удалил/i,
+  /вы были удалены/i,
+  /вас исключил/i,
+];
 
 const JOIN_TIMEOUT_MS = Number(process.env.ZOOM_JOIN_TIMEOUT_MS || 10 * 60 * 1000);
 const JOIN_POLL_MS = Number(process.env.ZOOM_JOIN_POLL_MS || 2000);
@@ -125,11 +136,11 @@ export async function join({ page, meetingUrl, botName }) {
     await page.waitForSelector(NAME_INPUT_SELECTORS[0], { timeout: 8000 }).catch(() => null);
   }
 
-  let onJoinPage = rewritten ? await fillFirstMatch(page, NAME_INPUT_SELECTORS, botName || 'VoxMate') : false;
+  let onJoinPage = rewritten ? await fillFirstMatch(page, NAME_INPUT_SELECTORS, botName || 'Бот-ассистент') : false;
 
   if (!onJoinPage) {
     await fallbackToBrowserJoinLink(page, meetingUrl);
-    onJoinPage = await fillFirstMatch(page, NAME_INPUT_SELECTORS, botName || 'VoxMate');
+    onJoinPage = await fillFirstMatch(page, NAME_INPUT_SELECTORS, botName || 'Бот-ассистент');
     console.log(`[zoom] name field ${onJoinPage ? 'found' : 'not found'} after fallback navigation`);
   }
 
@@ -170,6 +181,30 @@ export async function join({ page, meetingUrl, botName }) {
   throw new Error('Zoom join timed out (still in waiting room or unadmitted by the host)');
 }
 
+// Открытие панели чата и поле ввода в веб-клиенте Zoom (селекторы меняются между
+// ревизиями — держим набор кандидатов, работаем best-effort).
+const CHAT_TOGGLE_SELECTORS = [
+  'button[aria-label*="chat" i]',
+  'button[aria-label*="open the chat panel" i]',
+  'button[aria-label*="чат" i]',
+];
+const CHAT_INPUT_SELECTORS = [
+  'div.chat-rtf-box__editor[contenteditable="true"]',
+  'textarea[aria-label*="chat" i]',
+  'div[contenteditable="true"][aria-label*="chat" i]',
+  'textarea[placeholder*="message" i]',
+  'textarea[placeholder*="сообщени" i]',
+];
+
+/**
+ * US-15.1: бот объявляет о записи в чате встречи. Best-effort — конференция
+ * записывается независимо от того, удалось ли отправить сообщение, поэтому любые
+ * сбои проглатываются, а вызывающий код логирует факт попытки.
+ */
+export async function announce({ page, message }) {
+  return announceViaChat(page, message, CHAT_TOGGLE_SELECTORS, CHAT_INPUT_SELECTORS, ['Chat', 'Чат']);
+}
+
 /**
  * Platform-specific extra signal for endDetection.js: checks whether the
  * page is showing Zoom's own "meeting ended" text. This is a secondary
@@ -180,4 +215,14 @@ export async function matchesEndText(page) {
   const bodyText = await getBodyText(page);
 
   return END_TEXT_PATTERNS.some((pattern) => pattern.test(bodyText));
+}
+
+/**
+ * US-15.1 (e): распознаёт, что бота удалили/исключили из встречи (не путать с
+ * обычным завершением встречи — см. matchesEndText).
+ */
+export async function matchesRemovedText(page) {
+  const bodyText = await getBodyText(page);
+
+  return REMOVED_TEXT_PATTERNS.some((pattern) => pattern.test(bodyText));
 }

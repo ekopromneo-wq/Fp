@@ -11,14 +11,18 @@ const EVENT_LABELS = {
   joining: 'Бот открывает конференцию',
   waiting_room: 'В зале ожидания',
   in_meeting: 'Бот вошёл — идёт запись',
-  rtc_disconnected: 'Разрыв связи',
+  recording_announced: 'Объявлено о записи в чате',
+  rtc_disconnected: 'Разрыв связи — ждём переподключения',
   rtc_reconnected: 'Связь восстановлена',
+  rtc_reconnect_timeout: 'Переподключение не удалось',
+  removed: 'Бота удалили из встречи',
   stopped_by_user: 'Остановлено пользователем',
   callback_received: 'Получен результат от бота',
   ended: 'Встреча завершилась',
   ended_error: 'Завершилось ошибкой',
   ingested: 'Транскрипт получен',
   poll_failed: 'Ошибка опроса задачи',
+  paused: 'Пауза — исчерпан лимит минут по тарифу',
 };
 
 export default function BotConnectionLog({ recordingId, status }) {
@@ -65,7 +69,9 @@ export default function BotConnectionLog({ recordingId, status }) {
       <ul className="bot-event-list">
         {events.map((item, index) => {
           const detail = item.detail || {};
-          const extra = detail.error || detail.reason || detail.state || null;
+          const announceNote =
+            item.event === 'recording_announced' ? (detail.ok ? null : 'сообщение отправить не удалось') : null;
+          const extra = detail.error || detail.reason || detail.state || announceNote || null;
 
           return (
             <li key={index} className={`bot-event bot-event-${item.event}`}>
