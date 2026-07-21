@@ -44,6 +44,9 @@ export function toSyntheticRecording(item) {
     syncState: item.syncState,
     syncProgress: item.totalBytes ? item.bytesAcked / item.totalBytes : 0,
     syncError: item.lastError || null,
+    // Постоянная ошибка (сервер отклонил файл, 4xx) — повтор не поможет, запись
+    // надо удалить. Отличаем от сетевых/серверных (5xx), которые лечатся повтором.
+    syncPermanent: Boolean(item.syncPermanent),
   };
 }
 
@@ -77,6 +80,14 @@ export async function getQueueSnapshot() {
   return getAllQueueItems();
 }
 
+// Ошибка шага выгрузки с пометкой «постоянная» для клиентских (4xx) ответов —
+// сервер отклонил сам файл/запрос, повтор с теми же данными не поможет.
+function stepError(message, response) {
+  const error = new Error(message);
+  error.permanent = Boolean(response && response.status >= 400 && response.status < 500);
+  return error;
+}
+
 async function syncOneItem(apiFetch, item, callbacks) {
   try {
     await updateQueueItem(item.localId, { syncState: 'syncing', lastAttemptAt: new Date().toISOString() });
@@ -91,7 +102,7 @@ async function syncOneItem(apiFetch, item, callbacks) {
       });
 
       if (!createResponse.ok) {
-        throw new Error('Не удалось создать запись на сервере');
+        throw stepError('Не удалось создать запись на сервере', createResponse);
       }
 
       const createData = await createResponse.json();
@@ -109,7 +120,7 @@ async function syncOneItem(apiFetch, item, callbacks) {
     });
 
     if (!sessionResponse.ok) {
-      throw new Error('Не удалось начать сессию загрузки');
+      throw stepError('Не удалось начать сессию загрузки', sessionResponse);
     }
 
     const { session } = await sessionResponse.json();
@@ -142,7 +153,7 @@ async function syncOneItem(apiFetch, item, callbacks) {
 
     if (!completeResponse.ok) {
       const data = await completeResponse.json().catch(() => null);
-      throw new Error(data?.error || 'Не удалось завершить загрузку');
+      throw stepError(data?.error || 'Не удалось завершить загрузку', completeResponse);
     }
 
     const { recording } = await completeResponse.json();
@@ -152,6 +163,7 @@ async function syncOneItem(apiFetch, item, callbacks) {
     const updated = await updateQueueItem(item.localId, {
       syncState: 'sync-failed',
       lastError: error.message || 'Ошибка синхронизации',
+      syncPermanent: Boolean(error.permanent),
       attempts: (item.attempts || 0) + 1,
     });
     callbacks.onFailed?.(item.localId, updated);

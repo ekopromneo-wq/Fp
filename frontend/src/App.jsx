@@ -913,7 +913,7 @@ function App() {
     setRecordings((current) =>
       current.map((recording) =>
         recording.id === localId
-          ? { ...recording, syncState: 'sync-failed', syncError: updatedQueueItem?.lastError }
+          ? { ...recording, syncState: 'sync-failed', syncError: updatedQueueItem?.lastError, syncPermanent: Boolean(updatedQueueItem?.syncPermanent) }
           : recording,
       ),
     );
