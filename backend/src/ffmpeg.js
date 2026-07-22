@@ -67,11 +67,47 @@ export function concatAudioFiles(inputPaths, outputPath) {
   ]);
 }
 
+// Длительность через полный декод: `ffmpeg -i file -f null -` пишет прогресс
+// «time=HH:MM:SS.xx» в stderr — берём последний. Нужен для потоковых контейнеров
+// (webm из MediaRecorder), у которых в заголовке duration=N/A: файл валиден,
+// но format=duration его не отдаёт. Opus/webm декодируется в десятки раз
+// быстрее реального времени, поэтому фолбэк дешёвый.
+function measureDurationByDecodeSeconds(filePath) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('ffmpeg', ['-v', 'info', '-i', filePath, '-f', 'null', '-'], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let stderrTail = '';
+
+    child.stderr.on('data', (chunk) => {
+      stderrTail = (stderrTail + chunk.toString()).slice(-8192);
+    });
+
+    child.on('error', reject);
+    child.on('close', (code) => {
+      const matches = [...stderrTail.matchAll(/time=(\d+):(\d\d):(\d\d(?:\.\d+)?)/g)];
+
+      if (code === 0 && matches.length) {
+        const last = matches[matches.length - 1];
+        resolve(Number(last[1]) * 3600 + Number(last[2]) * 60 + Number(last[3]));
+        return;
+      }
+
+      reject(new Error(`ffmpeg decode-duration failed with code ${code}: ${stderrTail.slice(-500)}`));
+    });
+  });
+}
+
 /**
  * Reads a media file's duration via ffprobe. A failure here (non-zero exit,
  * unparseable output) is also the cheapest reliable "is this file actually a
  * readable media file" check available - callers use it to detect corrupt or
  * unsupported uploads, not just to get a number.
+ *
+ * Потоковый webm из MediaRecorder (микрофонные записи, US-1.8 timeslice) не
+ * содержит duration в заголовке — ffprobe выходит с кодом 0 и «N/A». Такой файл
+ * НЕ битый: длительность добираем декодом (см. measureDurationByDecodeSeconds),
+ * а браковка остаётся только для настоящих ошибок чтения.
  */
 export function getFfprobeDurationSeconds(filePath) {
   return new Promise((resolve, reject) => {
@@ -96,6 +132,12 @@ export function getFfprobeDurationSeconds(filePath) {
 
       if (code === 0 && Number.isFinite(seconds)) {
         resolve(seconds);
+        return;
+      }
+
+      if (code === 0) {
+        // Контейнер читается, но длительности в заголовке нет — меряем декодом.
+        measureDurationByDecodeSeconds(filePath).then(resolve, reject);
         return;
       }
 
