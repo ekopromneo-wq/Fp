@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import JobsList from './JobsList.jsx';
 import FeedbackWidget from './FeedbackWidget.jsx';
 import SpeakerRow from './SpeakerRow.jsx';
@@ -24,6 +24,7 @@ import { getStatusLabel } from '../lib/statusLabels.js';
  */
 function RecordingDetail({
   recording,
+  onOpenSettings,
   canProcess,
   canExport,
   processingId,
@@ -92,14 +93,24 @@ function RecordingDetail({
   const tasksNoAssignee = (recording.tasks || []).filter((task) => !task.assignee).length;
   const [shareSkipped, setShareSkipped] = useState(false);
 
-  // Текущий шаг — по достигнутому результату. Он раскрывается автоматически.
+  // Текущий шаг — по достигнутому результату (маркер ● в списке шагов).
   const activeStep = hasSummary ? 3 : hasTranscript ? 2 : 1;
 
-  // Аккордеон: открыт один шаг; при смене текущего (обработка завершилась и т.п.)
-  // открытие переезжает на новый текущий.
-  const [openStep, setOpenStep] = useState(activeStep);
+  // Аккордеон: при открытии записи ВСЕ шаги свёрнуты — пользователь видит компактный
+  // маршрут целиком. Авто-раскрытие только когда прогресс случился на глазах
+  // (обработка завершилась → открываем следующий шаг).
+  const [openStep, setOpenStep] = useState(null);
+  const prevStepRef = useRef(activeStep);
   useEffect(() => {
-    setOpenStep(activeStep);
+    setOpenStep(null);
+    prevStepRef.current = activeStep;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recording.id]);
+  useEffect(() => {
+    if (prevStepRef.current !== activeStep) {
+      prevStepRef.current = activeStep;
+      setOpenStep(activeStep);
+    }
   }, [activeStep]);
   const toggleStep = (n) => setOpenStep((current) => (current === n ? null : n));
 
@@ -352,11 +363,14 @@ function RecordingDetail({
         <div className={`detail-next${cta.processing ? ' is-processing' : ''}`}>
           <span className="detail-next-eyebrow">Что дальше</span>
           {cta.label ? (
-            <button className="button button-primary detail-next-cta" type="button" onClick={cta.onClick} disabled={cta.disabled}>
+            <button className={`button button-primary detail-next-cta${cta.disabled ? ' is-busy' : ''}`} type="button" onClick={cta.onClick} disabled={cta.disabled}>
               {cta.label}
             </button>
           ) : null}
-          <span className="detail-next-hint">{cta.hint}</span>
+          <span className="detail-next-hint">
+            {cta.processing ? <span className="busy-spinner" aria-hidden="true" /> : null}
+            {cta.hint}
+          </span>
         </div>
       ) : null}
 
@@ -509,7 +523,7 @@ function RecordingDetail({
           <div className="detail-action-group detail-protocol-group">
             {summaryLengthToggle}
             <button
-              className="button button-primary"
+              className={`button button-primary${isSummarizing ? ' is-busy' : ''}`}
               type="button"
               onClick={() => onSummarize(recording)}
               disabled={isSummarizing}
@@ -668,7 +682,7 @@ function RecordingDetail({
             ) : null}
           </div>
 
-          <SendPanel sending={sending} sendConfig={sendConfig} canSend={canExport} onCopyShareLink={onCopyShareLink} />
+          <SendPanel sending={sending} sendConfig={sendConfig} canSend={canExport} onCopyShareLink={onCopyShareLink} onOpenSettings={onOpenSettings} />
 
           <div className="step-skip-row">
             <button

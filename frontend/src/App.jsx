@@ -94,7 +94,24 @@ function App() {
   // равно перезагружает страницу.
   const [shareToken] = useState(() => new URLSearchParams(window.location.search).get('share'));
   // US-13.1: приложение открывается на контекстном главном экране.
-  const [activePage, setActivePage] = useState('home');
+  // Страница переживает перезагрузку (F5/обновление PWA) — иначе любой рефреш
+  // выкидывал на «Главную».
+  const [activePage, setActivePage] = useState(() => {
+    try {
+      const saved = localStorage.getItem('stenogram-active-page');
+      return ['home', 'library', 'settings', 'projects', 'tasksearch', 'contacts'].includes(saved) ? saved : 'home';
+    } catch {
+      return 'home';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('stenogram-active-page', activePage);
+    } catch {
+      // localStorage может быть недоступен — не критично.
+    }
+  }, [activePage]);
   const [trashMode, setTrashMode] = useState(false);
   const [selectedRecordingId, setSelectedRecordingId] = useState(null);
   const [selectedRecording, setSelectedRecording] = useState(null);
@@ -190,7 +207,16 @@ function App() {
     handleMicRecordingToggle();
   }
 
-  const handleMicButtonClick = isMobile ? openVoicePanel : startRecordingWithConsent;
+  // Мобильный: тап по микрофону сразу ведёт в согласие/запись (панель открывается
+  // фоном без промежуточного «Готово к записи»); во время записи — просто панель.
+  const handleMicButtonClick = isMobile
+    ? () => {
+        openVoicePanel();
+        if (!isMicRecording) {
+          startRecordingWithConsent();
+        }
+      }
+    : startRecordingWithConsent;
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -979,7 +1005,14 @@ function App() {
       const queueItem = await enqueueRecording(file, title, source, { deviceOnly });
 
       setRecordings((current) => [toSyntheticRecording(queueItem), ...current]);
-      setSelectedRecordingId(queueItem.localId);
+      // На мобильном не открываем деталь сразу — показываем список с новой записью
+      // сверху (деталь на мобильном полноэкранная и скрыла бы библиотеку).
+      setSelectedRecordingId(isMobile ? null : queueItem.localId);
+
+      // Запись закончена/файл добавлен — ведём в «Записи», там виден статус
+      // синхронизации и обработки. Панель записи закрываем.
+      closeVoicePanel();
+      setActivePage('library');
 
       if (deviceOnly) {
         setStatus(`Сохранено только на устройстве — «${title}» не выгружается`);
@@ -1704,6 +1737,7 @@ function App() {
               {selectedRecording && !isDetailLoading ? (
                 <RecordingDetail
                   recording={selectedRecording}
+                  onOpenSettings={() => setActivePage('settings')}
                   canProcess={canProcessSelected}
                   canExport={canExportSelected}
                   processingId={processingId}

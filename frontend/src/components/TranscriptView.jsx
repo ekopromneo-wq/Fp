@@ -280,12 +280,12 @@ export default function TranscriptView({ recording, audioUrl, onUpdateTranscript
     if (format === 'txt') {
       downloadBlob(
         transcriptFilename(recording.title, 'txt'),
-        new Blob([buildPlainTranscript(baseSegments, recording.speakers, mode)], { type: 'text/plain;charset=utf-8' }),
+        new Blob(['﻿', buildPlainTranscript(baseSegments, recording.speakers, mode)], { type: 'text/plain;charset=utf-8' }),
       );
     } else if (format === 'md') {
       downloadBlob(
         transcriptFilename(recording.title, 'md'),
-        new Blob([buildMarkdownTranscript(baseSegments, recording.speakers, mode)], { type: 'text/markdown;charset=utf-8' }),
+        new Blob(['﻿', buildMarkdownTranscript(baseSegments, recording.speakers, mode)], { type: 'text/markdown;charset=utf-8' }),
       );
     } else if (format === 'docx') {
       const blob = await buildDocxBlob(baseSegments, recording.speakers, mode, recording.title);

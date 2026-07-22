@@ -3939,7 +3939,12 @@ a.bitrix-sent-badge {
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
   background: var(--bg-elevated);
-  overflow: hidden;
+  /* overflow:hidden убран: ломал position:sticky у аудиоплеера внутри шага.
+     Скругление обеспечиваем радиусом на шапке. */
+}
+
+.step-card > .step-head {
+  border-radius: 12px;
 }
 
 .step-card.is-current {
@@ -4285,3 +4290,60 @@ a.bitrix-sent-badge {
     max-height: 72vh;
   }
 }
+
+/* ===== Баг-пачка 2026-07-22 ===== */
+
+/* #8a: плеер стенограммы всегда виден сверху при прокрутке текста с подсветкой. */
+.transcript-audio-controls {
+  position: sticky;
+  top: 8px;
+  z-index: 15;
+  background: var(--bg-elevated);
+  padding: 8px;
+  margin: -8px -8px 0;
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+
+/* #8b: индикатор «работа идёт» — крутящееся кольцо в кнопках и подсказках. */
+.busy-spinner,
+.button.is-busy::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: busy-rotate 0.8s linear infinite;
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+
+.busy-spinner {
+  border-color: var(--accent-primary);
+  border-top-color: transparent;
+}
+
+@keyframes busy-rotate {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .busy-spinner,
+  .button.is-busy::before { animation-duration: 1.6s; }
+}
+
+/* #9: кнопки при поле инструкции (микрофон + крестик очистки) — колонкой. */
+.protocol-instruction-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* #10: строка задачи не должна распирать экран — сжимаемость и переносы. */
+.task-row-toggle { min-width: 0; }
+.task-row-desc { overflow-wrap: anywhere; }
+.task-row-summary { min-width: 0; }
+.task-list, .task-row { min-width: 0; }

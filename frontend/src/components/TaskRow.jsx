@@ -32,6 +32,8 @@ export default function TaskRow({
 }) {
   const [emailDraft, setEmailDraft] = useState(assigneeMatch?.autoMatch?.email || '');
   const [expanded, setExpanded] = useState(false);
+  // US: сотрудников в Битрикс24 может быть много — фильтр по подстроке над select.
+  const [employeeQuery, setEmployeeQuery] = useState('');
   const hasMultipleCandidates = (assigneeMatch?.candidates?.length || 0) > 1;
 
   return (
@@ -171,17 +173,34 @@ export default function TaskRow({
           {bitrixDirectory.loaded && !bitrixDirectory.error ? (
             <>
               <label>
+                Поиск сотрудника
+                <input
+                  value={employeeQuery}
+                  onChange={(event) => setEmployeeQuery(event.target.value)}
+                  placeholder="Начните вводить имя..."
+                />
+              </label>
+
+              <label>
                 Сотрудник Битрикс24
                 <select
                   value={bitrixDraft.responsibleId}
                   onChange={(event) => onBitrixDraftChange(task, 'responsibleId', event.target.value)}
                 >
                   <option value="">Не выбран</option>
-                  {bitrixDirectory.employees.map((employee) => (
-                    <option key={employee.id} value={employee.id}>
-                      {employee.name}
-                    </option>
-                  ))}
+                  {bitrixDirectory.employees
+                    .filter(
+                      (employee) =>
+                        !employeeQuery.trim() ||
+                        employee.name.toLowerCase().includes(employeeQuery.trim().toLowerCase()) ||
+                        // выбранный всегда в списке, даже если не подходит под фильтр
+                        String(employee.id) === String(bitrixDraft.responsibleId),
+                    )
+                    .map((employee) => (
+                      <option key={employee.id} value={employee.id}>
+                        {employee.name}
+                      </option>
+                    ))}
                 </select>
               </label>
 

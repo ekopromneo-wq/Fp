@@ -70,6 +70,7 @@ export default function SendPanel({
   sendConfig,
   canSend,
   onCopyShareLink,
+  onOpenSettings,
 }) {
   const { draft, setDraft, deliveries, shareLinks, suggestions, preview, loadPreview, isSending, failure, send, createShareLink, revokeShareLink } =
     sending;
@@ -216,6 +217,13 @@ export default function SendPanel({
         {failure ? (
           <div className="send-failure" role="alert">
             <strong>{failure.error}</strong>
+            {/* «Почта/Telegram/Битрикс не настроен — укажите в настройках» — ведём
+                прямо на страницу настроек, а не оставляем пользователя искать её. */}
+            {onOpenSettings && /не настроен/i.test(failure.error || '') ? (
+              <button className="button button-secondary" type="button" onClick={onOpenSettings}>
+                Открыть настройки
+              </button>
+            ) : null}
             {failure.attempts > 1 ? <span className="muted-text">Попыток: {failure.attempts}</span> : null}
             {failure.suggestAlternativeChannel && failure.alternativeChannels?.length ? (
               <div className="send-failure-actions">

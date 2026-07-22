@@ -78,7 +78,7 @@ export default function DiarizationSettingsPanel({ draft, setDraft, onSubmit, is
         ) : null}
 
         <button className="button button-primary" type="submit" disabled={isSaving || isSettingsLoading}>
-          {isSaving ? 'Сохраняем...' : 'Сохранить диаризацию'}
+          {isSaving ? 'Сохраняем...' : 'Сохранить настройки диаризации'}
         </button>
       </form>
 

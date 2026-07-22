@@ -367,15 +367,29 @@ export default function ProtocolView({ recording, onUpdateProtocol, onGeneratePr
             placeholder="Например: сделай упор на риски и открытые вопросы"
             disabled={isRegenerating}
           />
-          <DictateButton
-            isActive={dictatingField === 'instruction'}
-            isBusy={Boolean(dictatingField)}
-            onToggle={() => toggleDictate('instruction', (text) => setInstruction((current) => (current ? `${current}\n${text}` : text)))}
-            label="инструкция"
-          />
+          <div className="protocol-instruction-buttons">
+            <DictateButton
+              isActive={dictatingField === 'instruction'}
+              isBusy={Boolean(dictatingField)}
+              onToggle={() => toggleDictate('instruction', (text) => setInstruction((current) => (current ? `${current}\n${text}` : text)))}
+              label="инструкция"
+            />
+            {instruction ? (
+              <button
+                className="button button-secondary icon-button"
+                type="button"
+                onClick={() => setInstruction('')}
+                disabled={isRegenerating}
+                aria-label="Стереть текущий промт"
+                title="Стереть текущий промт"
+              >
+                ✕
+              </button>
+            ) : null}
+          </div>
         </div>
         <button
-          className="button button-secondary"
+          className={`button button-secondary${isRegenerating ? ' is-busy' : ''}`}
           type="button"
           onClick={regenerateWithInstruction}
           disabled={isRegenerating || summary.isLocked}

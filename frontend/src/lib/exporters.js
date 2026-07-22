@@ -241,6 +241,7 @@ export async function copyText(text) {
 }
 
 export function downloadTextFile(filename, text) {
-  const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+  // BOM: без него Windows-редакторы читают UTF-8 как ANSI — «битая кодировка».
+  const blob = new Blob(['﻿', text], { type: 'text/markdown;charset=utf-8' });
   downloadBlob(filename, blob);
 }
