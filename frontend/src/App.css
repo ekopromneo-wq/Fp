@@ -4272,3 +4272,16 @@ a.bitrix-sent-badge {
   flex: 1;
   min-width: 0;
 }
+
+/* Уведомления на мобильном — аккуратная панель на всю ширину сверху, а не
+   плавающий 320px-бокс, оторванный от колокольчика. */
+@media (max-width: 980px) {
+  .notifications-dropdown {
+    position: fixed;
+    top: 64px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-height: 72vh;
+  }
+}

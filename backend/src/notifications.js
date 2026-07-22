@@ -167,8 +167,37 @@ export async function notifyMeetingReminder(userId, reminder) {
   );
 }
 
+// Понятное имя устройства из user-agent («Chrome на Windows») вместо сырой строки
+// вида «Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...».
+function describeDevice(userAgent) {
+  if (!userAgent) {
+    return 'неизвестное устройство';
+  }
+
+  const ua = userAgent;
+  let os = null;
+  if (/iPhone|iPad|iPod/i.test(ua)) os = 'iOS';
+  else if (/Android/i.test(ua)) os = 'Android';
+  else if (/Windows/i.test(ua)) os = 'Windows';
+  else if (/Mac OS X|Macintosh/i.test(ua)) os = 'macOS';
+  else if (/Linux/i.test(ua)) os = 'Linux';
+
+  let browser = null;
+  if (/Edg\//i.test(ua)) browser = 'Edge';
+  else if (/YaBrowser/i.test(ua)) browser = 'Яндекс.Браузер';
+  else if (/OPR\/|Opera/i.test(ua)) browser = 'Opera';
+  else if (/Firefox/i.test(ua)) browser = 'Firefox';
+  else if (/Chrome/i.test(ua)) browser = 'Chrome';
+  else if (/Safari/i.test(ua)) browser = 'Safari';
+
+  if (browser && os) return `${browser} на ${os}`;
+  if (browser) return browser;
+  if (os) return os;
+  return 'новое устройство';
+}
+
 export async function notifyNewLogin(userId, context = {}) {
-  const device = context.userAgent ? context.userAgent.slice(0, 120) : 'неизвестное устройство';
+  const device = describeDevice(context.userAgent);
   const from = context.ip && context.ip !== 'local' ? ` (адрес ${context.ip})` : '';
   const message = `Новый вход в аккаунт с устройства: ${device}${from}. Если это не вы — смените пароль и завершите чужие сессии в настройках.`;
 
