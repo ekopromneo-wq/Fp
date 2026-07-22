@@ -386,16 +386,19 @@ function RecordingDetail({
         >
           <div className="detail-action-group detail-primary-actions">
             <button
-              className="button button-primary"
+              className={`button button-primary${processingId === recording.id ? ' is-busy' : ''}`}
               type="button"
               onClick={() => onProcess(recording)}
-              disabled={!canProcess}
+              disabled={!canProcess || (hasTranscript && recording.status !== 'failed')}
+              title={hasTranscript && recording.status !== 'failed' ? 'Запись уже обработана — используйте «Расшифровать заново»' : undefined}
             >
               {processingId === recording.id
                 ? 'Запускаем...'
                 : recording.status === 'failed'
                   ? 'Перезапустить обработку'
-                  : 'Запустить обработку'}
+                  : hasTranscript
+                    ? 'Обработка выполнена'
+                    : 'Запустить обработку'}
             </button>
             {recording.transcript && !isProcessingStatus(recording.status) ? (
               <button
