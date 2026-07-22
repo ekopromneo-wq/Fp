@@ -63,7 +63,7 @@ export default function NotificationSettingsPanel({ draft, setDraft, onSubmit, i
 
       <p className="settings-note">
         Уведомляем о готовности протокола и о сбоях обработки. В приложении история хранится 90 дней независимо от
-        выбранных каналов. Web Push пока недоступен — нужен для этого service worker, которого ещё нет в приложении.
+        выбранных каналов. Push-уведомления в браузере пока не подключены — планируем позже.
       </p>
     </section>
   );
