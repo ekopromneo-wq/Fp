@@ -1735,9 +1735,12 @@ audio {
   padding-right: 4px;
 }
 
+/* display:contents — дети встраиваются прямо в грид .step-body (gap совпадает).
+   Нужен, чтобы sticky-плеер прилипал в пределах ВСЕГО шага «Стенограмма и
+   спикеры», а не уезжал под верх экрана на конце текста стенограммы (sticky
+   ограничен родительским контейнером). */
 .transcript-view {
-  display: grid;
-  gap: 14px;
+  display: contents;
 }
 
 .transcript-audio-controls {
