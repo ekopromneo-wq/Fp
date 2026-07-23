@@ -21,7 +21,21 @@ export const PROTOCOL_SECTION_LABELS = {
   risks: 'Риски',
   questions: 'Открытые вопросы',
   nextSteps: 'Следующие шаги',
+  recommendations: 'Рекомендации',
 };
+
+// Шаблон ОБРАБОТКИ (объём результата) — независимая ось от MEETING_TYPE_OPTIONS
+// (те задают разделы протокола). Значения/объём зашиты в
+// backend/src/processingTemplates.js — держите тексты в синхроне при правках.
+export const PROCESSING_TEMPLATE_OPTIONS = [
+  { value: 'brief', label: 'Краткий протокол', description: 'Только суть встречи, без задач.' },
+  { value: 'standard', label: 'Протокол + задачи', description: 'Протокол средней длины и извлечённые поручения.' },
+  {
+    value: 'extended',
+    label: 'Развёрнутый протокол + задачи + рекомендации',
+    description: 'Подробный протокол, задачи и рекомендации по итогам встречи.',
+  },
+];
 
 function escapeTableCell(value) {
   return String(value || '-').replace(/\|/g, '\\|').replace(/\n/g, ' ');

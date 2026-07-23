@@ -147,6 +147,10 @@ function App() {
   const [processingId, setProcessingId] = useState(null);
   const [cancellingId, setCancellingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  // #3: групповое удаление встреч из библиотеки.
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isJobsCollapsed, setIsJobsCollapsed] = useState(false);
 
   const settings = useSettings(setStatus, setSendConfig);
@@ -1260,7 +1264,7 @@ function App() {
     }
   }
 
-  async function handleSummarize(recording, { instruction } = {}) {
+  async function handleSummarize(recording, { instruction, processingTemplate } = {}) {
     if (!recording?.transcript) {
       setStatus('Сначала нужна стенограмма');
       return;
@@ -1272,7 +1276,14 @@ function App() {
     try {
       const response = await apiFetch(`/api/recordings/${recording.id}/summary`, {
         method: 'POST',
-        body: JSON.stringify({ length: summaryLength, instruction, timezoneOffsetMinutes: new Date().getTimezoneOffset() }),
+        body: JSON.stringify({
+          // #9: явный выбор шаблона при пересборке перекрывает toggle
+          // Кратко/Средне/Подробно (сервер сам решит длину по шаблону).
+          length: processingTemplate ? undefined : summaryLength,
+          instruction,
+          processingTemplate,
+          timezoneOffsetMinutes: new Date().getTimezoneOffset(),
+        }),
       });
       const data = await response.json();
 
@@ -1280,18 +1291,43 @@ function App() {
         throw new Error(data.error || 'Не удалось сделать протокол');
       }
 
-      setSelectedRecording((current) =>
-        current?.id === recording.id ? { ...current, summary: data.summary, tasks: data.tasks || [] } : current,
-      );
-      setRecordings((current) =>
-        current.map((item) => (item.id === recording.id ? { ...item, summary: data.summary, tasks: data.tasks || [] } : item)),
-      );
+      const patch = {
+        summary: data.summary,
+        tasks: data.tasks || [],
+        ...(processingTemplate ? { processingTemplate } : null),
+      };
+      setSelectedRecording((current) => (current?.id === recording.id ? { ...current, ...patch } : current));
+      setRecordings((current) => current.map((item) => (item.id === recording.id ? { ...item, ...patch } : item)));
       setStatus(`Протокол "${recording.title}" готов`);
     } catch (error) {
       setStatus(error.message || 'Ошибка создания протокола');
       throw error;
     } finally {
       setIsSummarizing(false);
+    }
+  }
+
+  // #9: «удалить действие» — протокол и задачи стираются, стенограмма остаётся;
+  // шаги «Протокол»/«Задачи» в мастере возвращаются в состояние «не сделано».
+  async function handleDeleteSummary(recording) {
+    if (!recording) {
+      return;
+    }
+
+    try {
+      const response = await apiFetch(`/api/recordings/${recording.id}/summary`, { method: 'DELETE' });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Не удалось удалить протокол');
+      }
+
+      const patch = { summary: null, tasks: [] };
+      setSelectedRecording((current) => (current?.id === recording.id ? { ...current, ...patch } : current));
+      setRecordings((current) => current.map((item) => (item.id === recording.id ? { ...item, ...patch } : item)));
+      setStatus('Протокол и задачи удалены');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка удаления протокола');
     }
   }
 
@@ -1471,6 +1507,59 @@ function App() {
       setStatus(error.message || 'Ошибка удаления');
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  // #3: групповое удаление — переиспользует одиночный DELETE (soft-delete → корзина),
+  // но параллельно и с одним подтверждением на всю пачку вместо N диалогов.
+  function toggleSelectionMode() {
+    setSelectionMode((current) => !current);
+    setSelectedIds(new Set());
+  }
+
+  function toggleRecordingSelected(recording) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(recording.id)) {
+        next.delete(recording.id);
+      } else {
+        next.add(recording.id);
+      }
+      return next;
+    });
+  }
+
+  async function handleBulkDelete() {
+    if (!selectedIds.size) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Удалить выбранные встречи (${selectedIds.size})? Они переместятся в корзину.`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsBulkDeleting(true);
+    setStatus(`Удаляем ${selectedIds.size} встреч...`);
+
+    try {
+      const ids = [...selectedIds];
+      await Promise.all(
+        ids.map((id) => apiFetch(`/api/recordings/${id}`, { method: 'DELETE' }).catch(() => null)),
+      );
+
+      if (ids.includes(selectedRecordingId)) {
+        setSelectedRecordingId(null);
+        setSelectedRecording(null);
+      }
+
+      setSelectionMode(false);
+      setSelectedIds(new Set());
+      await loadRecordings(ids.includes(selectedRecordingId) ? null : selectedRecordingId);
+      setStatus(`Удалено встреч: ${ids.length}`);
+    } finally {
+      setIsBulkDeleting(false);
     }
   }
 
@@ -1654,11 +1743,30 @@ function App() {
             }}
             sortOrder={sortOrder}
             onToggleSort={() => setSortOrder((v) => (v === 'asc' ? 'desc' : 'asc'))}
+            selectionMode={selectionMode}
+            onToggleSelectionMode={toggleSelectionMode}
           />
 
           <section className="status-line library-status" aria-live="polite">
             <span>{status || (hasRecordings ? `${recordings.length} ${pluralizeRu(recordings.length, ['встреча', 'встречи', 'встреч'])}${trashMode ? ' в корзине' : ''}` : trashMode ? 'Корзина пуста' : 'Встреч пока нет')}</span>
           </section>
+
+          {/* #3: групповое удаление — панель появляется в режиме выбора. */}
+          {selectionMode && !trashMode ? (
+            <section className="sync-bar bulk-select-bar" aria-label="Групповые действия">
+              <span className="sync-bar-count">Выбрано: <strong>{selectedIds.size}</strong></span>
+              <div className="sync-bar-actions">
+                <button
+                  className="button button-danger"
+                  type="button"
+                  onClick={handleBulkDelete}
+                  disabled={!selectedIds.size || isBulkDeleting}
+                >
+                  {isBulkDeleting ? 'Удаляем...' : 'Удалить выбранные'}
+                </button>
+              </div>
+            </section>
+          ) : null}
 
           {/* US-3.2/US-3.4: несинхронизированные записи + ручной запуск синхры и
               запрет выгрузки по мобильной сети. Панель видна, только когда есть
@@ -1727,11 +1835,14 @@ function App() {
                       key={recording.id}
                       recording={recording}
                       isSelected={recording.id === selectedRecordingId}
-                      onSelect={setSelectedRecordingId}
+                      onSelect={selectionMode ? () => toggleRecordingSelected(recording) : setSelectedRecordingId}
                       onDelete={handleDelete}
                       onProcess={handleProcess}
                       isDeleting={deletingId === recording.id}
-                      enableSwipe={isMobile}
+                      enableSwipe={isMobile && !selectionMode}
+                      selectionMode={selectionMode}
+                      isChecked={selectedIds.has(recording.id)}
+                      onToggleChecked={() => toggleRecordingSelected(recording)}
                     />
                   ))}
                 </div>
@@ -1768,6 +1879,7 @@ function App() {
                   setSummaryLength={setSummaryLength}
                   isSummarizing={isSummarizing}
                   onSummarize={handleSummarize}
+                  onDeleteSummary={handleDeleteSummary}
                   onCopyExport={handleCopyExport}
                   onDownloadExport={handleDownloadExport}
                   onDownloadDocxExport={handleDownloadDocxExport}

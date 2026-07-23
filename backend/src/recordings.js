@@ -34,6 +34,7 @@ import {
   PROTOCOL_SECTION_LABELS,
   getProtocolTemplate,
 } from './protocolTemplates.js';
+import { PROCESSING_TEMPLATE_KEYS, getProcessingTemplate, resolveProcessingTemplateKey } from './processingTemplates.js';
 import { joinMeeting, stopMeeting, isSupportedMeetingUrl } from './meetingBot.js';
 import { detectPlatform, isSupportedMeetingUrl as isSelfHostedMeetingUrl, startRecorderJob, stopRecorderJob } from './recorderBot.js';
 import { Readable } from 'node:stream';
@@ -88,6 +89,9 @@ function mapRecording(row) {
     source: row.source,
     meetingType: row.meeting_type || 'meeting',
     protocolTemplate: getProtocolTemplate(row.meeting_type),
+    // Шаблон ОБРАБОТКИ (краткий/стандарт/развёрнутый) — null значит «дефолт
+    // аккаунта», фронт разрешает его тем же ключом при показе.
+    processingTemplate: row.processing_template || null,
     durationSeconds: row.duration_seconds,
     storageKey: row.storage_key,
     originalFilename: row.original_filename,
@@ -395,7 +399,16 @@ function normalizeSummaryLength(length) {
 
 async function generateSummaryWithOpenRouter(
   transcriptText,
-  { length = 'medium', meetingType = 'meeting', instruction = '', speakers = [], dueDateAnchor = null, timezoneOffsetMinutes = 0 } = {},
+  {
+    length = 'medium',
+    meetingType = 'meeting',
+    instruction = '',
+    speakers = [],
+    dueDateAnchor = null,
+    timezoneOffsetMinutes = 0,
+    includeTasks = true,
+    includeRecommendations = false,
+  } = {},
 ) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
@@ -405,14 +418,24 @@ async function generateSummaryWithOpenRouter(
 
   const summaryLength = normalizeSummaryLength(length);
   const template = getProtocolTemplate(meetingType);
+  // Шаблон ОБРАБОТКИ (processingTemplates.js) может добавить раздел «рекомендации»
+  // поверх разделов, заданных типом встречи (protocolTemplates.js) — оси независимы.
+  const sections = includeRecommendations && !template.sections.includes('recommendations')
+    ? [...template.sections, 'recommendations']
+    : template.sections;
   const model = process.env.OPENROUTER_LLM_MODEL || 'openai/gpt-4o-mini';
-  const sectionDescriptions = template.sections
+  const sectionDescriptions = sections
     .map((key) =>
       key === 'decisions'
         ? `- decisions: массив объектов {text:string, disputed:boolean} — "${PROTOCOL_SECTION_LABELS[key]}". disputed=true, если решение прозвучало неуверенно или не было явно подтверждено всеми участниками`
-        : `- ${key}: string[] — "${PROTOCOL_SECTION_LABELS[key]}"`,
+        : key === 'recommendations'
+          ? `- recommendations: string[] — "${PROTOCOL_SECTION_LABELS[key]}" — практические советы по итогам встречи (что стоит сделать/изменить дальше), не дублируй tasks`
+          : `- ${key}: string[] — "${PROTOCOL_SECTION_LABELS[key]}"`,
     )
     .join('\n');
+  const tasksInstruction = includeTasks
+    ? ''
+    : '\n\nВАЖНО: этот шаблон обработки не включает задачи — верни tasks: [] (пустой массив), даже если в стенограмме упоминались поручения.';
   const instructionLine = instruction && String(instruction).trim()
     ? `\n\nДополнительное указание пользователя (обязательно учти при генерации): ${String(instruction).trim()}`
     : '';
@@ -443,13 +466,14 @@ async function generateSummaryWithOpenRouter(
         {
           role: 'system',
           content:
-            `Ты помощник Stenogram. Верни строго JSON без markdown. Поля: summary:string (полная версия), executiveSummary:string (краткая выжимка сути встречи, 3-5 строк), topics:string[], protocol:{${template.sections.join(',')}}, tasks:{assignee:string|null,description:string,dueText:string|null}[]. ` +
+            `Ты помощник Stenogram. Верни строго JSON без markdown. Поля: summary:string (полная версия), executiveSummary:string (краткая выжимка сути встречи, 3-5 строк), topics:string[], protocol:{${sections.join(',')}}, tasks:{assignee:string|null,description:string,dueText:string|null}[]. ` +
             `Разделы protocol (используй только перечисленные ниже, больше никаких других полей в protocol не добавляй):\n${sectionDescriptions}\n\n` +
             'Пиши по-русски, конкретно. Если исполнитель или срок не названы явно, ставь null - не выдумывай. ' +
             'Одна реплика может дать несколько задач. Если два фрагмента речи описывают одно и то же поручение - верни одну задачу, не дублируй. ' +
             'Приоритет — точность: лучше не создать задачу, чем создать ложную.' +
             speakersLine + '\n\n' +
             SUMMARY_LENGTH_INSTRUCTIONS[summaryLength] +
+            tasksInstruction +
             instructionLine,
         },
         {
@@ -468,13 +492,17 @@ async function generateSummaryWithOpenRouter(
 
   const content = body?.choices?.[0]?.message?.content;
   const parsed = parseJsonObject(content);
-  const tasks = (Array.isArray(parsed.tasks) ? parsed.tasks : parsed.actionItems || [])
-    .map(normalizeTask)
-    .filter(Boolean)
-    .map((task) => ({
-      ...task,
-      dueDate: dueDateAnchor ? resolveDueDate(task.dueText, dueDateAnchor, timezoneOffsetMinutes) : null,
-    }));
+  // includeTasks=false — принудительно пусто, независимо от того, что вернула
+  // модель (промпт просит то же самое, но не полагаемся на послушание LLM).
+  const tasks = !includeTasks
+    ? []
+    : (Array.isArray(parsed.tasks) ? parsed.tasks : parsed.actionItems || [])
+        .map(normalizeTask)
+        .filter(Boolean)
+        .map((task) => ({
+          ...task,
+          dueDate: dueDateAnchor ? resolveDueDate(task.dueText, dueDateAnchor, timezoneOffsetMinutes) : null,
+        }));
 
   return {
     model,
@@ -981,16 +1009,20 @@ export async function createRecording(input, ownerId) {
     : accountConfig?.defaultMeetingType && MEETING_TYPES.has(accountConfig.defaultMeetingType)
       ? accountConfig.defaultMeetingType
       : 'meeting';
+  // #5/#1: шаблон обработки можно задать явно при создании встречи (кнопка «+»);
+  // null сохраняем как есть — resolveProcessingTemplateKey подставит дефолт
+  // аккаунта в момент генерации протокола, а не здесь (аккаунт может измениться).
+  const processingTemplate = PROCESSING_TEMPLATE_KEYS.has(input.processingTemplate) ? input.processingTemplate : null;
 
   const result = await query(
     `
-      insert into recordings (owner_id, title, source, duration_seconds, storage_key, meeting_type)
-      values ($1, $2, $3, $4, $5, $6)
+      insert into recordings (owner_id, title, source, duration_seconds, storage_key, meeting_type, processing_template)
+      values ($1, $2, $3, $4, $5, $6, $7)
       returning id, owner_id, title, status, source, duration_seconds, storage_key,
-        original_filename, mime_type, file_size_bytes, auto_named, meeting_type, created_at, updated_at,
+        original_filename, mime_type, file_size_bytes, auto_named, meeting_type, processing_template, created_at, updated_at,
         null as projects
     `,
-    [ownerId, title, source, input.durationSeconds || null, input.storageKey || null, meetingType],
+    [ownerId, title, source, input.durationSeconds || null, input.storageKey || null, meetingType, processingTemplate],
   );
 
   const recording = mapRecording(result.rows[0]);
@@ -1252,7 +1284,7 @@ export async function getRecording(id, ownerId) {
     `
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
       , original_filename, mime_type, file_size_bytes, auto_named, meeting_url, meeting_bot_task_id,
-        recorder_engine, failure_count, meeting_type, confidential, download_locked, asr_hints, deleted_at,
+        recorder_engine, failure_count, meeting_type, processing_template, confidential, download_locked, asr_hints, deleted_at,
         ${RECORDING_PROJECTS_SELECT}
       from recordings
       where id = $1 and owner_id = $2
@@ -1329,7 +1361,11 @@ export async function getRecording(id, ownerId) {
   };
 }
 
-export async function summarizeRecording(recordingId, ownerId, { length = 'medium', instruction = '', timezoneOffsetMinutes = 0 } = {}) {
+export async function summarizeRecording(
+  recordingId,
+  ownerId,
+  { length = null, instruction = '', timezoneOffsetMinutes = 0, processingTemplate = null } = {},
+) {
   const recording = await getRecording(recordingId, ownerId);
 
   if (!recording) {
@@ -1344,13 +1380,34 @@ export async function summarizeRecording(recordingId, ownerId, { length = 'mediu
     throw new Error('Protocol is locked - unlock it before regenerating');
   }
 
+  // #9: «пересобрать по другому шаблону» — persist явного выбора на записи, если
+  // передан; иначе используем то, что на ней уже сохранено (или дефолт аккаунта).
+  let effectiveTemplateKey = recording.processingTemplate;
+  if (processingTemplate && PROCESSING_TEMPLATE_KEYS.has(processingTemplate)) {
+    effectiveTemplateKey = processingTemplate;
+    await query('update recordings set processing_template = $1 where id = $2 and owner_id = $3', [
+      processingTemplate,
+      recordingId,
+      ownerId,
+    ]);
+  }
+  const accountConfig = await getUserAccountConfig(ownerId);
+  const resolvedTemplateKey = resolveProcessingTemplateKey(effectiveTemplateKey, accountConfig.defaultProcessingTemplate);
+  const template = getProcessingTemplate(resolvedTemplateKey);
+  // Явный length (кнопки Кратко/Средне/Подробно) главнее шаблона; без него —
+  // длина шаблона. Worker дергает summarizeRecording автопосле транскрипции без
+  // length вообще — там шаблон и решает.
+  const effectiveLength = length || template.length;
+
   const generated = await generateSummaryWithOpenRouter(recording.transcript.text, {
-    length,
+    length: effectiveLength,
     meetingType: recording.meetingType,
     instruction,
     speakers: recording.speakers || [],
     dueDateAnchor: recording.createdAt ? new Date(recording.createdAt) : new Date(),
     timezoneOffsetMinutes,
+    includeTasks: template.includeTasks,
+    includeRecommendations: template.includeRecommendations,
   });
   const originalSnapshot = JSON.stringify({
     summary: generated.summary,
@@ -1429,6 +1486,24 @@ export async function summarizeRecording(recordingId, ownerId, { length = 'mediu
   }
 
   return result;
+}
+
+// #9: «удалить действие» — стирает протокол и извлечённые задачи, не трогая
+// стенограмму/аудио. Шаги «Протокол»/«Задачи» в мастере возвращаются в
+// состояние «не сделано» (recording.summary/tasks станут null/[]).
+export async function deleteRecordingSummary(recordingId, ownerId) {
+  const owned = await query('select id from recordings where id = $1 and owner_id = $2', [recordingId, ownerId]);
+
+  if (owned.rowCount === 0) {
+    return false;
+  }
+
+  await transaction(async (client) => {
+    await client.query('delete from recording_tasks where recording_id = $1', [recordingId]);
+    await client.query('delete from recording_summaries where recording_id = $1', [recordingId]);
+  });
+
+  return true;
 }
 
 export async function updateRecordingMetadata(recordingId, ownerId, input) {
@@ -2762,6 +2837,7 @@ export function registerRecordingRoutes(app) {
         length: body.length,
         instruction: body.instruction,
         timezoneOffsetMinutes: body.timezoneOffsetMinutes,
+        processingTemplate: body.processingTemplate,
       });
 
       if (!result) {
@@ -2772,6 +2848,18 @@ export function registerRecordingRoutes(app) {
     } catch (error) {
       return c.json({ error: error.message || 'Failed to summarize recording' }, 400);
     }
+  });
+
+  // #9: удалить протокол+задачи (без пересборки) — «удалить действие».
+  app.delete('/api/recordings/:id/summary', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const ok = await deleteRecordingSummary(c.req.param('id'), user.id);
+
+    if (!ok) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    return c.json({ ok: true });
   });
 
   app.patch('/api/recordings/:id/summary', requireAuth, async (c) => {

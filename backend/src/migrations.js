@@ -755,6 +755,15 @@ const migrations = [
         on bot_connection_events(recording_id, created_at);
     `,
   },
+  {
+    id: '037_processing_template',
+    sql: `
+      -- Именованный шаблон обработки (краткий/стандарт/развёрнутый), выбранный при
+      -- создании встречи или при пересборке протокола — null означает «дефолт
+      -- аккаунта» (account_config.defaultProcessingTemplate).
+      alter table recordings add column if not exists processing_template text;
+    `,
+  },
 ];
 
 export async function runMigrations() {

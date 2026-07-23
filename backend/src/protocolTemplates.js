@@ -16,7 +16,12 @@ export const PROTOCOL_TEMPLATES = {
 
 export const MEETING_TYPES = new Set(Object.keys(PROTOCOL_TEMPLATES));
 
-export const PROTOCOL_ALL_SECTIONS = ['participants', 'agenda', 'discussions', 'decisions', 'risks', 'questions', 'nextSteps'];
+// 'recommendations' не входит ни в один фиксированный PROTOCOL_TEMPLATES —
+// добавляется динамически, когда выбранный шаблон ОБРАБОТКИ (processingTemplates.js,
+// другая ось: краткий/стандарт/развёрнутый) требует рекомендации. Всё равно
+// в PROTOCOL_ALL_SECTIONS, чтобы normalizeProtocol/jsonb-хранение работали как
+// с любым другим разделом.
+export const PROTOCOL_ALL_SECTIONS = ['participants', 'agenda', 'discussions', 'decisions', 'risks', 'questions', 'nextSteps', 'recommendations'];
 
 export const PROTOCOL_SECTION_LABELS = {
   participants: 'Участники',
@@ -26,6 +31,7 @@ export const PROTOCOL_SECTION_LABELS = {
   risks: 'Риски',
   questions: 'Открытые вопросы',
   nextSteps: 'Следующие шаги',
+  recommendations: 'Рекомендации',
 };
 
 export function getProtocolTemplate(meetingType) {

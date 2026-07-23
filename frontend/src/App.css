@@ -4428,3 +4428,52 @@ a.bitrix-sent-badge {
   background: linear-gradient(135deg, color-mix(in srgb, var(--accent-primary) 10%, var(--bg-elevated)), var(--bg-elevated) 55%);
   border-color: color-mix(in srgb, var(--accent-primary) 30%, var(--border-subtle));
 }
+
+/* ===== Волна B1/B4: шаблоны обработки, пересборка ===== */
+.detail-rebuild-group {
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.detail-rebuild-select {
+  display: grid;
+  gap: 5px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  min-width: 220px;
+  flex: 1 1 220px;
+}
+
+.detail-rebuild-select select {
+  min-height: 40px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  padding: 0 10px;
+  text-transform: none;
+  font-weight: 600;
+}
+
+/* ===== #3: групповой выбор встреч ===== */
+.recording-card-checkbox {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 4px;
+  cursor: pointer;
+}
+
+.recording-card.is-checked {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px var(--accent-primary);
+}
+
+.bulk-select-bar .button-danger {
+  min-width: 160px;
+}

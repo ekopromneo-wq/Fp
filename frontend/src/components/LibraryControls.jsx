@@ -43,6 +43,8 @@ function LibraryControls({
   onToggleTrash,
   sortOrder,
   onToggleSort,
+  selectionMode,
+  onToggleSelectionMode,
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const activeExtraCount = Object.values(filters).filter(Boolean).length;
@@ -92,6 +94,15 @@ function LibraryControls({
           title="Порядок по времени создания"
         >
           {sortOrder === 'asc' ? '↑ Старые' : '↓ Новые'}
+        </button>
+
+        {/* #3: групповые действия — выбор нескольких встреч для удаления. */}
+        <button
+          className={`button button-secondary${selectionMode ? ' is-active' : ''}`}
+          type="button"
+          onClick={onToggleSelectionMode}
+        >
+          {selectionMode ? 'Отменить выбор' : 'Выбрать'}
         </button>
 
         <button

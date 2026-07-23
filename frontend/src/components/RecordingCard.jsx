@@ -77,7 +77,18 @@ function SyncPill({ syncState, syncProgress, syncError }) {
   return null;
 }
 
-export default function RecordingCard({ recording, isSelected, onSelect, onDelete, onProcess, isDeleting, enableSwipe }) {
+export default function RecordingCard({
+  recording,
+  isSelected,
+  onSelect,
+  onDelete,
+  onProcess,
+  isDeleting,
+  enableSwipe,
+  selectionMode,
+  isChecked,
+  onToggleChecked,
+}) {
   const { cardRef, trackRef, handlers } = useSwipeAction({
     enabled: Boolean(enableSwipe),
     onSwipeRight: () => onProcess?.(recording),
@@ -85,7 +96,7 @@ export default function RecordingCard({ recording, isSelected, onSelect, onDelet
   });
 
   return (
-    <article className={`recording-card ${isSelected ? 'is-selected' : ''}`}>
+    <article className={`recording-card ${isSelected ? 'is-selected' : ''}${isChecked ? ' is-checked' : ''}`}>
       <div className="recording-card-clip">
         <div className="recording-card-swipe-bg" ref={trackRef} />
 
@@ -104,6 +115,18 @@ export default function RecordingCard({ recording, isSelected, onSelect, onDelet
           {...handlers}
           style={{ touchAction: enableSwipe ? 'pan-y' : undefined }}
         >
+          {/* #3: чекбокс группового выбора — виден только в режиме выбора. */}
+          {selectionMode ? (
+            <input
+              type="checkbox"
+              className="recording-card-checkbox"
+              checked={Boolean(isChecked)}
+              onChange={() => onToggleChecked?.()}
+              onClick={(event) => event.stopPropagation()}
+              aria-label="Выбрать встречу"
+            />
+          ) : null}
+
           <div className="recording-card-main">
             <strong className="recording-card-title">{recording.title || recording.originalFilename}</strong>
 
@@ -136,19 +159,21 @@ export default function RecordingCard({ recording, isSelected, onSelect, onDelet
             ) : null}
           </div>
 
-          <button
-            className="recording-card-delete"
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDelete(recording);
-            }}
-            disabled={isDeleting}
-            aria-label="Удалить запись"
-            title="Удалить"
-          >
-            {isDeleting ? '…' : '✕'}
-          </button>
+          {!selectionMode ? (
+            <button
+              className="recording-card-delete"
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDelete(recording);
+              }}
+              disabled={isDeleting}
+              aria-label="Удалить запись"
+              title="Удалить"
+            >
+              {isDeleting ? '…' : '✕'}
+            </button>
+          ) : null}
         </div>
       </div>
     </article>

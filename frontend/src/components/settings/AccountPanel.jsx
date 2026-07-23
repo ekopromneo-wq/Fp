@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/api.js';
 import { formatDate } from '../../lib/format.js';
-import { MEETING_TYPE_OPTIONS } from '../../lib/exporters.js';
+import { MEETING_TYPE_OPTIONS, PROCESSING_TEMPLATE_OPTIONS } from '../../lib/exporters.js';
 
 // US-16.3: отдельные согласия на обработку и их подписи.
 const PROCESSING_CONSENT_LABELS = [
@@ -43,7 +43,7 @@ function deviceLabel(userAgent) {
 export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
   const [sessions, setSessions] = useState([]);
   const [showAllSessions, setShowAllSessions] = useState(false);
-  const [account, setAccount] = useState({ defaultMeetingType: 'meeting', recordingConsentWarning: true });
+  const [account, setAccount] = useState({ defaultMeetingType: 'meeting', recordingConsentWarning: true, defaultProcessingTemplate: 'standard' });
   const [isSavingAccount, setIsSavingAccount] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
@@ -203,6 +203,27 @@ export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
             ))}
           </select>
         </label>
+
+        {/* #1: шаблон ОБРАБОТКИ по умолчанию — объём результата, независимая ось
+            от типа встречи выше (тот задаёт только разделы протокола). */}
+        <h3>Шаблон обработки по умолчанию</h3>
+        <label className="account-inline">
+          <select
+            value={account.defaultProcessingTemplate || 'standard'}
+            onChange={(event) => saveAccount({ defaultProcessingTemplate: event.target.value })}
+            disabled={isSavingAccount}
+          >
+            {PROCESSING_TEMPLATE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="field-hint">
+          {PROCESSING_TEMPLATE_OPTIONS.find((option) => option.value === (account.defaultProcessingTemplate || 'standard'))?.description}
+          {' '}Можно выбрать другой шаблон для конкретной встречи при её создании или пересобрать протокол позже.
+        </p>
 
         <label className="settings-toggle">
           <input

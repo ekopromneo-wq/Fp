@@ -5,6 +5,7 @@ import { query } from './db.js';
 // (обработчик логина), а не при загрузке модуля.
 import { notifyNewLogin } from './notifications.js';
 import { MEETING_TYPES } from './protocolTemplates.js';
+import { PROCESSING_TEMPLATE_KEYS } from './processingTemplates.js';
 import { deleteRecordingAudio } from './storage.js';
 import {
   buildAuthorizeUrl,
@@ -491,7 +492,13 @@ export async function getUserNotificationConfig(userId) {
 }
 
 // US-16.2: настройки уровня аккаунта — шаблон протокола по умолчанию и т.п.
-const DEFAULT_ACCOUNT_CONFIG = { defaultMeetingType: 'meeting', recordingConsentWarning: true };
+const DEFAULT_ACCOUNT_CONFIG = {
+  defaultMeetingType: 'meeting',
+  recordingConsentWarning: true,
+  // Шаблон ОБРАБОТКИ по умолчанию (объём результата: краткий/стандарт/развёрнутый) —
+  // отдельная ось от defaultMeetingType (тот задаёт разделы протокола по типу встречи).
+  defaultProcessingTemplate: 'standard',
+};
 
 function normalizeAccountConfig(input = {}, previous = {}) {
   const base = { ...DEFAULT_ACCOUNT_CONFIG, ...previous };
@@ -500,8 +507,11 @@ function normalizeAccountConfig(input = {}, previous = {}) {
     : base.defaultMeetingType;
   const recordingConsentWarning =
     typeof input.recordingConsentWarning === 'boolean' ? input.recordingConsentWarning : base.recordingConsentWarning;
+  const defaultProcessingTemplate = PROCESSING_TEMPLATE_KEYS.has(input.defaultProcessingTemplate)
+    ? input.defaultProcessingTemplate
+    : base.defaultProcessingTemplate;
 
-  return { defaultMeetingType, recordingConsentWarning };
+  return { defaultMeetingType, recordingConsentWarning, defaultProcessingTemplate };
 }
 
 export async function getUserAccountConfig(userId) {

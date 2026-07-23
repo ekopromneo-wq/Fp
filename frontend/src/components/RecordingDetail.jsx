@@ -11,7 +11,7 @@ import TranscribingProgress from './TranscribingProgress.jsx';
 import BotConnectionLog from './BotConnectionLog.jsx';
 import StepCard from './StepCard.jsx';
 import { getAudioUrl, isProcessingStatus } from '../lib/api.js';
-import { MEETING_TYPE_OPTIONS } from '../lib/exporters.js';
+import { MEETING_TYPE_OPTIONS, PROCESSING_TEMPLATE_OPTIONS } from '../lib/exporters.js';
 import { formatDate, formatFileSize, pluralizeRu } from '../lib/format.js';
 import { getStatusLabel } from '../lib/statusLabels.js';
 
@@ -37,6 +37,7 @@ function RecordingDetail({
   setSummaryLength,
   isSummarizing,
   onSummarize,
+  onDeleteSummary,
   onCopyExport,
   onDownloadExport,
   onDownloadDocxExport,
@@ -92,6 +93,9 @@ function RecordingDetail({
   const unnamedSpeakers = (recording.speakers || []).filter((speaker) => !speaker.displayName).length;
   const tasksNoAssignee = (recording.tasks || []).filter((task) => !task.assignee).length;
   const [shareSkipped, setShareSkipped] = useState(false);
+  // #9: выбор шаблона для «Пересобрать по шаблону» — стартует с текущего шаблона
+  // записи (или 'standard', если ещё не задан).
+  const [rebuildTemplate, setRebuildTemplate] = useState(recording.processingTemplate || 'standard');
 
   // Текущий шаг — по достигнутому результату (маркер ● в списке шагов).
   const activeStep = hasSummary ? 3 : hasTranscript ? 2 : 1;
@@ -533,6 +537,45 @@ function RecordingDetail({
             >
               {isSummarizing ? 'Готовим...' : recording.summary ? 'Переделать протокол' : 'Сделать протокол'}
             </button>
+          </div>
+
+          {/* #9: пересобрать по другому шаблону обработки (краткий/+задачи/развёрнутый)
+              простой нативной кнопкой, отдельно от toggle длины выше. */}
+          <div className="detail-action-group detail-rebuild-group">
+            <label className="detail-rebuild-select">
+              Шаблон обработки
+              <select value={rebuildTemplate} onChange={(event) => setRebuildTemplate(event.target.value)} disabled={isSummarizing}>
+                {PROCESSING_TEMPLATE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className={`button button-secondary${isSummarizing ? ' is-busy' : ''}`}
+              type="button"
+              onClick={() => onSummarize(recording, { processingTemplate: rebuildTemplate })}
+              disabled={isSummarizing}
+              title="Пересобрать протокол и задачи по выбранному шаблону"
+            >
+              Пересобрать по шаблону
+            </button>
+            {hasSummary ? (
+              <button
+                className="button button-danger"
+                type="button"
+                onClick={() => {
+                  if (window.confirm('Удалить протокол и задачи? Стенограмма останется.')) {
+                    onDeleteSummary(recording);
+                  }
+                }}
+                disabled={isSummarizing}
+                title="Удалить протокол и задачи (стенограмма останется)"
+              >
+                Удалить протокол
+              </button>
+            ) : null}
           </div>
 
           <div className="protocol-print-area">
