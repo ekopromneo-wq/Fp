@@ -3562,6 +3562,23 @@ a.bitrix-sent-badge {
   align-items: center;
 }
 
+/* select без явной ширины принимает intrinsic-ширину по самому длинному
+   <option> (напр. «Развёрнутый протокол + задачи + рекомендации») и распирает
+   узкий флекс-контейнер за экран — режем явной шириной. */
+.account-inline select {
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.field-hint {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .account-inline select,
 .account-inline input {
   min-height: 40px;
@@ -4449,6 +4466,9 @@ a.bitrix-sent-badge {
 }
 
 .detail-rebuild-select select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 40px;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
