@@ -785,6 +785,11 @@ body::after {
   position: sticky;
   top: 8px;
   z-index: 10;
+  /* Грид-элемент без min-width:0 растёт до min-content своих детей (сумма всех
+     вкладок) — при 4+ вкладках это шире экрана, и overflow-x:auto не спасает,
+     т.к. сам бокс уже вылез за родителя. min-width:0 отдаёт скролл контейнеру. */
+  min-width: 0;
+  max-width: 100%;
 }
 
 .settings-tabs::-webkit-scrollbar {
