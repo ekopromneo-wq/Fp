@@ -45,6 +45,7 @@ function LibraryControls({
   onToggleSort,
   selectionMode,
   onToggleSelectionMode,
+  onCreateMeeting,
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const activeExtraCount = Object.values(filters).filter(Boolean).length;
@@ -83,6 +84,11 @@ function LibraryControls({
       </div>
 
       <div className="library-controls-actions">
+        {/* #5: создать встречу загрузкой файла или ссылкой, с выбором шаблона обработки. */}
+        <button className="button button-primary" type="button" onClick={onCreateMeeting}>
+          ＋ Новая встреча
+        </button>
+
         <button className="button button-secondary" type="button" onClick={onToggleTrash}>
           {trashMode ? '← К встречам' : 'Корзина'}
         </button>

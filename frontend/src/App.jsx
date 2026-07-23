@@ -35,6 +35,7 @@ import {
   copyText,
   downloadBlob,
   downloadTextFile,
+  PROCESSING_TEMPLATE_OPTIONS,
 } from './lib/exporters.js';
 import {
   isNetworkFailure,
@@ -129,8 +130,14 @@ function App() {
     hasTasks: '',
   });
   const [recordingDraft, setRecordingDraft] = useState({ title: '', projectIds: [], meetingType: 'meeting', asrHints: '' });
-  const [meetingBotDraft, setMeetingBotDraft] = useState({ meetingUrl: '', title: '' });
+  const [meetingBotDraft, setMeetingBotDraft] = useState({ meetingUrl: '', title: '', processingTemplate: 'standard' });
   const [isJoiningMeeting, setIsJoiningMeeting] = useState(false);
+  // #5: модалка «+ создать встречу» — файл или ссылка на встречу, с выбором
+  // шаблона обработки. Файл переиспользует uploadRecordingFile, ссылка —
+  // существующий handleJoinMeeting (meetingBotDraft уже несёт processingTemplate).
+  const [isCreateMeetingOpen, setIsCreateMeetingOpen] = useState(false);
+  const [createMeetingMode, setCreateMeetingMode] = useState('file');
+  const [createMeetingTemplate, setCreateMeetingTemplate] = useState('standard');
   const [isStoppingMeetingBot, setIsStoppingMeetingBot] = useState(false);
   const [isSavingRecording, setIsSavingRecording] = useState(false);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
@@ -765,7 +772,7 @@ function App() {
         throw new Error(data.error || 'Не удалось отправить бота на встречу');
       }
 
-      setMeetingBotDraft({ meetingUrl: '', title: '' });
+      setMeetingBotDraft({ meetingUrl: '', title: '', processingTemplate: 'standard' });
       await loadRecordings(data.recording.id);
       setStatus(`Бот отправлен на встречу "${data.recording.title}"`);
     } catch (error) {
@@ -1008,7 +1015,7 @@ function App() {
     refreshUnsyncedCount();
   }, [currentUser?.id]);
 
-  async function uploadRecordingFile(file, source = 'frontend-upload') {
+  async function uploadRecordingFile(file, source = 'frontend-upload', { processingTemplate } = {}) {
     setIsUploading(true);
 
     try {
@@ -1022,7 +1029,7 @@ function App() {
       // US-3.5: режим «только на устройстве» — запись не выгружается и не
       // обрабатывается в облаке (осознанный выбор пользователя ради приватности).
       const deviceOnly = useUiStore.getState().storageMode === 'device';
-      const queueItem = await enqueueRecording(file, title, source, { deviceOnly });
+      const queueItem = await enqueueRecording(file, title, source, { deviceOnly, processingTemplate });
 
       setRecordings((current) => [toSyntheticRecording(queueItem), ...current]);
       // На мобильном не открываем деталь сразу — показываем список с новой записью
@@ -1745,7 +1752,104 @@ function App() {
             onToggleSort={() => setSortOrder((v) => (v === 'asc' ? 'desc' : 'asc'))}
             selectionMode={selectionMode}
             onToggleSelectionMode={toggleSelectionMode}
+            onCreateMeeting={() => setIsCreateMeetingOpen(true)}
           />
+
+          {/* #5: «+ Новая встреча» — файл или ссылка на встречу, с выбором шаблона
+              обработки. Ссылка переиспользует meetingBotDraft/handleJoinMeeting
+              (тот же путь, что и приглашение бота с главной). */}
+          {isCreateMeetingOpen ? (
+            <div className="modal-overlay" onClick={() => setIsCreateMeetingOpen(false)}>
+              <div className="modal" role="dialog" aria-modal="true" aria-label="Новая встреча" onClick={(event) => event.stopPropagation()}>
+                <h3>Новая встреча</h3>
+
+                <div className="create-meeting-mode-toggle" role="group" aria-label="Способ создания">
+                  <button
+                    type="button"
+                    className={`summary-length-option${createMeetingMode === 'file' ? ' active' : ''}`}
+                    onClick={() => setCreateMeetingMode('file')}
+                  >
+                    Файл
+                  </button>
+                  <button
+                    type="button"
+                    className={`summary-length-option${createMeetingMode === 'link' ? ' active' : ''}`}
+                    onClick={() => setCreateMeetingMode('link')}
+                  >
+                    Ссылка на встречу
+                  </button>
+                </div>
+
+                <label className="modal-field">
+                  Шаблон обработки
+                  <select value={createMeetingTemplate} onChange={(event) => setCreateMeetingTemplate(event.target.value)}>
+                    {PROCESSING_TEMPLATE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {createMeetingMode === 'file' ? (
+                  <form
+                    className="modal-form"
+                    onSubmit={(event) => event.preventDefault()}
+                  >
+                    <label className="button button-primary modal-file-picker">
+                      Выбрать аудио/видео файл
+                      <input
+                        type="file"
+                        accept="audio/*,video/*,.webm,.mp3,.wav,.m4a,.ogg,.mp4,.mov,.mkv"
+                        hidden
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          event.target.value = '';
+                          if (file) {
+                            setIsCreateMeetingOpen(false);
+                            uploadRecordingFile(file, 'frontend-upload', { processingTemplate: createMeetingTemplate });
+                          }
+                        }}
+                      />
+                    </label>
+                    <p className="field-hint">Текстовые расшифровки сторонних сервисов пока не поддерживаются — только аудио/видео.</p>
+                  </form>
+                ) : (
+                  <form
+                    className="modal-form"
+                    onSubmit={(event) => {
+                      setMeetingBotDraft((current) => ({ ...current, processingTemplate: createMeetingTemplate }));
+                      handleJoinMeeting(event);
+                      setIsCreateMeetingOpen(false);
+                    }}
+                  >
+                    <input
+                      autoFocus
+                      value={meetingBotDraft.meetingUrl}
+                      onChange={(event) => setMeetingBotDraft((current) => ({ ...current, meetingUrl: event.target.value }))}
+                      placeholder="Ссылка на встречу (Zoom, Meet, Телемост...)"
+                    />
+                    <input
+                      value={meetingBotDraft.title}
+                      onChange={(event) => setMeetingBotDraft((current) => ({ ...current, title: event.target.value }))}
+                      placeholder="Название встречи (необязательно)"
+                    />
+                    <div className="modal-actions">
+                      <button className="button button-primary" type="submit" disabled={isJoiningMeeting}>
+                        {isJoiningMeeting ? 'Отправляем...' : 'Пригласить бота'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                <div className="modal-actions">
+                  <button className="button button-secondary" type="button" onClick={() => setIsCreateMeetingOpen(false)}>
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <section className="status-line library-status" aria-live="polite">
             <span>{status || (hasRecordings ? `${recordings.length} ${pluralizeRu(recordings.length, ['встреча', 'встречи', 'встреч'])}${trashMode ? ' в корзине' : ''}` : trashMode ? 'Корзина пуста' : 'Встреч пока нет')}</span>

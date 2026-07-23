@@ -50,7 +50,7 @@ export function toSyntheticRecording(item) {
   };
 }
 
-export async function enqueueRecording(file, title, source, { deviceOnly = false } = {}) {
+export async function enqueueRecording(file, title, source, { deviceOnly = false, processingTemplate = null } = {}) {
   const item = {
     localId: generateLocalId(),
     title: title || file.name,
@@ -62,6 +62,9 @@ export async function enqueueRecording(file, title, source, { deviceOnly = false
     bytesAcked: 0,
     chunkSizeBytes: null,
     serverRecordingId: null,
+    // #5: шаблон обработки, выбранный при создании встречи (кнопка «+») —
+    // уезжает в теле POST /api/recordings при первой попытке синка ниже.
+    processingTemplate,
     // US-3.5: 'device-only' — запись остаётся на устройстве и НЕ выгружается
     // (processQueue её пропускает). Расшифровки/протокола не будет — осознанный
     // выбор пользователя ради приватности. Обычная запись — 'local-pending'.
@@ -98,7 +101,7 @@ async function syncOneItem(apiFetch, item, callbacks) {
     if (!serverRecordingId) {
       const createResponse = await apiFetch('/api/recordings', {
         method: 'POST',
-        body: JSON.stringify({ title: item.title, source: item.source }),
+        body: JSON.stringify({ title: item.title, source: item.source, processingTemplate: item.processingTemplate || undefined }),
       });
 
       if (!createResponse.ok) {

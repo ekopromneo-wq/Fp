@@ -1056,14 +1056,16 @@ export async function createMeetingBotRecording(input, ownerId) {
   }
 
   const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : 'Встреча по ссылке';
+  // #5: шаблон обработки, выбранный в модалке «+ создать встречу».
+  const processingTemplate = PROCESSING_TEMPLATE_KEYS.has(input.processingTemplate) ? input.processingTemplate : null;
 
   const inserted = await query(
     `
-      insert into recordings (owner_id, title, source, status, meeting_url)
-      values ($1, $2, 'meeting_bot', 'queued', $3)
+      insert into recordings (owner_id, title, source, status, meeting_url, processing_template)
+      values ($1, $2, 'meeting_bot', 'queued', $3, $4)
       returning id
     `,
-    [ownerId, title, meetingUrl],
+    [ownerId, title, meetingUrl, processingTemplate],
   );
   const recordingId = inserted.rows[0].id;
   // US-15.1: журнал подключений — запрос входа бота.
@@ -1156,14 +1158,15 @@ export async function createSelfHostedMeetingRecording(input, ownerId) {
   }
 
   const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : 'Встреча по ссылке';
+  const processingTemplate = PROCESSING_TEMPLATE_KEYS.has(input.processingTemplate) ? input.processingTemplate : null;
 
   const inserted = await query(
     `
-      insert into recordings (owner_id, title, source, status, meeting_url, recorder_engine)
-      values ($1, $2, 'recorder_bot', 'queued', $3, 'self_hosted')
+      insert into recordings (owner_id, title, source, status, meeting_url, recorder_engine, processing_template)
+      values ($1, $2, 'recorder_bot', 'queued', $3, 'self_hosted', $4)
       returning id
     `,
-    [ownerId, title, meetingUrl],
+    [ownerId, title, meetingUrl, processingTemplate],
   );
   const recordingId = inserted.rows[0].id;
   // US-15.1: журнал подключений — запрос входа самохост-бота.
