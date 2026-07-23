@@ -32,8 +32,51 @@ function ProjectsPage({ projects, projectsPage, onOpenRecording }) {
   const [showCreate, setShowCreate] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState(null);
 
-  const activeProjects = projects.filter((project) => !project.isArchived);
-  const archivedProjects = projects.filter((project) => project.isArchived);
+  // #11: поиск по названию, сортировка (по названию / по времени последней
+  // обработки), закрепление проектов сверху — сортировка и закреп сохраняются
+  // на устройстве между сессиями.
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('recent');
+  const [pinnedIds, setPinnedIds] = useState(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem('stenogram-pinned-projects') || '[]'));
+    } catch {
+      return new Set();
+    }
+  });
+
+  function togglePin(projectId) {
+    setPinnedIds((current) => {
+      const next = new Set(current);
+      if (next.has(projectId)) {
+        next.delete(projectId);
+      } else {
+        next.add(projectId);
+      }
+      try {
+        localStorage.setItem('stenogram-pinned-projects', JSON.stringify([...next]));
+      } catch {
+        // localStorage может быть недоступен — закреп просто не переживёт сессию.
+      }
+      return next;
+    });
+  }
+
+  function sortProjects(list) {
+    const sorted = [...list].sort((a, b) =>
+      sortBy === 'name'
+        ? a.name.localeCompare(b.name, 'ru')
+        : new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime(),
+    );
+    // Закреплённые — всегда первыми, порядок между ними сохраняет выбранную сортировку.
+    return [...sorted.filter((p) => pinnedIds.has(p.id)), ...sorted.filter((p) => !pinnedIds.has(p.id))];
+  }
+
+  const query = searchQuery.trim().toLowerCase();
+  const matchesQuery = (project) => !query || project.name.toLowerCase().includes(query);
+
+  const activeProjects = sortProjects(projects.filter((project) => !project.isArchived && matchesQuery(project)));
+  const archivedProjects = projects.filter((project) => project.isArchived && matchesQuery(project));
 
   function renderProject(project) {
     const draft = getProjectDraft(project);
@@ -43,6 +86,17 @@ function ProjectsPage({ projects, projectsPage, onOpenRecording }) {
     return (
       <article className={`project-card ${project.isArchived ? 'is-archived' : ''}`} key={project.id}>
         <div className="project-card-header">
+          {!project.isArchived ? (
+            <button
+              type="button"
+              className={`project-pin-toggle${pinnedIds.has(project.id) ? ' is-pinned' : ''}`}
+              onClick={() => togglePin(project.id)}
+              aria-label={pinnedIds.has(project.id) ? 'Открепить проект' : 'Закрепить проект сверху'}
+              title={pinnedIds.has(project.id) ? 'Открепить' : 'Закрепить сверху'}
+            >
+              {pinnedIds.has(project.id) ? '★' : '☆'}
+            </button>
+          ) : null}
           <span className="project-chip" style={{ '--project-color': project.color }}>
             {project.name}
           </span>
@@ -216,6 +270,24 @@ function ProjectsPage({ projects, projectsPage, onOpenRecording }) {
 
   return (
     <section className="projects-page" aria-label="Проекты">
+      {/* #11: поиск по названию + сортировка (имя / последняя обработка). */}
+      <div className="projects-toolbar">
+        <input
+          className="projects-search"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Поиск проекта по названию"
+        />
+        <button
+          className="button button-secondary"
+          type="button"
+          onClick={() => setSortBy((current) => (current === 'name' ? 'recent' : 'name'))}
+          title="Сортировка проектов"
+        >
+          {sortBy === 'name' ? 'По названию' : 'По активности'}
+        </button>
+      </div>
+
       <button
         className="button button-primary add-toggle"
         type="button"

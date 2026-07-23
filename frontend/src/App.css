@@ -4555,3 +4555,37 @@ a.bitrix-sent-badge {
   text-align: center;
   min-height: 46px;
 }
+
+/* ===== #11: поиск/сортировка/закреп проектов ===== */
+.projects-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.projects-search {
+  flex: 1 1 220px;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  padding: 0 12px;
+}
+
+.project-pin-toggle {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px;
+}
+
+.project-pin-toggle.is-pinned {
+  color: var(--accent-warning);
+}
