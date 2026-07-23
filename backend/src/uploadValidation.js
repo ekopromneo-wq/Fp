@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { getFfprobeDurationSeconds } from './ffmpeg.js';
@@ -60,6 +60,21 @@ async function probeAudioAtPath(inputPath) {
   try {
     durationSeconds = await getFfprobeDurationSeconds(inputPath);
   } catch (error) {
+    // Диагностика «повреждённых» загрузок: реальная причина ffprobe/ffmpeg в лог
+    // + копия файла для вскрытия (только небольшие файлы — микрофонные записи).
+    console.error(`Upload probe failed for ${inputPath}:`, error.message);
+    try {
+      const size = (await stat(inputPath)).size;
+      if (size <= 50 * 1024 * 1024) {
+        const rejectedDir = process.env.UPLOAD_STAGING_DIR || path.join(process.cwd(), 'data', 'upload-staging');
+        await mkdir(rejectedDir, { recursive: true });
+        const copyPath = path.join(rejectedDir, `rejected-${Date.now()}`);
+        await copyFile(inputPath, copyPath);
+        console.error(`Rejected upload saved for post-mortem: ${copyPath} (${size} bytes)`);
+      }
+    } catch {
+      // Диагностика не должна менять поведение основного пути.
+    }
     throw new UploadValidationError(
       'file_corrupt',
       'Файл повреждён или формат не поддерживается. Загрузите другой файл.',
