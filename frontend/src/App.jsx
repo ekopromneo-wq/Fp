@@ -1661,6 +1661,7 @@ function App() {
         isMicPaused={isMicPaused}
         canPauseMicRecording={canPauseMicRecording}
         micDuration={micDuration}
+        micLevel={micLevel}
         isMicLevelLow={isMicLevelLow}
         analyserRef={micAnalyserRef}
         onToggleRecording={startRecordingWithConsent}

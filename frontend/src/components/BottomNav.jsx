@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { formatDuration } from '../lib/format.js';
+import BrandMicIcon from './BrandMicIcon.jsx';
 
 /**
  * Нижняя навигация (Bottom-Heavy / FABar по дизайн-системе): основные разделы в
@@ -141,12 +142,8 @@ export default function BottomNav({
                 <span className="bottom-nav-fab-time">{formatDuration(micDuration)}</span>
               </span>
             ) : (
-              /* #13: фирменный знак — микрофон с 4 строками стенограммы. */
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="4" y="3" width="5" height="9" rx="2.5" />
-                <path d="M3 10.5a3.5 3.5 0 0 0 7 0M6.5 14v3.5" />
-                <path d="M13 5h8M13 9h8M13 13h8M13 17h6" />
-              </svg>
+              /* #13: фирменный знак — микрофон на стойке с 4 строками внутри. */
+              <BrandMicIcon className="bottom-nav-fab-icon" />
             )}
           </button>
           {isMicRecording && canPauseMicRecording ? (

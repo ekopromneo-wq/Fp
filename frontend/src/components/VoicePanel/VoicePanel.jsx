@@ -1,4 +1,5 @@
 import Waveform from './Waveform.jsx';
+import BrandMicIcon from '../BrandMicIcon.jsx';
 import { formatDuration } from '../../lib/format.js';
 
 export default function VoicePanel({
@@ -8,6 +9,7 @@ export default function VoicePanel({
   isMicPaused,
   canPauseMicRecording,
   micDuration,
+  micLevel,
   isMicLevelLow,
   analyserRef,
   onToggleRecording,
@@ -70,9 +72,9 @@ export default function VoicePanel({
             aria-label={isMicRecording ? 'Остановить запись' : 'Начать запись'}
           >
             {isMicRecording ? (
-              <span className={`eq-bars${isMicPaused ? ' is-paused' : ''}`} aria-hidden="true">
-                <span /><span /><span /><span /><span />
-              </span>
+              // #13/полосочки: фирменный микрофон, 4 строки внутри капсулы двигаются
+              // по реальному уровню сигнала (пауза — level=null, застывают статично).
+              <BrandMicIcon className="voice-panel-record-icon" level={isMicPaused ? null : micLevel ?? 0} />
             ) : (
               '●'
             )}

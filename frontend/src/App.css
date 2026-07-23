@@ -4382,33 +4382,6 @@ a.bitrix-sent-badge {
 
 /* ===== Волна A: живая запись, индикатор обработки, тиффани ===== */
 
-/* #6: 5 столбиков-эквалайзер внутри красной кнопки записи. */
-.eq-bars {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 4px;
-  height: 30px;
-}
-
-.eq-bars span {
-  width: 5px;
-  border-radius: 3px;
-  background: #fff;
-  animation: eq-bounce 0.9s ease-in-out infinite;
-}
-
-.eq-bars span:nth-child(1) { height: 40%; animation-delay: 0s; }
-.eq-bars span:nth-child(2) { height: 75%; animation-delay: 0.15s; }
-.eq-bars span:nth-child(3) { height: 100%; animation-delay: 0.3s; }
-.eq-bars span:nth-child(4) { height: 65%; animation-delay: 0.45s; }
-.eq-bars span:nth-child(5) { height: 45%; animation-delay: 0.6s; }
-
-.eq-bars.is-paused span { animation-play-state: paused; }
-
-@keyframes eq-bounce {
-  0%, 100% { transform: scaleY(0.5); }
-  50% { transform: scaleY(1); }
-}
 
 /* #7: логотип-индикатор обработки — строки «печатаются». */
 .processing-logo {
@@ -4588,4 +4561,15 @@ a.bitrix-sent-badge {
 
 .project-pin-toggle.is-pinned {
   color: var(--accent-warning);
+}
+
+/* ===== BrandMicIcon: фирменный микрофон-со-стойкой (idle FAB + запись) ===== */
+.bottom-nav-fab-icon {
+  width: 26px;
+  height: 26px;
+}
+
+.voice-panel-record-icon {
+  width: 44px;
+  height: 44px;
 }
