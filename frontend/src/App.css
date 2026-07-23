@@ -765,6 +765,10 @@ body::after {
 
 .settings-page {
   display: grid;
+  /* Без явного трека implicit-колонка сайзится по auto (max-content ребёнка,
+     напр. .settings-tabs с 4 вкладками) и распирает грид шире родителя — тот же
+     паттерн, что и у .workspace. minmax(0,1fr) ограничивает track родителем. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   margin-top: 18px;
 }
@@ -3550,6 +3554,7 @@ a.bitrix-sent-badge {
 /* ===== Эпик 16: аккаунт ===== */
 .account-block {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   padding: 14px 0;
   border-top: 1px solid var(--border-subtle);
@@ -3565,6 +3570,8 @@ a.bitrix-sent-badge {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* select без явной ширины принимает intrinsic-ширину по самому длинному
