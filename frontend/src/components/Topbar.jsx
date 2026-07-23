@@ -82,7 +82,7 @@ export default function Topbar({
                 ? 'Проекты'
                 : activePage === 'tasksearch'
                   ? 'Поиск задач'
-                  : 'Записи'}
+                  : 'Встречи'}
           {isOnline ? null : (
             <span className="offline-badge" role="status" title="Нет подключения к сети — показаны сохранённые данные">
               Офлайн

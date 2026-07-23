@@ -114,10 +114,10 @@ export default function BottomNav({
           type="button"
           className={`bottom-nav-item ${activePage === 'library' ? 'is-active' : ''}`}
           onClick={() => go('library')}
-          aria-label="Записи"
+          aria-label="Встречи"
         >
           <NavIcon name="library" />
-          <span>Записи</span>
+          <span>Встречи</span>
         </button>
 
         {/* Центральная кнопка записи (FAB). Во время записи — состояние с уровнем
@@ -141,9 +141,11 @@ export default function BottomNav({
                 <span className="bottom-nav-fab-time">{formatDuration(micDuration)}</span>
               </span>
             ) : (
+              /* #13: фирменный знак — микрофон с 4 строками стенограммы. */
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="9" y="3" width="6" height="11" rx="3" />
-                <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+                <rect x="4" y="3" width="5" height="9" rx="2.5" />
+                <path d="M3 10.5a3.5 3.5 0 0 0 7 0M6.5 14v3.5" />
+                <path d="M13 5h8M13 9h8M13 13h8M13 17h6" />
               </svg>
             )}
           </button>

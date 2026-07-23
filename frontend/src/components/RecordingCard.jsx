@@ -1,6 +1,24 @@
 import { formatDate, formatFileSize } from '../lib/format.js';
 import { getStatusLabel } from '../lib/statusLabels.js';
+import { isProcessingStatus } from '../lib/api.js';
 import useSwipeAction from '../hooks/useSwipeAction.js';
+
+// #7: индикатор «идёт обработка» — фирменный микрофон со строчками, которые
+// «печатаются» (анимация в CSS: .processing-logo line).
+function ProcessingLogo() {
+  return (
+    <span className="processing-logo" title="Идёт обработка встречи" aria-label="Идёт обработка">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+        <rect x="4" y="3" width="5" height="9" rx="2.5" />
+        <path d="M3 10.5a3.5 3.5 0 0 0 7 0M6.5 14v3" />
+        <line className="pl1" x1="13" y1="5" x2="21" y2="5" />
+        <line className="pl2" x1="13" y1="9" x2="21" y2="9" />
+        <line className="pl3" x1="13" y1="13" x2="21" y2="13" />
+        <line className="pl4" x1="13" y1="17" x2="19" y2="17" />
+      </svg>
+    </span>
+  );
+}
 
 // syncState is a client-only concept (never sent to/read from the backend)
 // tracking a recording that started life in the offline write queue - kept
@@ -92,6 +110,7 @@ export default function RecordingCard({ recording, isSelected, onSelect, onDelet
             <div className="recording-meta">
               <span>{formatFileSize(recording.fileSizeBytes)}</span>
               <span>{formatDate(recording.createdAt)}</span>
+              {isProcessingStatus(recording.status) ? <ProcessingLogo /> : null}
               {recording.status ? (
                 <span className={`status-pill status-${recording.status}`}>{getStatusLabel(recording.status)}</span>
               ) : null}

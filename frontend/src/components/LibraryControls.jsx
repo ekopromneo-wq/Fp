@@ -41,6 +41,8 @@ function LibraryControls({
   setStatus,
   trashMode,
   onToggleTrash,
+  sortOrder,
+  onToggleSort,
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const activeExtraCount = Object.values(filters).filter(Boolean).length;
@@ -80,7 +82,16 @@ function LibraryControls({
 
       <div className="library-controls-actions">
         <button className="button button-secondary" type="button" onClick={onToggleTrash}>
-          {trashMode ? '← В библиотеку' : 'Корзина'}
+          {trashMode ? '← К встречам' : 'Корзина'}
+        </button>
+
+        <button
+          className="button button-secondary"
+          type="button"
+          onClick={onToggleSort}
+          title="Порядок по времени создания"
+        >
+          {sortOrder === 'asc' ? '↑ Старые' : '↓ Новые'}
         </button>
 
         <button

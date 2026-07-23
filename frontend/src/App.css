@@ -10,7 +10,7 @@
   --accent-danger: #f87171;
   --text-primary: #f8fafc;
   --text-secondary: #94a3b8;
-  --border-subtle: rgba(129, 216, 208, 0.12);
+  --border-subtle: rgba(129, 216, 208, 0.2);
 
   --font-family-base: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
@@ -4350,3 +4350,81 @@ a.bitrix-sent-badge {
 .task-row-desc { overflow-wrap: anywhere; }
 .task-row-summary { min-width: 0; }
 .task-list, .task-row { min-width: 0; }
+
+/* ===== Волна A: живая запись, индикатор обработки, тиффани ===== */
+
+/* #6: 5 столбиков-эквалайзер внутри красной кнопки записи. */
+.eq-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 30px;
+}
+
+.eq-bars span {
+  width: 5px;
+  border-radius: 3px;
+  background: #fff;
+  animation: eq-bounce 0.9s ease-in-out infinite;
+}
+
+.eq-bars span:nth-child(1) { height: 40%; animation-delay: 0s; }
+.eq-bars span:nth-child(2) { height: 75%; animation-delay: 0.15s; }
+.eq-bars span:nth-child(3) { height: 100%; animation-delay: 0.3s; }
+.eq-bars span:nth-child(4) { height: 65%; animation-delay: 0.45s; }
+.eq-bars span:nth-child(5) { height: 45%; animation-delay: 0.6s; }
+
+.eq-bars.is-paused span { animation-play-state: paused; }
+
+@keyframes eq-bounce {
+  0%, 100% { transform: scaleY(0.5); }
+  50% { transform: scaleY(1); }
+}
+
+/* #7: логотип-индикатор обработки — строки «печатаются». */
+.processing-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent-primary) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 36%, transparent);
+  color: var(--accent-primary);
+  flex: 0 0 auto;
+}
+
+.processing-logo svg {
+  width: 16px;
+  height: 16px;
+}
+
+.processing-logo line {
+  stroke-dasharray: 8;
+  stroke-dashoffset: 8;
+  animation: type-line 2s linear infinite;
+}
+
+.processing-logo .pl2 { animation-delay: 0.5s; }
+.processing-logo .pl3 { animation-delay: 1s; }
+.processing-logo .pl4 { animation-delay: 1.5s; }
+
+@keyframes type-line {
+  0% { stroke-dashoffset: 8; }
+  25%, 100% { stroke-dashoffset: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eq-bars span, .processing-logo line { animation: none; stroke-dashoffset: 0; }
+}
+
+/* #12: больше тиффани — вторичные кнопки и hero. */
+.button.button-secondary {
+  border-color: color-mix(in srgb, var(--accent-primary) 22%, transparent);
+}
+
+.home-hero {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-primary) 10%, var(--bg-elevated)), var(--bg-elevated) 55%);
+  border-color: color-mix(in srgb, var(--accent-primary) 30%, var(--border-subtle));
+}

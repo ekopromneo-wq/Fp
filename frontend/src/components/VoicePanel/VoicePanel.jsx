@@ -69,7 +69,13 @@ export default function VoicePanel({
             onClick={onToggleRecording}
             aria-label={isMicRecording ? 'Остановить запись' : 'Начать запись'}
           >
-            {isMicRecording ? '■' : '●'}
+            {isMicRecording ? (
+              <span className={`eq-bars${isMicPaused ? ' is-paused' : ''}`} aria-hidden="true">
+                <span /><span /><span /><span /><span />
+              </span>
+            ) : (
+              '●'
+            )}
           </button>
         </div>
       </section>

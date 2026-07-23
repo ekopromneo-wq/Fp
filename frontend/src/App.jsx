@@ -235,7 +235,17 @@ function App() {
   }, []);
 
   const hasRecordings = recordings.length > 0;
-  const sortedRecordings = useMemo(() => recordings, [recordings]);
+  // #10: сортировка встреч по времени создания (новые сверху по умолчанию).
+  const [sortOrder, setSortOrder] = useState('desc');
+  const sortedRecordings = useMemo(() => {
+    const list = [...recordings];
+    list.sort((a, b) => {
+      const ta = new Date(a.createdAt || 0).getTime();
+      const tb = new Date(b.createdAt || 0).getTime();
+      return sortOrder === 'asc' ? ta - tb : tb - ta;
+    });
+    return list;
+  }, [recordings, sortOrder]);
   const canProcessSelected =
     selectedRecording && !isProcessingStatus(selectedRecording.status) && processingId !== selectedRecording.id;
   const canExportSelected =
@@ -998,7 +1008,13 @@ function App() {
     setIsUploading(true);
 
     try {
-      const title = file.name.replace(/\.[^.]+$/, '') || file.name;
+      // Микрофонная встреча получает человеческое имя «Встреча ДД.ММ.ГГГГ ЧЧ:ММ»
+      // (правится вручную/AI-названием); файл — своё имя без расширения.
+      const now = new Date();
+      const title =
+        source === 'frontend-microphone'
+          ? `Встреча ${now.toLocaleDateString('ru-RU')} ${now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`
+          : file.name.replace(/\.[^.]+$/, '') || file.name;
       // US-3.5: режим «только на устройстве» — запись не выгружается и не
       // обрабатывается в облаке (осознанный выбор пользователя ради приватности).
       const deviceOnly = useUiStore.getState().storageMode === 'device';
@@ -1636,10 +1652,12 @@ function App() {
               setSelectedRecordingId(null);
               setTrashMode((v) => !v);
             }}
+            sortOrder={sortOrder}
+            onToggleSort={() => setSortOrder((v) => (v === 'asc' ? 'desc' : 'asc'))}
           />
 
           <section className="status-line library-status" aria-live="polite">
-            <span>{status || (hasRecordings ? `${recordings.length} ${pluralizeRu(recordings.length, ['запись', 'записи', 'записей'])}${trashMode ? ' в корзине' : ' в библиотеке'}` : trashMode ? 'Корзина пуста' : 'Записей пока нет')}</span>
+            <span>{status || (hasRecordings ? `${recordings.length} ${pluralizeRu(recordings.length, ['встреча', 'встречи', 'встреч'])}${trashMode ? ' в корзине' : ''}` : trashMode ? 'Корзина пуста' : 'Встреч пока нет')}</span>
           </section>
 
           {/* US-3.2/US-3.4: несинхронизированные записи + ручной запуск синхры и
@@ -1673,11 +1691,11 @@ function App() {
 
           <section className="workspace" aria-label="Рабочая область записей">
             <section className="recording-list" aria-label="Список записей">
-              {isLoading && !hasRecordings ? <div className="empty-state">Получаем список записей...</div> : null}
+              {isLoading && !hasRecordings ? <div className="empty-state">Получаем список встреч...</div> : null}
 
               {!isLoading && !hasRecordings ? (
                 <div className="empty-state">
-                  {trashMode ? <h2>Корзина пуста</h2> : <><h2>Нет загруженных записей</h2><p>Добавь первый аудиофайл через кнопку загрузки.</p></>}
+                  {trashMode ? <h2>Корзина пуста</h2> : <><h2>Нет встреч</h2><p>Запишите первую встречу или добавьте аудиофайл.</p></>}
                 </div>
               ) : null}
 
@@ -1724,7 +1742,7 @@ function App() {
               {/* US: на мобильном деталь открывается на весь экран — кнопка возврата к списку. */}
               {isMobile && selectedRecordingId ? (
                 <button className="detail-back" type="button" onClick={() => setSelectedRecordingId(null)}>
-                  К записям
+                  К встречам
                 </button>
               ) : null}
 
