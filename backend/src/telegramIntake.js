@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { query } from './db.js';
 import { attachRecordingAudio, createRecording, enqueueRecording, getRecording } from './recordings.js';
 import { downloadTelegramFile, sendTelegramText, sendTelegramMessage } from './telegram.js';
+import { fetchPublicUrl, UnsafeUrlError } from './urlSafety.js';
 
 // Bot API отдаёт ботам файлы только до 20 МБ — критерий приёмки US-14.1
 // («файл превышает лимит Telegram → бот сообщает»).
@@ -162,7 +163,18 @@ async function handleMediaMessage(botToken, userId, chatId, message, media) {
 async function handleUrlMessage(botToken, userId, chatId, url) {
   await sendTelegramMessage(botToken, chatId, 'Получил ссылку! Скачиваю файл.');
 
-  const response = await fetch(url, { signal: AbortSignal.timeout(120000) });
+  let response;
+  try {
+    // Ссылку присылает сам пользователь боту — без проверки хоста это была бы
+    // серверная SSRF-дыра на внутреннюю сеть (docker-хосты, localhost, метадата).
+    response = await fetchPublicUrl(url, { signal: AbortSignal.timeout(120000) });
+  } catch (error) {
+    if (error instanceof UnsafeUrlError) {
+      await sendTelegramMessage(botToken, chatId, 'Эта ссылка недоступна для загрузки.');
+      return;
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     await sendTelegramMessage(botToken, chatId, `Не удалось скачать по ссылке (ответ ${response.status}).`);

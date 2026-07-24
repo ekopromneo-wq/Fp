@@ -76,7 +76,7 @@ export async function saveRecordingAudioFromPath(recordingId, filePath, { origin
  * processed - see videoAudio.js), deleting the previous object afterward.
  */
 export async function replaceRecordingAudio(recordingId, previousStorageKey, buffer, originalFilename, mimeType) {
-  const metadata = await putAudioObject(recordingId, buffer, originalFilename, mimeType);
+  const metadata = await putAudioObject(recordingId, buffer, buffer.length, originalFilename, mimeType);
 
   if (previousStorageKey) {
     await deleteRecordingAudio(previousStorageKey).catch((error) => {

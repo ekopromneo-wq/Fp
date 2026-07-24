@@ -1,4 +1,5 @@
 import { PermanentSendError } from './sending.js';
+import { fetchPublicUrl, UnsafeUrlError } from './urlSafety.js';
 
 function getBitrixConfig(input = {}) {
   const webhookUrl = input.webhookUrl || process.env.BITRIX_WEBHOOK_URL;
@@ -25,11 +26,21 @@ function buildTaskDescription(recording, task) {
 }
 
 async function callBitrix(config, method, payload) {
-  const response = await fetch(`${config.webhookUrl}/${method}.json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  let response;
+  try {
+    // Вебхук — адрес, который сам пользователь вписывает в настройках; без
+    // проверки хоста это была бы SSRF-дыра во внутреннюю сеть сервера.
+    response = await fetchPublicUrl(`${config.webhookUrl}/${method}.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    if (error instanceof UnsafeUrlError) {
+      throw new PermanentSendError('Вебхук Битрикс24 указывает на недопустимый адрес');
+    }
+    throw error;
+  }
   const body = await response.json().catch(() => null);
 
   if (!response.ok || body?.error) {
@@ -194,7 +205,15 @@ export async function fetchBitrixUsers(bitrixConfig = {}) {
 
   for (let page = 0; page < MAX_USER_PAGES; page += 1) {
     const start = page * USER_PAGE_SIZE;
-    const response = await fetch(`${config.webhookUrl}/user.get.json?start=${start}`);
+    let response;
+    try {
+      response = await fetchPublicUrl(`${config.webhookUrl}/user.get.json?start=${start}`);
+    } catch (error) {
+      if (error instanceof UnsafeUrlError) {
+        throw new PermanentSendError('Вебхук Битрикс24 указывает на недопустимый адрес');
+      }
+      throw error;
+    }
     const body = await response.json().catch(() => null);
 
     if (!response.ok || body?.error) {

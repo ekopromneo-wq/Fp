@@ -51,6 +51,7 @@ import {
   putCachedCurrentUser,
   getCachedCurrentUser,
   getQueueItem,
+  deleteQueueItem,
   getActiveRecordingSession,
   getLiveRecordingChunks,
   clearLiveRecordingSession,
@@ -1497,12 +1498,19 @@ function App() {
     setStatus(`Удаляем "${recording.title}"...`);
 
     try {
-      const response = await apiFetch(`/api/recordings/${recording.id}`, {
-        method: 'DELETE',
-      });
+      // Ещё не досинканная (или device-only/навсегда-неудачная) запись живёт
+      // только в очереди IndexedDB — сервер про её id никогда не слышал, DELETE
+      // на /api/recordings/<localId> просто вернёт 404.
+      if (recording.id.startsWith('local-')) {
+        await deleteQueueItem(recording.id);
+      } else {
+        const response = await apiFetch(`/api/recordings/${recording.id}`, {
+          method: 'DELETE',
+        });
 
-      if (!response.ok) {
-        throw new Error('Не удалось удалить запись');
+        if (!response.ok) {
+          throw new Error('Не удалось удалить запись');
+        }
       }
 
       const nextSelectedId = selectedRecordingId === recording.id ? null : selectedRecordingId;
@@ -1553,7 +1561,11 @@ function App() {
     try {
       const ids = [...selectedIds];
       await Promise.all(
-        ids.map((id) => apiFetch(`/api/recordings/${id}`, { method: 'DELETE' }).catch(() => null)),
+        ids.map((id) =>
+          id.startsWith('local-')
+            ? deleteQueueItem(id).catch(() => null)
+            : apiFetch(`/api/recordings/${id}`, { method: 'DELETE' }).catch(() => null),
+        ),
       );
 
       if (ids.includes(selectedRecordingId)) {
