@@ -90,6 +90,16 @@ export default function BottomNav({
                 {item.label}
               </button>
             ))}
+            <a
+              className="bottom-sheet-item"
+              href="/help.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              role="menuitem"
+              onClick={() => setIsMoreOpen(false)}
+            >
+              Справка
+            </a>
             <button type="button" className="bottom-sheet-item" onClick={onToggleTheme}>
               {theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
             </button>

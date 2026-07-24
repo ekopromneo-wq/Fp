@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#2FB3B7" />
+<title>Справка — Stenogram</title>
+<style>
+  :root {
+    --bg: #f6faf9;
+    --surface: #ffffff;
+    --surface-2: #eef5f4;
+    --text: #172321;
+    --text-muted: #566b68;
+    --border: #d7e5e2;
+    --accent: #2FB3B7;
+    --accent-strong: #0e5f61;
+    --accent-tint: #e3f3f2;
+    --warn: #a8620f;
+    --warn-tint: #fbf0e1;
+    --warn-border: #e7c48c;
+    --kbd-bg: #eef5f4;
+    --kbd-border: #cfe0dd;
+    --kbd-text: #0e5f61;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0F1419;
+      --surface: #151c22;
+      --surface-2: #1a2229;
+      --text: #e6efed;
+      --text-muted: #93a6a3;
+      --border: #223330;
+      --accent: #4fc7c4;
+      --accent-strong: #7bdbd7;
+      --accent-tint: #16302e;
+      --warn: #e3a95c;
+      --warn-tint: #2a2116;
+      --warn-border: #4a3820;
+      --kbd-bg: #1a2229;
+      --kbd-border: #2a3d3a;
+      --kbd-text: #7bdbd7;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0F1419;
+    --surface: #151c22;
+    --surface-2: #1a2229;
+    --text: #e6efed;
+    --text-muted: #93a6a3;
+    --border: #223330;
+    --accent: #4fc7c4;
+    --accent-strong: #7bdbd7;
+    --accent-tint: #16302e;
+    --warn: #e3a95c;
+    --warn-tint: #2a2116;
+    --warn-border: #4a3820;
+    --kbd-bg: #1a2229;
+    --kbd-border: #2a3d3a;
+    --kbd-text: #7bdbd7;
+  }
+
+  :root[data-theme="light"] {
+    --bg: #f6faf9;
+    --surface: #ffffff;
+    --surface-2: #eef5f4;
+    --text: #172321;
+    --text-muted: #566b68;
+    --border: #d7e5e2;
+    --accent: #2FB3B7;
+    --accent-strong: #0e5f61;
+    --accent-tint: #e3f3f2;
+    --warn: #a8620f;
+    --warn-tint: #fbf0e1;
+    --warn-border: #e7c48c;
+    --kbd-bg: #eef5f4;
+    --kbd-border: #cfe0dd;
+    --kbd-text: #0e5f61;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--accent-strong); }
+
+  .shell {
+    max-width: 1180px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 0;
+    min-height: 100vh;
+  }
+
+  .masthead {
+    grid-column: 1 / -1;
+    padding: 2rem clamp(1.25rem, 4vw, 3rem) 2.2rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .masthead-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.1rem;
+  }
+
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+  .back-link:hover { color: var(--accent-strong); }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-strong);
+    background: var(--accent-tint);
+    border: 1px solid var(--border);
+    padding: 0.32rem 0.7rem 0.32rem 0.55rem;
+    border-radius: 999px;
+  }
+  .eyebrow .dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--accent);
+    flex: none;
+  }
+
+  h1.title {
+    font-family: Georgia, "Charter", "Times New Roman", serif;
+    font-weight: 400;
+    font-size: clamp(2rem, 4vw, 2.9rem);
+    line-height: 1.12;
+    margin: 0.9rem 0 0.6rem;
+    text-wrap: balance;
+    max-width: 22ch;
+  }
+
+  .subhead {
+    font-size: 1.05rem;
+    color: var(--text-muted);
+    max-width: 62ch;
+    margin: 0;
+  }
+
+  .toc-col {
+    border-right: 1px solid var(--border);
+    padding: 2rem 1.25rem 3rem;
+  }
+
+  .toc-sticky { position: sticky; top: 1.5rem; }
+
+  .toc-label {
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0 0 0.75rem 0.4rem;
+  }
+
+  .toc-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  .toc-list a {
+    display: flex;
+    gap: 0.55rem;
+    align-items: baseline;
+    padding: 0.4rem 0.45rem;
+    border-radius: 8px;
+    text-decoration: none;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    line-height: 1.35;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+  .toc-list a:hover { background: var(--surface-2); color: var(--text); }
+  .toc-list a.active { background: var(--accent-tint); color: var(--accent-strong); font-weight: 600; }
+  .toc-num {
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    flex: none;
+    width: 1.4rem;
+  }
+  .toc-list a.active .toc-num { color: var(--accent-strong); }
+
+  .toc-toggle { display: none; }
+
+  main { padding: 2.4rem clamp(1.25rem, 4vw, 3.2rem) 6rem; min-width: 0; }
+
+  .lede {
+    font-size: 1.08rem;
+    color: var(--text);
+    max-width: 66ch;
+    margin: 0 0 2.6rem;
+    padding-bottom: 2.2rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .lede strong { color: var(--accent-strong); }
+
+  section.doc {
+    max-width: 68ch;
+    padding: 2.6rem 0;
+    border-bottom: 1px solid var(--border);
+    scroll-margin-top: 1.5rem;
+  }
+  section.doc:last-of-type { border-bottom: none; }
+
+  .sec-head { display: flex; align-items: baseline; gap: 0.85rem; margin: 0 0 1.1rem; }
+  .sec-num { font-family: Georgia, "Charter", serif; font-style: italic; font-size: 1.6rem; color: var(--accent); flex: none; }
+  h2 {
+    font-family: Georgia, "Charter", "Times New Roman", serif;
+    font-weight: 400;
+    font-size: 1.55rem;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-family: Georgia, "Charter", "Times New Roman", serif;
+    font-weight: 400;
+    font-style: italic;
+    font-size: 1.15rem;
+    color: var(--text);
+    margin: 1.8rem 0 0.7rem;
+  }
+
+  p { margin: 0 0 1rem; color: var(--text); }
+  section.doc p:last-child { margin-bottom: 0; }
+
+  ul, ol { padding-left: 1.3rem; margin: 0 0 1rem; }
+  li { margin-bottom: 0.5rem; }
+  li:last-child { margin-bottom: 0; }
+  li > ul, li > ol { margin-top: 0.5rem; }
+
+  kbd {
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+    font-size: 0.86em;
+    background: var(--kbd-bg);
+    color: var(--kbd-text);
+    border: 1px solid var(--kbd-border);
+    border-radius: 5px;
+    padding: 0.05em 0.4em;
+    white-space: nowrap;
+  }
+
+  .note {
+    display: flex;
+    gap: 0.75rem;
+    background: var(--warn-tint);
+    border: 1px solid var(--warn-border);
+    border-radius: 10px;
+    padding: 0.9rem 1.1rem;
+    margin: 1.1rem 0;
+    font-size: 0.95rem;
+  }
+  .note .flag {
+    flex: none;
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--warn);
+    border: 1px solid var(--warn-border);
+    border-radius: 999px;
+    padding: 0.15rem 0.55rem;
+    height: fit-content;
+  }
+  .note p { margin: 0; color: var(--text); }
+
+  table { width: 100%; border-collapse: collapse; margin: 0.5rem 0 1.2rem; font-size: 0.94rem; }
+  .table-wrap { overflow-x: auto; }
+  th, td { text-align: left; padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th {
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  tr:last-child td { border-bottom: none; }
+
+  .status-pill {
+    display: inline-block;
+    font-size: 0.85em;
+    padding: 0.1em 0.55em;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .status-wait { color: var(--warn); border-color: var(--warn-border); background: var(--warn-tint); }
+  .status-done { color: var(--accent-strong); border-color: var(--accent); background: var(--accent-tint); }
+
+  .qa dt { font-family: Georgia, "Charter", serif; font-style: italic; font-size: 1.03rem; color: var(--text); margin: 1.5rem 0 0.4rem; }
+  .qa dt:first-child { margin-top: 0; }
+  .qa dd { margin: 0; color: var(--text); }
+
+  footer {
+    grid-column: 1 / -1;
+    padding: 2.2rem clamp(1.25rem, 4vw, 3rem) 3rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.88rem;
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  footer .brand { font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace; color: var(--text-muted); }
+
+  a:focus-visible, .toc-list a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (max-width: 860px) {
+    .shell { grid-template-columns: 1fr; }
+    .toc-col { border-right: none; border-bottom: 1px solid var(--border); padding: 0; }
+    .toc-sticky { position: static; }
+    .toc-toggle {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      background: var(--surface);
+      border: none;
+      padding: 1rem clamp(1.25rem, 4vw, 3rem);
+      color: var(--text);
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    .toc-body { padding: 0 1.25rem 1.25rem; display: none; }
+    .toc-col.open .toc-body { display: block; }
+    .toc-col.open .toc-toggle .chevron { transform: rotate(180deg); }
+    .chevron { transition: transform 0.15s ease; color: var(--text-muted); }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <header class="masthead">
+    <div class="masthead-top">
+      <span class="eyebrow"><span class="dot"></span>Справка · Stenogram</span>
+      <a class="back-link" href="/">← Вернуться в приложение</a>
+    </div>
+    <h1 class="title">Как пользоваться Stenogram</h1>
+    <p class="subhead">Запись встречи, расшифровка, протокол, задачи и отправка — по шагам, теми же словами и кнопками, что вы видите в приложении.</p>
+  </header>
+
+  <nav class="toc-col" id="tocCol">
+    <button class="toc-toggle" id="tocToggle" aria-expanded="false" aria-controls="tocBody" type="button">
+      Оглавление <span class="chevron">⌄</span>
+    </button>
+    <div class="toc-body" id="tocBody">
+      <div class="toc-sticky">
+        <p class="toc-label">Оглавление</p>
+        <ol class="toc-list" id="tocList">
+          <li><a href="#start"><span class="toc-num">·</span>Вход и начало работы</a></li>
+          <li><a href="#sec-2"><span class="toc-num">01</span>Запись встречи</a></li>
+          <li><a href="#sec-3"><span class="toc-num">02</span>Обработка записи</a></li>
+          <li><a href="#sec-4"><span class="toc-num">03</span>Стенограмма и спикеры</a></li>
+          <li><a href="#sec-5"><span class="toc-num">04</span>Протокол встречи</a></li>
+          <li><a href="#sec-6"><span class="toc-num">05</span>Задачи</a></li>
+          <li><a href="#sec-7"><span class="toc-num">06</span>Проекты</a></li>
+          <li><a href="#sec-8"><span class="toc-num">07</span>Контакты</a></li>
+          <li><a href="#sec-9"><span class="toc-num">08</span>Отправка результатов</a></li>
+          <li><a href="#sec-10"><span class="toc-num">09</span>Офлайн и синхронизация</a></li>
+          <li><a href="#sec-11"><span class="toc-num">10</span>Настройки</a></li>
+          <li><a href="#sec-12"><span class="toc-num">11</span>Квоты и лимиты</a></li>
+          <li><a href="#sec-13"><span class="toc-num">12</span>Обновления приложения</a></li>
+          <li><a href="#sec-14"><span class="toc-num">13</span>Частые вопросы</a></li>
+        </ol>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <p class="lede">
+      <strong>Stenogram</strong> — AI-ассистент для встреч: он записывает разговор, превращает его в текст, собирает протокол
+      с решениями и рисками и сам находит поручения с исполнителями и сроками. Работает как приложение в браузере (PWA) —
+      можно установить на телефон или компьютер и пользоваться даже при слабом интернете.
+    </p>
+
+    <section class="doc" id="start">
+      <div class="sec-head"><h2>Вход и начало работы</h2></div>
+
+      <h3>Регистрация и вход</h3>
+      <p>На экране входа доступны:</p>
+      <ul>
+        <li><strong>Email и пароль</strong> — <kbd>Создать новый аккаунт</kbd> → имя, email, пароль от 6 символов.</li>
+        <li><strong>Вход через провайдеров</strong> (Google, Яндекс&nbsp;ID, Сбер&nbsp;ID, VK) — если подключено администратором, на экране появятся кнопки «Войти через …».</li>
+        <li><strong>Вход через Telegram</strong> — если подключено, появится кнопка Telegram-виджета.</li>
+      </ul>
+      <p>Если вы впервые входите через Telegram или VK и у аккаунта ещё нет email, приложение попросит указать и подтвердить его — так вы не потеряете доступ, если отвяжете Telegram или VK.</p>
+
+      <h3>Установка приложения (PWA)</h3>
+      <p>На экране входа и в интерфейсе есть кнопка <kbd>Установить приложение</kbd>:</p>
+      <ul>
+        <li>В Chrome / Edge (Android, Windows) — устанавливается в один клик.</li>
+        <li>В Safari на iPhone/iPad приложение подскажет: «В Safari нажмите «Поделиться» → «На экран «Домой»»».</li>
+      </ul>
+      <p>После установки Stenogram открывается как отдельное приложение, без адресной строки браузера, и умеет работать при плохом или отсутствующем интернете — см. раздел «Офлайн и синхронизация».</p>
+    </section>
+
+    <section class="doc" id="sec-2">
+      <div class="sec-head"><span class="sec-num">01</span><h2>Запись встречи</h2></div>
+      <p>Получить запись в приложении можно тремя способами.</p>
+
+      <h3>Запись с микрофона</h3>
+      <p>Нажмите центральную кнопку записи внизу экрана. Появится оверлей с таймером и статусом «Идёт запись…». Доступна пауза и продолжение, если это поддерживает браузер.</p>
+      <div class="note">
+        <span class="flag">152-ФЗ</span>
+        <p>Если в настройках включено предупреждение о согласии участников, перед стартом появится диалог <kbd>Согласие на запись</kbd> с вариантами: «Все участники согласны — начать», «Записать без отказавшегося участника», «Записать несмотря на отказ» или «Отменить запись». Обязанность предупредить участников и получить согласие лежит на пользователе — приложение только фиксирует факт.</p>
+      </div>
+      <p>Во время записи:</p>
+      <ul>
+        <li>Если микрофон почти не слышно, появится предупреждение «Тихо или микрофон не слышно — проверьте звук».</li>
+        <li>Если на устройстве заканчивается место, приложение спросит подтверждение перед стартом.</li>
+        <li>Экран не гаснет, а при попытке случайно закрыть вкладку браузер спросит подтверждение.</li>
+        <li>Аудио сохраняется на устройство каждые несколько секунд — если приложение закроется или телефон разрядится, при следующем запуске недописанная запись восстановится и уйдёт на обработку сама.</li>
+      </ul>
+
+      <h3>Загрузка готового файла</h3>
+      <p>На главном экране или в библиотеке — кнопка <kbd>Загрузить</kbd>. Подходит любой обычный аудио- или видеофайл записи встречи. Загрузка устойчива к обрыву сети: докачивается по частям, можно продолжить с другого устройства. Если такой файл уже загружался раньше, приложение предложит оставить обе копии или удалить дубль.</p>
+
+      <h3>Бот-участник на онлайн-встрече</h3>
+      <p>Кнопка <kbd>Пригласить бота</kbd> на главном экране: вставьте ссылку на встречу (Zoom, Google&nbsp;Meet, Телемост, СберЗвук, МТС&nbsp;Линк, Bitrix24, BigBlueButton, Контур.Толк) и, при желании, название встречи. Бот сам зайдёт, дождётся допуска в комнате ожидания, объявит о записи в чате и будет записывать до конца встречи.</p>
+      <p>Статус подключения виден в карточке встречи, а подробный технический журнал — «Журнал подключений бота» в разделе «Служебное» на странице записи: запросил вход → зашёл → идёт запись → разрыв связи / переподключение → встреча завершилась, бота удалили и т.д. Кнопка <kbd>Остановить бота</kbd> прерывает запись вручную.</p>
+    </section>
+
+    <section class="doc" id="sec-3">
+      <div class="sec-head"><span class="sec-num">02</span><h2>Обработка записи</h2></div>
+      <p>Каждая встреча проходит один и тот же путь — сверху вниз на странице записи:</p>
+      <p style="font-family: Georgia, 'Charter', serif; font-style: italic; font-size: 1.15rem; margin: 0 0 1.4rem;">Обработка → Стенограмма → Протокол → Задачи → Отправка</p>
+
+      <h3>Статусы записи</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Статус</th><th>Значение</th></tr></thead>
+          <tbody>
+            <tr><td><span class="status-pill">Загружено</span></td><td>файл получен, ждёт очереди</td></tr>
+            <tr><td><span class="status-pill">В очереди</span></td><td>ждёт свободного места на обработку</td></tr>
+            <tr><td><span class="status-pill">Расшифровываем</span></td><td>идёт распознавание речи</td></tr>
+            <tr><td><span class="status-pill">Создаём протокол и задачи</span></td><td>идёт AI-анализ</td></tr>
+            <tr><td><span class="status-pill status-done">Готово</span></td><td>стенограмма и протокол доступны</td></tr>
+            <tr><td><span class="status-pill">Ошибка</span></td><td>обработка не удалась, можно перезапустить</td></tr>
+            <tr><td><span class="status-pill status-wait">Ожидает квоты</span></td><td>лимит обработки на аккаунте исчерпан — запись не потеряна, отправится сама (см. раздел «Квоты и лимиты»)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Запустить обработку вручную — кнопка <kbd>Запустить обработку</kbd>, при ошибке — <kbd>Перезапустить обработку</kbd>. Уже готовую стенограмму можно переделать заново кнопкой <kbd>Расшифровать заново</kbd> — учтите, это перезапишет текущий текст.</p>
+      <p>Если у записи несколько раз подряд не получается обработаться, приложение честно предупредит: «Похоже, с этой записью систематическая проблема… Если это повторится, обратитесь в поддержку». Дальнейшие повторы обычно бессмысленны — стоит проверить сам файл.</p>
+
+      <h3>Добавление фрагмента</h3>
+      <p>Если встреча случайно записалась несколькими кусками (например, из-за обрыва связи), кнопка <kbd>Добавить фрагмент</kbd> доклеивает второй аудиофайл к уже существующей записи — приложение склеивает их и пересобирает протокол по полной записи.</p>
+
+      <h3>Настройки записи <span style="font-weight:400;color:var(--text-muted);font-size:0.85em;">(шестерёнка на странице встречи)</span></h3>
+      <ul>
+        <li>Название встречи — можно попросить AI придумать его кнопкой <kbd>AI-название</kbd>.</li>
+        <li>Привязка к проектам и тип встречи.</li>
+        <li>«Известные имена и термины» — впишите заранее сложные имена, аббревиатуры или термины, и распознавание речи будет точнее их узнавать.</li>
+        <li>«Конфиденциально» — пометка записи.</li>
+        <li>«Запретить скачивание файлов» — блокирует экспорт для этой записи.</li>
+      </ul>
+    </section>
+
+    <section class="doc" id="sec-4">
+      <div class="sec-head"><span class="sec-num">03</span><h2>Стенограмма и спикеры</h2></div>
+      <ul>
+        <li>Переключатель <kbd>Дословно</kbd> / <kbd>Без слов-паразитов</kbd> — показывать текст как есть или в очищенном от «э-э», повторов и т.п. виде.</li>
+        <li>Поиск по тексту стенограммы со счётчиком совпадений.</li>
+        <li>Спикеры распознаются автоматически по голосам; если имя не определилось — переименуйте вручную или сопоставьте с контактом кнопками <kbd>Подобрать по контактам</kbd> и <kbd>Подобрать по Битрикс24</kbd>.</li>
+        <li>Кнопка <kbd>Редактировать</kbd> позволяет поправить текст, переназначить реплики другому спикеру, сделать массовую замену слов («Найти» / «Заменить на» / <kbd>Заменить везде</kbd>). После правок — <kbd>Сохранить изменения</kbd>.</li>
+        <li>Стенограмму можно защитить от случайных правок кнопкой <kbd>Заблокировать от редактирования</kbd>.</li>
+        <li>Экспорт: <kbd>Скопировать стенограмму</kbd> или скачать <kbd>.txt</kbd>, <kbd>.md</kbd>, <kbd>.docx</kbd>.</li>
+        <li>Аудио можно слушать тут же, с перемоткой на 10 секунд и регулировкой скорости от 0.75× до 2×.</li>
+      </ul>
+    </section>
+
+    <section class="doc" id="sec-5">
+      <div class="sec-head"><span class="sec-num">04</span><h2>Протокол встречи</h2></div>
+      <p>Протокол собирается автоматически после стенограммы и включает: участников, повестку, обсуждения, решения, риски, открытые вопросы, следующие шаги и краткое резюме.</p>
+      <ul>
+        <li><kbd>Детализация протокола</kbd> — «Кратко» / «Средне» / «Подробно», выбирается перед генерацией.</li>
+        <li>«Шаблон обработки» — своя структура протокола, если настроена.</li>
+        <li><kbd>Переделать протокол</kbd> — пересобрать заново.</li>
+        <li><kbd>Перегенерировать с инструкцией</kbd> — можно написать AI отдельное указание, например «сделай упор на риски и открытые вопросы», и пересобрать протокол с учётом этого.</li>
+        <li>Ручное редактирование: <kbd>Редактировать</kbd>, любой раздел можно надиктовать голосом (значок 🎙 у каждого поля), затем <kbd>Сохранить</kbd>. Блокировка от правок — так же, как у стенограммы.</li>
+        <li><kbd>Печать / PDF</kbd> — вывод протокола через диалог печати браузера.</li>
+      </ul>
+      <p>Протокол вместе с задачами можно удалить отдельно от стенограммы — она при этом останется.</p>
+    </section>
+
+    <section class="doc" id="sec-6">
+      <div class="sec-head"><span class="sec-num">05</span><h2>Задачи</h2></div>
+      <p>После генерации протокола AI пытается выделить поручения — они появляются на вкладке «Задачи» с исполнителем, сроком и текстом. Если модель что-то упустила, добавьте задачу вручную формой «Новая задача» (можно надиктовать голосом).</p>
+      <p>Для каждой задачи доступны: <kbd>Подтвердить</kbd> — отметить как проверенную, <kbd>Скрыть</kbd> — убрать из списка не удаляя, <kbd>Удалить</kbd> — удалить совсем. Если исполнитель не найден среди контактов, приложение подскажет похожих или предложит <kbd>Отправить задачу на email</kbd>.</p>
+      <p>Массово: подобрать исполнителей по контактам, подтвердить сразу несколько задач, назначить исполнителя или изменить срок для нескольких выбранных.</p>
+      <h3>Интеграции по задачам</h3>
+      <ul>
+        <li><strong>Bitrix24</strong> — кнопка <kbd>В Битрикс24</kbd> создаёт задачу в выбранной группе на выбранного сотрудника, с проверкой на дубли по названию.</li>
+        <li><strong>Telegram</strong> — если у исполнителя в контактах привязан Telegram, задачу можно отправить ему в чат одной кнопкой.</li>
+      </ul>
+      <p>Отдельная страница «Поиск задач» — фильтры по статусу, проекту и сроку, поиск по тексту, выгрузка списка в <kbd>.md</kbd>.</p>
+    </section>
+
+    <section class="doc" id="sec-7">
+      <div class="sec-head"><span class="sec-num">06</span><h2>Проекты</h2></div>
+      <p>Проекты объединяют встречи по теме — например, «Запуск продукта» или «Клиент N».</p>
+      <ul>
+        <li><kbd>＋ Новый проект</kbd> — тема, цвет, описание, участники.</li>
+        <li>Важные проекты можно закрепить сверху (★).</li>
+        <li><kbd>Сводка</kbd> по проекту — сколько встреч, открытых и закрытых задач, принятых решений на временной шкале; спорные решения помечаются ⚠.</li>
+        <li>Проект можно отправить в архив, вернуть обратно или удалить.</li>
+      </ul>
+    </section>
+
+    <section class="doc" id="sec-8">
+      <div class="sec-head"><span class="sec-num">07</span><h2>Контакты</h2></div>
+      <p>Раздел «Контакты» хранит людей, связанных со встречами и задачами: имя, организация, должность, email, телефон, Telegram chat ID — он нужен для отправки задач в Telegram (контакт должен сначала написать вашему боту, тогда узнать chat id можно, например, через @userinfobot).</p>
+      <p>Импорт пачкой — из <kbd>CSV</kbd>, <kbd>vCard</kbd> или прямо из <kbd>Bitrix24</kbd>. При совпадении с уже существующим контактом приложение предложит объединить записи или создать отдельную.</p>
+    </section>
+
+    <section class="doc" id="sec-9">
+      <div class="sec-head"><span class="sec-num">08</span><h2>Отправка результатов</h2></div>
+      <p>На последнем шаге страницы встречи, вкладка «Отправка»:</p>
+      <ul>
+        <li>Что отправить — протокол целиком, краткое резюме или только задачи.</li>
+        <li>Куда — <strong>email</strong> (получатели, копия, вложение Word-файла) или <strong>Telegram</strong> (chat ID).</li>
+        <li>Если включён предпросмотр, сначала можно посмотреть текст письма и только потом подтвердить отправку.</li>
+        <li><strong>Ссылка на результат</strong> — публичная ссылка без пароля, действует неделю, доступ можно в любой момент отозвать кнопкой <kbd>Отозвать</kbd>.</li>
+        <li>«Журнал доставки» показывает историю: канал, статус («доставлено» / «ошибка»), получателей, попытки повтора.</li>
+      </ul>
+      <p>Если канал отправки не настроен — например, не указан SMTP или Telegram-бот — приложение сразу предложит перейти в настройки и донастроить его.</p>
+    </section>
+
+    <section class="doc" id="sec-10">
+      <div class="sec-head"><span class="sec-num">09</span><h2>Офлайн и синхронизация</h2></div>
+      <p>Приложение спроектировано так, чтобы запись никогда не терялась из-за плохого интернета.</p>
+      <ul>
+        <li>Запись с микрофона всегда сначала сохраняется на устройство, потом выгружается в облако при первой возможности.</li>
+        <li>В библиотеке у каждой записи виден значок синхронизации: <kbd>✓ на устройстве</kbd> (ждёт отправки), <kbd>⟳ синхронизация</kbd>, <kbd>✓✓ отправлено</kbd> или <kbd>⚠ ошибка синхронизации</kbd> с возможностью повторить вручную.</li>
+        <li>Если несинхронизированных записей несколько, вверху появляется панель «Несинхронизированных записей: N» с кнопкой <kbd>Синхронизировать</kbd>.</li>
+        <li>Тумблер «Не выгружать по мобильной сети» экономит трафик — автоматическая отправка ждёт Wi-Fi, а вручную отправить можно в любой момент.</li>
+      </ul>
+      <div class="note">
+        <span class="flag">Важно</span>
+        <p>Режим «Хранить новые записи только на устройстве» (в настройках микрофона) вообще не выгружает запись в облако: без расшифровки, протокола и задач, запись не появится на других устройствах, но и не расходует квоту. Аудио на устройстве шифруется, но при удалении приложения будет потеряно безвозвратно.</p>
+      </div>
+    </section>
+
+    <section class="doc" id="sec-11">
+      <div class="sec-head"><span class="sec-num">10</span><h2>Настройки</h2></div>
+      <dl class="qa">
+        <dt>Аккаунт</dt>
+        <dd>Шаблоны по умолчанию для протокола и обработки; приватность и согласия 152-ФЗ (отдельные переключатели на запись, транскрипцию, AI-анализ, трансграничную передачу данных, доступ поддержки — и журнал, кто и когда что разрешал); устройства и сессии с возможностью завершить любую удалённо; необратимое удаление аккаунта со всеми записями, проектами и задачами.</dd>
+        <dt>Обработка</dt>
+        <dd>Выбор устройства записи, тест микрофона с индикатором уровня, звуковой сигнал в начале записи, режим «только на устройстве»; настройки распознавания спикеров; остаток по подключённым сервисам расшифровки.</dd>
+        <dt>Интеграции</dt>
+        <dd>Отправка по умолчанию, SMTP-сервер, Telegram-бот, Bitrix24, календарь.</dd>
+        <dt>Уведомления</dt>
+        <dd>Какие события присылать — готовность протокола, ошибки обработки и т.д. — и куда.</dd>
+      </dl>
+    </section>
+
+    <section class="doc" id="sec-12">
+      <div class="sec-head"><span class="sec-num">11</span><h2>Квоты и лимиты</h2></div>
+      <p>Чтобы расход на распознавание речи и AI был предсказуем, у аккаунта есть лимиты на минуты обработки — месячный и суточный. При исчерпании лимита:</p>
+      <ul>
+        <li><strong>Запись никогда не теряется</strong> — она уже сохранена, статус меняется на <span class="status-pill status-wait">Ожидает квоты</span>, и обработка запустится сама, как только лимит освободится.</li>
+        <li>У бота-участника похожий механизм — событие в журнале подключений «Пауза — исчерпан лимит минут по тарифу».</li>
+      </ul>
+      <p>Ограничение действует только на обработку — расшифровку, протокол, задачи. Саму запись сделать и сохранить можно всегда.</p>
+    </section>
+
+    <section class="doc" id="sec-13">
+      <div class="sec-head"><span class="sec-num">12</span><h2>Обновления приложения</h2></div>
+      <p>Когда выходит новая версия Stenogram, приложение показывает ненавязчивый баннер «Доступна новая версия» с кнопкой <kbd>Обновить</kbd>. Если в этот момент идёт запись с микрофона, обновление откладывается, а баннер сообщает «Обновление применится после записи» — чтобы новая версия не прервала запись перезагрузкой страницы.</p>
+    </section>
+
+    <section class="doc" id="sec-14">
+      <div class="sec-head"><span class="sec-num">13</span><h2>Частые вопросы</h2></div>
+      <dl class="qa">
+        <dt>Микрофон не работает, браузер просит разрешение</dt>
+        <dd>Разрешите доступ к микрофону в браузере. Если ранее было отказано, разрешение обычно нужно включить отдельно в настройках сайта в браузере.</dd>
+
+        <dt>Индикатор показывает «тихо»</dt>
+        <dd>Проверьте, что микрофон физически не заглушён, выбрано верное устройство записи в настройках, и участники говорят достаточно близко к нему.</dd>
+
+        <dt>Запись висит в статусе «В очереди» или «Ожидает квоты» долго</dt>
+        <dd>Это высокая нагрузка или исчерпанный лимит обработки на аккаунте — запись не потеряна и обработается автоматически, как только освободится ресурс.</dd>
+
+        <dt>Обработка всё время падает с ошибкой</dt>
+        <dd>Попробуйте «Перезапустить обработку» один раз. Если ошибка повторяется несколько раз подряд, приложение само предложит написать в поддержку — вероятно, проблема в самом файле.</dd>
+
+        <dt>Запись не появляется на другом устройстве</dt>
+        <dd>Проверьте значок синхронизации в библиотеке — возможно, запись ещё не выгрузилась (плохой интернет, включён запрет на мобильную сеть, либо запись сделана в режиме «только на устройстве», который не синхронизируется никогда).</dd>
+
+        <dt>Как посмотреть, на что я давал(а) согласие</dt>
+        <dd>Настройки → Аккаунт → «Приватность и согласия» → <kbd>Показать журнал согласий</kbd>.</dd>
+
+        <dt>Как удалить аккаунт совсем</dt>
+        <dd>Настройки → Аккаунт → «Удаление аккаунта» — действие необратимо, удаляет все записи, проекты и задачи.</dd>
+      </dl>
+    </section>
+  </main>
+
+  <footer>
+    <span class="brand">stenogram · справка пользователя</span>
+    <span>Названия кнопок и статусов приведены как в приложении.</span>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var toggle = document.getElementById('tocToggle');
+    var col = document.getElementById('tocCol');
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        var open = col.classList.toggle('open');
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+    }
+
+    var links = Array.prototype.slice.call(document.querySelectorAll('.toc-list a'));
+    var sections = links
+      .map(function (link) {
+        var id = link.getAttribute('href').slice(1);
+        return { link: link, el: document.getElementById(id) };
+      })
+      .filter(function (item) { return item.el; });
+
+    if ('IntersectionObserver' in window && sections.length) {
+      var observer = new IntersectionObserver(
+        function (entries) {
+          entries.forEach(function (entry) {
+            var match = sections.find(function (item) { return item.el === entry.target; });
+            if (!match) return;
+            if (entry.isIntersecting) {
+              links.forEach(function (l) { l.classList.remove('active'); });
+              match.link.classList.add('active');
+            }
+          });
+        },
+        { rootMargin: '-15% 0px -70% 0px', threshold: 0 }
+      );
+      sections.forEach(function (item) { observer.observe(item.el); });
+    }
+  })();
+</script>
+</body>
+</html>
