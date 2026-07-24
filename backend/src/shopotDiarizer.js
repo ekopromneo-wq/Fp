@@ -5,6 +5,12 @@ const SHOPOT_POLL_TIMEOUT_MS = Number(process.env.SHOPOT_POLL_TIMEOUT_MS || 30 *
 // потерянной. Опрос идёт десятки минут, и одна сетевая осечка (или 502 от
 // балансировщика) не значит, что расшифровка на стороне Shopot умерла.
 const SHOPOT_POLL_MAX_CONSECUTIVE_ERRORS = Number(process.env.SHOPOT_POLL_MAX_CONSECUTIVE_ERRORS || 5);
+// Воркер глобально отключает HTTP-таймауты (см. worker.js) ради многочасовой
+// расшифровки, но один статус-чек — лёгкий запрос и не должен зависать
+// навсегда: без своего таймаута сломанное соединение держит воркер-слот
+// бесконечно, обходя SHOPOT_POLL_TIMEOUT_MS (тот проверяется только МЕЖДУ
+// итерациями, не внутри одного fetch).
+const SHOPOT_POLL_REQUEST_TIMEOUT_MS = Number(process.env.SHOPOT_POLL_REQUEST_TIMEOUT_MS || 30000);
 
 function sleep(ms) {
   return new Promise((resolve) => {
@@ -89,6 +95,7 @@ async function pollShopotJob(taskId, apiKey) {
     try {
       const response = await fetch(`${SHOPOT_API_URL}/v1/status/${taskId}`, {
         headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(SHOPOT_POLL_REQUEST_TIMEOUT_MS),
       });
       const body = await response.json().catch(() => null);
 

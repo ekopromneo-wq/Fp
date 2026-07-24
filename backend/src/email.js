@@ -2,12 +2,16 @@ import nodemailer from 'nodemailer';
 import { PROTOCOL_SECTION_LABELS, getProtocolTemplate } from './protocolTemplates.js';
 import { PAYLOAD_KINDS, PermanentSendError } from './sending.js';
 import { buildProtocolDocxBuffer } from './protocolDocx.js';
+import { decryptSecret } from './secretCrypto.js';
 
 function getSmtpConfig(input = {}) {
   const host = input.host || process.env.SMTP_HOST;
   const port = Number(input.port || process.env.SMTP_PORT || 587);
   const user = input.user || process.env.SMTP_USER;
-  const pass = input.pass || process.env.SMTP_PASS;
+  // decryptSecret не трогает значения без её конверта (plaintext/legacy или уже
+  // расшифрованные getUserSmtpConfig'ом) — безопасный защитный слой на случай
+  // путей, которые читают smtp_config напрямую в обход auth.js (см. notifications.js).
+  const pass = decryptSecret(input.pass) || process.env.SMTP_PASS;
   const from = input.from || process.env.SMTP_FROM || user;
 
   if (!host || !from) {

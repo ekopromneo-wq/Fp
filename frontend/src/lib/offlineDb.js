@@ -68,7 +68,15 @@ async function getAudioKey() {
       const key = await generateAudioKey();
       await db.put('meta', { key: 'audioEncKey', value: key });
       return key;
-    })().catch(() => null);
+    })().catch((error) => {
+      // Не кэшируем провал навсегда: транзиентная ошибка IndexedDB (конкурентная
+      // upgrade-транзакция, квота) иначе тихо переводит все следующие локальные
+      // записи в этой вкладке на хранение без шифрования до перезагрузки —
+      // следующий вызов должен получить шанс повторить генерацию/чтение ключа.
+      console.warn('getAudioKey: ключ шифрования недоступен, повторим при следующем обращении', error);
+      audioKeyPromise = null;
+      return null;
+    });
   }
 
   return audioKeyPromise;
@@ -200,6 +208,48 @@ export async function clearOfflineCache() {
 
 // --- US-1.8: живая запись, устойчивая к разряду/крэшу ------------------------
 
+// liveChunks — общий (не per-сессионный) стор на всю вкладку. Web Locks API
+// защищает от того, что вторая вкладка, начавшая запись, снесёт ещё не
+// выгруженные чанки первой: замок держится открытым всю сессию записи и сам
+// освобождается браузером при крэше/закрытии вкладки, так что recovery-путь
+// (другая вкладка читает activeRecording после крэша) ничего не блокирует.
+let releaseLiveRecordingLockFn = null;
+let activeLiveSessionId = null;
+
+function releaseLiveRecordingLock() {
+  if (releaseLiveRecordingLockFn) {
+    releaseLiveRecordingLockFn();
+    releaseLiveRecordingLockFn = null;
+  }
+}
+
+async function acquireLiveRecordingLock() {
+  if (typeof navigator === 'undefined' || !navigator.locks) {
+    return true; // API недоступна в этом браузере — ведём себя как раньше, без защиты.
+  }
+
+  return new Promise((resolveAcquired) => {
+    navigator.locks
+      .request('stenogram-live-recording', { ifAvailable: true }, (lock) => {
+        if (!lock) {
+          resolveAcquired(false);
+          return undefined;
+        }
+
+        resolveAcquired(true);
+        // Замок остаётся занятым, пока callback не вернёт выполненное обещание —
+        // держим его открытым до releaseLiveRecordingLock() (стоп записи).
+        return new Promise((resolveHeld) => {
+          releaseLiveRecordingLockFn = resolveHeld;
+        });
+      })
+      .catch(() => {
+        releaseLiveRecordingLockFn = null;
+        resolveAcquired(false);
+      });
+  });
+}
+
 // Открывает новую сессию записи: сносит остатки прошлых сессий (страховка от
 // незакрытой аварийной) и запоминает метаданные для последующей сборки файла.
 export async function startLiveRecordingSession(session) {
@@ -207,15 +257,37 @@ export async function startLiveRecordingSession(session) {
     return;
   }
 
+  if (!(await acquireLiveRecordingLock())) {
+    // Другая вкладка уже пишет — её чанки лежат в этом же общем сторе, и
+    // clear() ниже их бы стёр. Пропускаем крэш-страховку для ЭТОЙ записи (её
+    // чанки просто не будут флашиться), но сама запись идёт как обычно в
+    // памяти — вызов из useMicRecorder fire-and-forget, ничего не блокирует.
+    console.warn('Live-recording safety net skipped: another tab is already recording.');
+    activeLiveSessionId = null;
+    return;
+  }
+
+  activeLiveSessionId = session.sessionId;
+
   const db = await getDb();
-  await db.clear('liveChunks');
-  await db.put('meta', { key: 'activeRecording', value: session });
+  // Один транзакшен на оба стора — иначе крэш точно между clear() и put()
+  // (раньше было двумя отдельными операциями) оставлял бы meta.activeRecording
+  // рассинхронизированным с уже очищенным liveChunks.
+  const tx = db.transaction(['liveChunks', 'meta'], 'readwrite');
+  await Promise.all([
+    tx.objectStore('liveChunks').clear(),
+    tx.objectStore('meta').put({ key: 'activeRecording', value: session }),
+  ]);
+  await tx.done;
 }
 
 // Дописывает один чанк идущей записи. Fire-and-forget из ondataavailable —
 // потеря одного чанка не должна ронять саму запись, поэтому без throw наружу.
 export async function appendLiveRecordingChunk(sessionId, blob) {
-  if (!sessionId || !blob?.size) {
+  // sessionId !== activeLiveSessionId: либо чужая (другой вкладки) сессия,
+  // либо safety-net для этой сессии не активировался (замок не достался) —
+  // в обоих случаях писать в общий стор нельзя, это чужие или ничейные данные.
+  if (!sessionId || !blob?.size || sessionId !== activeLiveSessionId) {
     return;
   }
 
@@ -261,4 +333,6 @@ export async function clearLiveRecordingSession() {
   const db = await getDb();
   await db.delete('meta', 'activeRecording');
   await db.clear('liveChunks');
+  activeLiveSessionId = null;
+  releaseLiveRecordingLock();
 }

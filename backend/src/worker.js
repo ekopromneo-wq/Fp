@@ -599,12 +599,16 @@ async function main() {
   worker.on('failed', async (job, error) => {
     console.error(`Failed recording job ${job?.id}:`, error);
 
-    // UnrecoverableError (thrown by checkCancelled) skips BullMQ's own
-    // retry count, so it must also skip this attemptsMade gate - otherwise
-    // a cancellation on an early attempt would be silently swallowed here
-    // and never persisted as 'failed'.
+    // UnrecoverableError (thrown by checkCancelled on user cancellation, or by
+    // the ADR-033 cost-ceiling gate below) skips BullMQ's own retry count, so
+    // it must also skip this attemptsMade gate for ANY such error - not just
+    // the cancellation message. Otherwise an early-attempt UnrecoverableError
+    // is silently swallowed here (attemptsMade < attempts) while BullMQ has
+    // already given up retrying, leaving the recording stuck at 'processing'
+    // forever with no error ever persisted.
     const isCancelled = error instanceof UnrecoverableError && error.message === CANCELLED_MESSAGE;
-    const isFinalAttempt = !job || isCancelled || job.attemptsMade >= (job.opts.attempts || 1);
+    const isUnrecoverable = error instanceof UnrecoverableError;
+    const isFinalAttempt = !job || isUnrecoverable || job.attemptsMade >= (job.opts.attempts || 1);
 
     if (!isFinalAttempt) {
       return;

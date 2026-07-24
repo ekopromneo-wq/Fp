@@ -13,7 +13,10 @@ const CHUNK_BODY_LIMIT_BYTES = Number(process.env.UPLOAD_CHUNK_SIZE_BYTES || 5 *
 
 function respondSessionError(c, error) {
   if (error instanceof UploadSessionError) {
-    return c.json({ error: error.message, code: error.code, expectedOffset: error.expectedOffset }, error.code === 'offset_mismatch' ? 409 : 400);
+    return c.json(
+      { error: error.message, code: error.code, expectedOffset: error.expectedOffset },
+      error.code === 'offset_mismatch' || error.code === 'already_completing' ? 409 : 400,
+    );
   }
 
   if (error instanceof UploadValidationError) {

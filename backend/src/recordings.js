@@ -2118,13 +2118,29 @@ export async function enqueueRecording(recordingId, ownerId, { retranscribe = fa
   }
 
   const job = await transaction(async (client) => {
-    const recording = await client.query('select id from recordings where id = $1 and owner_id = $2', [
-      recordingId,
-      ownerId,
-    ]);
+    // Условный UPDATE вместо отдельных select+insert+update: единственная
+    // строка recordings блокируется на время транзакции, так что конкурентный
+    // enqueueRecording для той же записи (ретрай клиента, пересёкшийся
+    // pollWaitingQuota) либо ждёт и видит уже проставленный статус (WHERE не
+    // совпадёт, 0 строк), либо проходит первым — двойной processing_jobs и
+    // двойное списание usage_ledger при повторной ASR так не возникают.
+    const guard = await client.query(
+      `
+        update recordings
+        set status = 'queued', updated_at = now()
+        where id = $1 and owner_id = $2
+          and status not in ('queued', 'processing', 'transcribing', 'summarizing')
+        returning id
+      `,
+      [recordingId, ownerId],
+    );
 
-    if (recording.rowCount === 0) {
-      return null;
+    // Запись существует (проверено выше), но уже в активном статусе - это
+    // конкурентный вызов, а не "не найдено". Отличаем от null, который здесь
+    // означает именно "нет такой записи", чтобы роут не отвечал 404 на живой
+    // конкурентный enqueue.
+    if (guard.rowCount === 0) {
+      return 'already-active';
     }
 
     const inserted = await client.query(
@@ -2136,20 +2152,15 @@ export async function enqueueRecording(recordingId, ownerId, { retranscribe = fa
       [recordingId],
     );
 
-    await client.query(
-      `
-        update recordings
-        set status = 'queued', updated_at = now()
-        where id = $1
-      `,
-      [recordingId],
-    );
-
     return mapJob(inserted.rows[0]);
   });
 
   if (!job) {
     return null;
+  }
+
+  if (job === 'already-active') {
+    return { alreadyActive: true };
   }
 
   const queueJob = await queue.add(
@@ -2810,6 +2821,12 @@ export function registerRecordingRoutes(app) {
 
     if (!job) {
       return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    // Запись уже в очереди/обрабатывается — конкурентный клик "Запустить
+    // обработку" или пересёкшийся авто-энкью, не ошибка находки записи.
+    if (job.alreadyActive) {
+      return c.json({ error: 'Обработка уже идёт', alreadyActive: true }, 409);
     }
 
     // ADR-033: обработка заблокирована квотой — запись сохранена, ждёт квоты.

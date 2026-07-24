@@ -212,6 +212,20 @@ export async function completeUploadSession(recordingId, ownerId) {
     throw new UploadSessionError('no_session', 'Файл загрузки повреждён — начните заново.');
   }
 
+  // Атомарно "застолбить" сессию за этим вызовом: без этого клиентский ретрай
+  // на медленном ответе (ffmpeg-склейка + заливка в MinIO до 1 ГБ) может
+  // пересечься со вторым одновременным completeUploadSession и обработать один
+  // и тот же staging-файл дважды — двойная запись в usage_ledger от повторной
+  // ASR, осиротевший объект в MinIO у проигравшего вызова.
+  const claim = await query(
+    `update upload_sessions set status = 'completed', updated_at = now() where id = $1 and status = 'uploading' returning id`,
+    [session.id],
+  );
+
+  if (claim.rowCount === 0) {
+    throw new UploadSessionError('already_completing', 'Загрузка уже обрабатывается.');
+  }
+
   // US-1.5: если у встречи уже есть аудио — этот upload не заменяет его, а
   // дозаписывает фрагмент: скачиваем существующее аудио, склеиваем со свежим
   // куском через ffmpeg и пересобираем встречу в один файл (единый протокол).

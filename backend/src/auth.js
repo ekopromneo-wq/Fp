@@ -7,6 +7,7 @@ import { notifyNewLogin } from './notifications.js';
 import { MEETING_TYPES } from './protocolTemplates.js';
 import { PROCESSING_TEMPLATE_KEYS } from './processingTemplates.js';
 import { deleteRecordingAudio } from './storage.js';
+import { encryptSecret, decryptSecret } from './secretCrypto.js';
 import {
   buildAuthorizeUrl,
   createPkce,
@@ -468,7 +469,8 @@ export async function cleanupExpiredAuthSessions() {
 
 export async function getUserSmtpConfig(userId) {
   const result = await query('select smtp_config from app_users where id = $1', [userId]);
-  return result.rows[0]?.smtp_config || null;
+  const config = result.rows[0]?.smtp_config || null;
+  return config?.pass ? { ...config, pass: decryptSecret(config.pass) } : config;
 }
 
 export async function getUserTelegramConfig(userId) {
@@ -744,9 +746,14 @@ export function registerAuthRoutes(app) {
     const body = await c.req.json().catch(() => ({}));
     const previous = (await getUserSmtpConfig(user.id)) || {};
     const config = normalizeSmtpConfig(body, previous);
+    // Пароль в БД — только зашифрованным (если задан SMTP_ENCRYPTION_KEY);
+    // getUserSmtpConfig выше уже расшифровал previous.pass, так что merge в
+    // normalizeSmtpConfig отработал над открытым текстом и шифруем его здесь
+    // ровно один раз, а не оборачиваем уже зашифрованное значение повторно.
+    const configToStore = { ...config, pass: encryptSecret(config.pass) };
 
     await query('update app_users set smtp_config = $1::jsonb, updated_at = now() where id = $2', [
-      JSON.stringify(config),
+      JSON.stringify(configToStore),
       user.id,
     ]);
 

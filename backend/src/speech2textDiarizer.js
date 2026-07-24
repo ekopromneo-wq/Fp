@@ -1,6 +1,12 @@
 export const SPEECH2TEXT_API_URL = process.env.SPEECH2TEXT_API_URL || 'https://api.speech2text.ru';
 const SPEECH2TEXT_POLL_INTERVAL_MS = Number(process.env.SPEECH2TEXT_POLL_INTERVAL_MS || 5000);
 const SPEECH2TEXT_POLL_TIMEOUT_MS = Number(process.env.SPEECH2TEXT_POLL_TIMEOUT_MS || 30 * 60 * 1000);
+// Воркер глобально отключает HTTP-таймауты (см. worker.js) ради многочасовой
+// расшифровки, но один статус-чек — лёгкий запрос и не должен зависать
+// навсегда: без своего таймаута сломанное соединение держит воркер-слот
+// бесконечно, обходя SPEECH2TEXT_POLL_TIMEOUT_MS (тот проверяется только МЕЖДУ
+// итерациями, не внутри одного fetch).
+const SPEECH2TEXT_POLL_REQUEST_TIMEOUT_MS = Number(process.env.SPEECH2TEXT_POLL_REQUEST_TIMEOUT_MS || 30000);
 
 function sleep(ms) {
   return new Promise((resolve) => {
@@ -67,7 +73,9 @@ async function pollSpeech2TextJob(taskId, apiKey) {
   const deadline = Date.now() + SPEECH2TEXT_POLL_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
-    const response = await fetch(`${SPEECH2TEXT_API_URL}/api/recognitions/${taskId}?api-key=${apiKey}`);
+    const response = await fetch(`${SPEECH2TEXT_API_URL}/api/recognitions/${taskId}?api-key=${apiKey}`, {
+      signal: AbortSignal.timeout(SPEECH2TEXT_POLL_REQUEST_TIMEOUT_MS),
+    });
     const body = await response.json().catch(() => null);
 
     if (!response.ok) {
@@ -98,7 +106,9 @@ async function pollSpeech2TextJob(taskId, apiKey) {
 }
 
 export async function fetchSpeech2TextResult(taskId, apiKey) {
-  const response = await fetch(`${SPEECH2TEXT_API_URL}/api/recognitions/${taskId}/result/json?api-key=${apiKey}`);
+  const response = await fetch(`${SPEECH2TEXT_API_URL}/api/recognitions/${taskId}/result/json?api-key=${apiKey}`, {
+    signal: AbortSignal.timeout(SPEECH2TEXT_POLL_REQUEST_TIMEOUT_MS),
+  });
   const body = await response.json().catch(() => null);
 
   if (!response.ok) {
@@ -115,7 +125,9 @@ export async function fetchSpeech2TextResult(taskId, apiKey) {
  * concurrent recordings.
  */
 export async function checkSpeech2TextStatus(taskId, apiKey) {
-  const response = await fetch(`${SPEECH2TEXT_API_URL}/api/recognitions/${taskId}?api-key=${apiKey}`);
+  const response = await fetch(`${SPEECH2TEXT_API_URL}/api/recognitions/${taskId}?api-key=${apiKey}`, {
+    signal: AbortSignal.timeout(SPEECH2TEXT_POLL_REQUEST_TIMEOUT_MS),
+  });
   const body = await response.json().catch(() => null);
 
   if (!response.ok) {

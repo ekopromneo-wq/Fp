@@ -74,14 +74,21 @@ export async function getAccountUsage(userId) {
       [userId],
     ),
     query(
-      "select count(*)::int as n from recordings where owner_id = $1 and status in ('queued', 'processing', 'transcribing', 'summarizing')",
+      "select count(*)::int as n, coalesce(sum(duration_seconds), 0)::float as s from recordings where owner_id = $1 and status in ('queued', 'processing', 'transcribing', 'summarizing')",
       [userId],
     ),
   ]);
 
+  // usage_ledger пишется только по завершении ASR (см. worker.js) - запись,
+  // которая уже в очереди/обрабатывается, ещё не отражена там. Без резерва её
+  // плановых минут здесь второй enqueueRecording, запущенный до завершения
+  // первого, увидел бы тот же "использовано 0" базис и вместе с первым мог бы
+  // превысить дневной/месячный лимит (TOCTOU, ADR-033 §2.4).
+  const reservedMinutes = active.rows[0].s / 60;
+
   return {
-    monthlyMinutes: monthly.rows[0].m,
-    dailyMinutes: daily.rows[0].m,
+    monthlyMinutes: monthly.rows[0].m + reservedMinutes,
+    dailyMinutes: daily.rows[0].m + reservedMinutes,
     activeJobs: active.rows[0].n,
   };
 }
