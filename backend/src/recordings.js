@@ -86,6 +86,10 @@ function mapRecording(row) {
     project: projects[0] || null,
     title: row.title,
     status: row.status,
+    // Готовность протокола — отдельно от status: 'Удалить протокол' (#9)
+    // чистит recording_summaries, но не трогает status записи, так что сам
+    // по себе status='done' после этого больше не означает "протокол есть".
+    hasSummary: Boolean(row.has_summary),
     source: row.source,
     meetingType: row.meeting_type || 'meeting',
     protocolTemplate: getProtocolTemplate(row.meeting_type),
@@ -928,6 +932,7 @@ export async function listRecordings(ownerId, filters = {}) {
         recordings.updated_at, recordings.original_filename, recordings.mime_type, recordings.file_size_bytes,
         recordings.auto_named, recordings.meeting_url, recordings.meeting_bot_task_id, recordings.failure_count,
         recordings.meeting_type, recordings.confidential, recordings.download_locked, recordings.deleted_at,
+        exists(select 1 from recording_summaries where recording_summaries.recording_id = recordings.id) as has_summary,
         ${RECORDING_PROJECTS_SELECT}
       from recordings
       where ${conditions.join('\n        and ')}
@@ -1288,6 +1293,7 @@ export async function getRecording(id, ownerId) {
       select id, owner_id, title, status, source, duration_seconds, storage_key, created_at, updated_at
       , original_filename, mime_type, file_size_bytes, auto_named, meeting_url, meeting_bot_task_id,
         recorder_engine, failure_count, meeting_type, processing_template, confidential, download_locked, asr_hints, deleted_at,
+        exists(select 1 from recording_summaries where recording_summaries.recording_id = recordings.id) as has_summary,
         ${RECORDING_PROJECTS_SELECT}
       from recordings
       where id = $1 and owner_id = $2

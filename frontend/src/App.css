@@ -3643,6 +3643,22 @@ a.bitrix-sent-badge {
   margin-top: 8px;
 }
 
+/* Протокол готов — отдельно от общего status (после «Удалить протокол» (#9)
+   status остаётся 'done', но протокола уже нет; галочка следит только за
+   recording.hasSummary). */
+.protocol-ready-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--accent-success);
+  background: rgba(74, 222, 128, 0.14);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
 /* US-16.4: конфиденциальность, запрет скачивания, корзина. */
 .confidential-badge {
   padding: 2px 8px;

@@ -137,6 +137,13 @@ export default function RecordingCard({
               {recording.status ? (
                 <span className={`status-pill status-${recording.status}`}>{getStatusLabel(recording.status)}</span>
               ) : null}
+              {/* Отдельно от status: "Удалить протокол" не меняет status записи,
+                  так что status='done' сам по себе не значит "протокол есть". */}
+              {recording.hasSummary ? (
+                <span className="protocol-ready-badge" title="Протокол готов">
+                  ✓ Протокол
+                </span>
+              ) : null}
               {recording.confidential ? <span className="confidential-badge">🔒 Конфиденциально</span> : null}
               <SyncPill syncState={recording.syncState} syncProgress={recording.syncProgress} syncError={recording.syncError} />
               {(recording.projects?.length ? recording.projects : recording.project ? [recording.project] : []).map((project) => (
