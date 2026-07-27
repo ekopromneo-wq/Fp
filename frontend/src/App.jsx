@@ -93,6 +93,12 @@ function App() {
   });
   const [linkEmailNeedsPassword, setLinkEmailNeedsPassword] = useState(false);
   const [recordings, setRecordings] = useState([]);
+  // STG-011: главный экран раньше читал тот же массив, что и отфильтрованная
+  // библиотека (recordings) - активный поиск/фильтр на «Встречах» незаметно
+  // урезал блоки «Обрабатывается»/«Готовые протоколы» на главной. Независимый
+  // источник без фильтров.
+  const [homeRecordings, setHomeRecordings] = useState([]);
+  const [isHomeLoading, setIsHomeLoading] = useState(true);
   const [projects, setProjects] = useState([]);
   // Токен читается один раз при монтировании: смена адреса без роутера всё
   // равно перезагружает страницу.
@@ -117,6 +123,11 @@ function App() {
     }
   }, [activePage]);
   const [trashMode, setTrashMode] = useState(false);
+  // STG-017: раньше выбор всегда сбрасывался в null и на входе, и на выходе из
+  // корзины - при возврате список молча выбирал первую запись вместо той, что
+  // была открыта до захода в корзину. Запоминаем её на входе и восстанавливаем
+  // на выходе.
+  const preTrashSelectedIdRef = useRef(null);
   const [selectedRecordingId, setSelectedRecordingId] = useState(null);
   const [selectedRecording, setSelectedRecording] = useState(null);
   const [status, setStatus] = useState('Загружаем записи...');
@@ -451,7 +462,27 @@ function App() {
     return [...pending, ...filteredBase];
   }
 
-  async function loadRecordings(nextSelectedId = selectedRecordingId) {
+  // STG-011: те же данные, что и loadRecordings, но всегда без search/project/
+  // libraryFilters/trash - главный экран не должен зависеть от того, что сейчас
+  // введено в поиске библиотеки. Fire-and-forget (не блокирует остальной UI),
+  // сбой тихо оставляет прежний homeRecordings.
+  async function loadHomeRecordings() {
+    try {
+      const response = await apiFetch('/api/recordings');
+      if (!response.ok) {
+        return;
+      }
+      const data = await response.json();
+      const merged = await withQueuedRecordings(data.recordings || []);
+      setHomeRecordings(merged);
+    } catch {
+      // Главный экран — не критичный путь; при сбое просто оставляем прежние данные.
+    } finally {
+      setIsHomeLoading(false);
+    }
+  }
+
+  async function loadRecordings(nextSelectedId = selectedRecordingId, { alsoRefreshHome = true } = {}) {
     setIsLoading(true);
 
     try {
@@ -500,6 +531,10 @@ function App() {
       const existingId = merged.some((recording) => recording.id === nextSelectedId) ? nextSelectedId : fallbackId;
       setSelectedRecordingId(existingId);
       setStatus('');
+
+      if (alsoRefreshHome) {
+        loadHomeRecordings();
+      }
 
       return merged;
     } catch (error) {
@@ -666,9 +701,21 @@ function App() {
   useEffect(() => {
     if (currentUser) {
       loadProjects();
-      loadRecordings();
+      // Этот эффект перезапускается на КАЖДОЕ изменение поиска/фильтров
+      // библиотеки - не повод дёргать независимый homeRecordings повторно.
+      loadRecordings(undefined, { alsoRefreshHome: false });
     }
   }, [currentUser?.id, searchQuery, projectFilter, JSON.stringify(libraryFilters), trashMode]);
+
+  // STG-011: главный экран грузится один раз при входе, независимо от фильтров
+  // библиотеки выше - дальше обновляется только через loadRecordings(...) после
+  // реальных мутаций (загрузка/удаление/обработка и т.п.).
+  useEffect(() => {
+    if (currentUser) {
+      loadHomeRecordings();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
 
   useEffect(() => {
     if (currentUser) {
@@ -858,6 +905,36 @@ function App() {
       setStatus(error.message || 'Ошибка сохранения записи');
     } finally {
       setIsSavingRecording(false);
+    }
+  }
+
+  // STG-067: раньше переименовать можно было только открыв деталь записи -
+  // загруженные файлы получают нечитаемые дефолтные имена (raw filename), и
+  // быстрого способа поправить это из списка не было. Отдельный self-contained
+  // хендлер (не завязан на recordingDraft детали) для кнопки-карандаша на карточке.
+  async function handleQuickRename(recording, newTitle) {
+    const title = newTitle.trim();
+    if (!title || title === recording.title) {
+      return;
+    }
+
+    try {
+      const response = await apiFetch(`/api/recordings/${recording.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось переименовать запись');
+      }
+
+      setRecordings((current) => current.map((item) => (item.id === recording.id ? { ...item, ...data.recording } : item)));
+      setHomeRecordings((current) => current.map((item) => (item.id === recording.id ? { ...item, ...data.recording } : item)));
+      setSelectedRecording((current) => (current?.id === recording.id ? { ...current, ...data.recording } : current));
+      setStatus('Запись переименована');
+    } catch (error) {
+      setStatus(error.message || 'Ошибка переименования');
     }
   }
 
@@ -1733,8 +1810,8 @@ function App() {
 
       {activePage === 'home' ? (
         <HomePage
-          recordings={recordings}
-          isLoading={isLoading}
+          recordings={homeRecordings}
+          isLoading={isHomeLoading}
           isMicRecording={isMicRecording}
           onStartRecording={startRecordingWithConsent}
           onOpenRecording={openRecordingFromAnywhere}
@@ -1808,8 +1885,18 @@ function App() {
             setStatus={setStatus}
             trashMode={trashMode}
             onToggleTrash={() => {
-              setSelectedRecordingId(null);
-              setTrashMode((v) => !v);
+              setTrashMode((v) => {
+                const next = !v;
+                if (next) {
+                  // Заходим в корзину - запоминаем, что было открыто, и чистим выбор.
+                  preTrashSelectedIdRef.current = selectedRecordingId;
+                  setSelectedRecordingId(null);
+                } else {
+                  // Выходим - возвращаем то, что было открыто до захода (если ещё существует).
+                  setSelectedRecordingId(preTrashSelectedIdRef.current);
+                }
+                return next;
+              });
             }}
             sortOrder={sortOrder}
             onToggleSort={() => setSortOrder((v) => (v === 'asc' ? 'desc' : 'asc'))}
@@ -1977,16 +2064,30 @@ function App() {
               {hasRecordings && trashMode ? (
                 <div className="recording-cards trash-list">
                   {sortedRecordings.map((recording) => (
-                    <article className="recording-card trash-card" key={recording.id}>
+                    <article
+                      className="recording-card trash-card"
+                      key={recording.id}
+                      // STG-072: раньше подсказка "нажмите, чтобы открыть" не имела под
+                      // собой действия - onClick не был назначен вообще.
+                      onClick={() => setSelectedRecordingId(recording.id)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelectedRecordingId(recording.id);
+                        }
+                      }}
+                    >
                       <div className="recording-card-main">
                         <strong className="recording-card-title">{recording.title || recording.originalFilename}</strong>
                         <span className="muted-text">удалено {formatDate(recording.deletedAt)} · будет стёрто через неделю</span>
                       </div>
                       <div className="trash-card-actions">
-                        <button className="button button-secondary" type="button" onClick={() => handleRestore(recording)}>
+                        <button className="button button-secondary" type="button" onClick={(event) => { event.stopPropagation(); handleRestore(recording); }}>
                           Восстановить
                         </button>
-                        <button className="button button-danger" type="button" onClick={() => handlePurge(recording)}>
+                        <button className="button button-danger" type="button" onClick={(event) => { event.stopPropagation(); handlePurge(recording); }}>
                           Удалить навсегда
                         </button>
                       </div>
@@ -2005,6 +2106,7 @@ function App() {
                       onSelect={selectionMode ? () => toggleRecordingSelected(recording) : setSelectedRecordingId}
                       onDelete={handleDelete}
                       onProcess={handleProcess}
+                      onRename={handleQuickRename}
                       isDeleting={deletingId === recording.id}
                       enableSwipe={isMobile && !selectionMode}
                       selectionMode={selectionMode}

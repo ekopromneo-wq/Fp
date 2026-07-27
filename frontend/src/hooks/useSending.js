@@ -144,7 +144,10 @@ export default function useSending({ recordingId, sendConfig, setStatus, default
         return false;
       }
 
-      setStatus?.('Отправлено');
+      // STG-006: невалидные адреса больше не блокируют отправку остальным -
+      // но пользователь должен узнать, что часть получателей пропущена.
+      const skipped = data.result?.invalidRecipients || [];
+      setStatus?.(skipped.length ? `Отправлено (пропущены недействительные адреса: ${skipped.join(', ')})` : 'Отправлено');
       setPreview(null);
       setDraft((current) => ({ ...current, message: '' }));
       return true;

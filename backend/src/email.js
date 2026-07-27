@@ -37,33 +37,49 @@ function escapeHtml(value) {
     .replace(/'/g, '&#039;');
 }
 
-// US-11.2: «Недействительный адрес → сообщение + предложение выбрать другой».
-// Называем конкретный адрес — иначе из списка в десяток получателей непонятно,
-// какой именно переписывать. PermanentSendError, чтобы отправка не уходила на
-// три круга повторов из-за опечатки.
-function normalizeRecipients(input, { field = 'Получатель' } = {}) {
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// STG-006: раньше ОДИН недействительный адрес в списке блокировал отправку
+// ВСЕМ, включая валидные — normalizeRecipients бросал исключение на весь
+// батч. Теперь валидные адреса отделяются от невалидных и письмо всё равно
+// уходит принятым; отклонённые адреса возвращаются вызывающему (см.
+// sendRecordingEmail/sendTaskEmail), чтобы показать пользователю, кого
+// пропустили, а не просто молчаливо отправить неполный список.
+function splitRecipients(input) {
   const source = Array.isArray(input) ? input : String(input || '').split(/[,\n;]/);
   const recipients = source.map((item) => String(item || '').trim()).filter(Boolean);
   const unique = [...new Set(recipients.map((item) => item.toLowerCase()))];
+  const valid = unique.filter((email) => EMAIL_PATTERN.test(email));
+  const invalid = unique.filter((email) => !EMAIL_PATTERN.test(email));
 
-  if (unique.length === 0) {
-    throw new PermanentSendError('Укажите хотя бы одного получателя');
+  return { valid, invalid };
+}
+
+// US-11.2: «Недействительный адрес → сообщение + предложение выбрать другой».
+// PermanentSendError только когда отправлять вообще некому (все адреса плохие
+// или список пуст) — отправка не уходит на три круга повторов из-за опечатки.
+function normalizeRecipients(input, { field = 'Получатель' } = {}) {
+  const { valid, invalid } = splitRecipients(input);
+
+  if (valid.length === 0) {
+    throw invalid.length
+      ? new PermanentSendError(`${field}: недействительный адрес — ${invalid.join(', ')}. Укажите другой.`)
+      : new PermanentSendError('Укажите хотя бы одного получателя');
   }
 
-  const invalid = unique.filter((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
-
-  if (invalid.length) {
-    throw new PermanentSendError(`${field}: недействительный адрес — ${invalid.join(', ')}. Укажите другой.`);
-  }
-
-  return unique;
+  return { valid, invalid };
 }
 
 // CC/BCC опциональны (US-11.2): пустое поле — это не ошибка, в отличие от
-// пустого списка основных получателей.
-function normalizeOptionalRecipients(input, field) {
+// пустого списка основных получателей. Невалидные cc/bcc адреса просто
+// отбрасываются (не блокируют письмо) - они не тот получатель, ради
+// которого письмо вообще отправляют.
+function normalizeOptionalRecipients(input) {
   const hasValue = Array.isArray(input) ? input.length > 0 : String(input || '').trim().length > 0;
-  return hasValue ? normalizeRecipients(input, { field }) : [];
+  if (!hasValue) {
+    return { valid: [], invalid: [] };
+  }
+  return splitRecipients(input);
 }
 
 // `decisions` items are {text, disputed} objects (US-8.1), everything else
@@ -214,7 +230,7 @@ export { buildEmailContent, buildSubject };
 // summary/protocol/task table.
 export async function sendTaskEmail(smtpConfig, toInput, recording, task) {
   const config = getSmtpConfig(smtpConfig || {});
-  const to = normalizeRecipients(toInput);
+  const { valid: to, invalid: invalidRecipients } = normalizeRecipients(toInput);
   const subject = `Задача из встречи "${recording.title}": ${task.description.slice(0, 80)}`;
   const text = [
     `Встреча: ${recording.title}`,
@@ -243,6 +259,7 @@ export async function sendTaskEmail(smtpConfig, toInput, recording, task) {
     messageId: result.messageId,
     accepted: result.accepted || [],
     rejected: result.rejected || [],
+    invalidRecipients,
   };
 }
 
@@ -270,9 +287,10 @@ export async function sendNotificationEmail(smtpConfig, to, subject, text) {
 export async function sendRecordingEmail(recording, input = {}, smtpConfig = {}) {
   const config = getSmtpConfig(smtpConfig || {});
   const payloadKind = PAYLOAD_KINDS.includes(input.payloadKind) ? input.payloadKind : 'protocol';
-  const to = normalizeRecipients(input.recipients);
-  const cc = normalizeOptionalRecipients(input.cc, 'Копия');
-  const bcc = normalizeOptionalRecipients(input.bcc, 'Скрытая копия');
+  const { valid: to, invalid: invalidTo } = normalizeRecipients(input.recipients);
+  const { valid: cc, invalid: invalidCc } = normalizeOptionalRecipients(input.cc);
+  const { valid: bcc, invalid: invalidBcc } = normalizeOptionalRecipients(input.bcc);
+  const invalidRecipients = [...invalidTo, ...invalidCc, ...invalidBcc];
   const subject = String(input.subject || '').trim() || buildSubject(recording, payloadKind);
   const { text, html } = buildEmailContent(recording, input.message, payloadKind);
   const transporter = nodemailer.createTransport({
@@ -306,6 +324,7 @@ export async function sendRecordingEmail(recording, input = {}, smtpConfig = {})
     rejected: result.rejected || [],
     cc,
     bcc,
+    invalidRecipients,
     attached: attachments.map((item) => item.filename),
   };
 }

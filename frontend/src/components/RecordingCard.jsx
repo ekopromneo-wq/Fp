@@ -83,6 +83,7 @@ export default function RecordingCard({
   onSelect,
   onDelete,
   onProcess,
+  onRename,
   isDeleting,
   enableSwipe,
   selectionMode,
@@ -167,19 +168,39 @@ export default function RecordingCard({
           </div>
 
           {!selectionMode ? (
-            <button
-              className="recording-card-delete"
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onDelete(recording);
-              }}
-              disabled={isDeleting}
-              aria-label="Удалить запись"
-              title="Удалить"
-            >
-              {isDeleting ? '…' : '✕'}
-            </button>
+            <div className="recording-card-actions">
+              {/* STG-067: быстрое переименование прямо из списка - раньше нужно
+                  было открыть деталь записи. window.prompt - тот же паттерн, что
+                  и "+ новый спикер..." в TranscriptView. */}
+              <button
+                className="recording-card-rename"
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const next = window.prompt('Новое название встречи', recording.title || recording.originalFilename || '');
+                  if (next && next.trim()) {
+                    onRename?.(recording, next.trim());
+                  }
+                }}
+                aria-label="Переименовать запись"
+                title="Переименовать"
+              >
+                ✎
+              </button>
+              <button
+                className="recording-card-delete"
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDelete(recording);
+                }}
+                disabled={isDeleting}
+                aria-label="Удалить запись"
+                title="Удалить"
+              >
+                {isDeleting ? '…' : '✕'}
+              </button>
+            </div>
           ) : null}
         </div>
       </div>

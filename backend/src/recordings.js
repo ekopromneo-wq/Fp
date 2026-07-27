@@ -853,6 +853,22 @@ function cleanFilterString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+// STG-015: `ilike` уже нечувствителен к регистру, но не к пунктуации/лишним
+// пробелам - "Тест", "тест." и "ТЕСТ  " раньше давали разные результаты.
+// Только для свободнотекстового поиска (recordings/tasks) - остальные
+// cleanFilterString-фильтры (id/enum-значения) пунктуацию не содержат.
+function normalizeSearchQuery(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const cleaned = value
+    .trim()
+    .replace(/[.,!?;:…]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || null;
+}
+
 // yyyy-mm-dd from <input type="date"> - anything else is ignored rather than
 // passed into a ::date cast that would throw on garbage query params.
 function cleanFilterDate(value) {
@@ -870,7 +886,7 @@ export async function listRecordings(ownerId, filters = {}) {
     return `$${params.length}`;
   };
 
-  const search = cleanFilterString(filters.search);
+  const search = normalizeSearchQuery(filters.search);
   if (search) {
     const p = bind(search);
     conditions.push(`(
@@ -975,7 +991,7 @@ export async function searchTasks(ownerId, filters = {}) {
     return `$${params.length}`;
   };
 
-  const search = cleanFilterString(filters.search);
+  const search = normalizeSearchQuery(filters.search);
   if (search) {
     const p = bind(search);
     conditions.push(`(t.description ilike '%' || ${p} || '%' or t.assignee ilike '%' || ${p} || '%')`);

@@ -49,6 +49,7 @@ function TaskSearchPage({ search, projectOptions, onOpenRecording, onDictate, se
               onText={(text) => setFilter('search', text)}
               setStatus={setStatus}
               title="Голосовой поиск"
+              requireConfirm
             />
           </span>
         </label>
@@ -119,9 +120,15 @@ function TaskSearchPage({ search, projectOptions, onOpenRecording, onDictate, se
                   <span>{task.dueDate ? formatDate(task.dueDate) : task.dueText || '?'}</span>
                   <span className="status-pill">{getTaskStatusLabel(task.status)}</span>
                 </div>
+                {/* STG-021: раньше название встречи было видно только на самой кнопке
+                    перехода, а дата не показывалась вовсе - отдельная подпись-источник. */}
+                <p className="task-search-result-source muted-text">
+                  {task.recordingTitle || 'Встреча'}
+                  {task.recordingCreatedAt ? ` · ${formatDate(task.recordingCreatedAt)}` : ''}
+                </p>
               </div>
               <button className="button button-secondary" type="button" onClick={() => onOpenRecording(task.recordingId)}>
-                {task.recordingTitle || 'К встрече'} →
+                Открыть встречу →
               </button>
             </article>
           ))}

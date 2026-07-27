@@ -82,7 +82,10 @@ export default function SummaryVersionHistory({ recordingId, onRestore, setStatu
               className="button button-secondary"
               type="button"
               onClick={() => handleRestore(version.id)}
-              disabled={restoringId !== null}
+              // STG-074: раньше busy-флаг блокировал ВСЕ кнопки в списке, а не
+              // только ту, что реально восстанавливается — соседние выглядели
+              // отключёнными без причины. Блокируем только конкретную кнопку.
+              disabled={restoringId === version.id}
             >
               {restoringId === version.id ? 'Восстанавливаем...' : 'Восстановить'}
             </button>

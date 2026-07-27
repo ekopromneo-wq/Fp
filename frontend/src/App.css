@@ -1165,6 +1165,41 @@ body::after {
   white-space: nowrap;
 }
 
+.recording-card-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* STG-067: кнопка-карандаш переименования - тот же приглушённый паттерн, что
+   и у удаления, но подсвечивается акцентным цветом при наведении, не красным. */
+.recording-card-content .recording-card-rename {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: color 0.15s ease, background 0.15s ease, opacity 0.15s ease, border-color 0.15s ease;
+}
+
+.recording-card-content .recording-card-rename:hover,
+.recording-card-content .recording-card-rename:focus-visible {
+  opacity: 1;
+  color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent-primary) 32%, transparent);
+}
+
 /* Приглушённая кнопка удаления — не кричит красным на каждой карточке, краснеет
    при наведении/фокусе. На мобильном дублируется свайпом влево. */
 .recording-card-content .recording-card-delete {
@@ -2791,6 +2826,35 @@ audio {
   align-items: center;
 }
 
+/* STG-016: обёртка кнопки голосового ввода - сама по себе не влияет на
+   раскладку (inline-flex размером с кнопку), поповер подтверждения текста
+   всплывает поверх контента, а не сжимает соседние элементы формы. */
+.voice-input-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.voice-input-confirm {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  width: max(220px, 100%);
+}
+
+.voice-input-confirm-text {
+  flex: 1;
+  min-width: 0;
+}
+
 .library-filters-toggle {
   align-self: end;
 }
@@ -3016,6 +3080,11 @@ audio {
   gap: 10px;
   color: var(--text-secondary);
   font-size: 0.85rem;
+}
+
+.task-search-result-source {
+  margin: 0;
+  font-size: 0.8rem;
 }
 
 @media (max-width: 720px) {
@@ -3764,6 +3833,7 @@ a.bitrix-sent-badge {
   justify-content: space-between;
   gap: 10px;
   padding: 12px;
+  cursor: pointer;
 }
 
 .trash-card-actions {
@@ -4377,6 +4447,11 @@ a.bitrix-sent-badge {
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
   padding: 2px 8px;
+  /* STG-020: длинное AI-извлечённое имя без пробелов раздвигало карточку
+     задачи за пределы экрана на iOS (320-390px) - у чипа не было предела
+     ширины/переноса, хотя у самой карточки min-width:0 уже стоял. */
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .task-status-mini {

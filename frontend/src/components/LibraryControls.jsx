@@ -65,7 +65,7 @@ function LibraryControls({
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Название, файл, проект или текст стенограммы"
             />
-            <VoiceInputButton onDictate={onDictate} onText={setSearchQuery} setStatus={setStatus} title="Голосовой поиск" />
+            <VoiceInputButton onDictate={onDictate} onText={setSearchQuery} setStatus={setStatus} title="Голосовой поиск" requireConfirm />
           </span>
         </label>
 

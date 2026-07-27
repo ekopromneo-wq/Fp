@@ -126,6 +126,12 @@ function RecordingDetail({
     }
   }, [openStep]);
 
+  // STG-007: шаг «Отправка» раньше никогда не мог стать 'done' - hasOutput не
+  // проверял n===5 вообще, хотя журнал доставки (sending.deliveries) уже
+  // корректно писался на бэкенде при успехе. «Пропущено» (shareSkipped) тоже
+  // считаем завершением шага - пользователь осознанно решил не отправлять.
+  const hasSentDelivery = (sending?.deliveries || []).some((delivery) => delivery.status === 'sent');
+
   function stepState(n) {
     const locked = ((n >= 2 && n <= 4) && !hasTranscript) || (n === 5 && !canExport);
     if (locked) return 'locked';
@@ -134,7 +140,8 @@ function RecordingDetail({
       (n === 1 && hasTranscript) ||
       (n === 2 && hasTranscript) ||
       (n === 3 && hasSummary) ||
-      (n === 4 && hasTasks);
+      (n === 4 && hasTasks) ||
+      (n === 5 && (hasSentDelivery || shareSkipped));
     return hasOutput ? 'done' : 'available';
   }
 
@@ -647,7 +654,11 @@ function RecordingDetail({
                     placeholder="Исполнитель для выбранных"
                     disabled={tasks.isBulkUpdatingTasks}
                   />
-                  <button className="button button-secondary" type="button" onClick={tasks.handleBulkAssign} disabled={tasks.isBulkUpdatingTasks || !tasks.selectedTaskIds.size}>
+                  {/* STG-019: раньше кнопка была отключена без выбранных задач, и
+                      собственная подсказка handleBulkAssign ("Выбери задачи и укажи
+                      исполнителя") никогда не могла сработать - клик по disabled-кнопке
+                      не долетает до onClick. Теперь кнопка активна и объясняет, что не так. */}
+                  <button className="button button-secondary" type="button" onClick={tasks.handleBulkAssign} disabled={tasks.isBulkUpdatingTasks}>
                     Назначить
                   </button>
                 </div>
@@ -658,11 +669,14 @@ function RecordingDetail({
                     placeholder="Срок для выбранных"
                     disabled={tasks.isBulkUpdatingTasks}
                   />
-                  <button className="button button-secondary" type="button" onClick={tasks.handleBulkDueText} disabled={tasks.isBulkUpdatingTasks || !tasks.selectedTaskIds.size}>
+                  <button className="button button-secondary" type="button" onClick={tasks.handleBulkDueText} disabled={tasks.isBulkUpdatingTasks}>
                     Изменить срок
                   </button>
                 </div>
               </div>
+              {!tasks.selectedTaskIds.size ? (
+                <p className="muted-text task-bulk-hint">Отметь задачи галочками, чтобы назначить исполнителя или срок сразу нескольким.</p>
+              ) : null}
 
               <div className="task-list">
                 {recording.tasks.map((task) => (

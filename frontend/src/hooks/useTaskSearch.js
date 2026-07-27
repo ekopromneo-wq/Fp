@@ -15,6 +15,15 @@ export default function useTaskSearch(setStatus) {
   const [hasSearchedTasks, setHasSearchedTasks] = useState(false);
 
   async function searchTasks(nextFilters = taskFilters) {
+    // STG-012: раньше «Найти задачи» с пустой формой (без единого фильтра)
+    // тихо возвращал ВСЕ задачи пользователя - неотличимо от настоящего
+    // результата поиска. Требуем хотя бы один непустой критерий.
+    const hasAnyFilter = Object.values(nextFilters).some((value) => value && String(value).trim());
+    if (!hasAnyFilter) {
+      setStatus('Укажи текст, исполнителя или хотя бы один фильтр для поиска');
+      return;
+    }
+
     setIsSearchingTasks(true);
 
     try {

@@ -8,10 +8,18 @@ import { describeMicError, requestMicStream } from '../lib/micPermission.js';
  * MediaRecorder, что и надиктовка в ProtocolView, но самодостаточный: у
  * поисковой строки нет своего draft-состояния, в которое можно было бы
  * встроить чужой toggleDictate.
+ *
+ * STG-016: распознавание голоса нестабильно ("тест" → "спасибо"). Для
+ * поисковых полей (requireConfirm=true) результат не применяется мгновенно —
+ * показываем распознанный текст с возможностью поправить/отменить, и только
+ * подтверждение вызывает onText. Для надиктовки в поля протокола/задачи
+ * (requireConfirm по умолчанию false) поведение прежнее — там результат и
+ * так остаётся в редактируемом черновике, доп. подтверждение только мешало бы.
  */
-export default function VoiceInputButton({ onDictate, onText, setStatus, title = 'Голосовой ввод' }) {
+export default function VoiceInputButton({ onDictate, onText, setStatus, title = 'Голосовой ввод', requireConfirm = false }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [pendingText, setPendingText] = useState(null);
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
 
@@ -29,6 +37,8 @@ export default function VoiceInputButton({ onDictate, onText, setStatus, title =
       setStatus?.('Голосовой ввод не поддерживается в этом браузере');
       return;
     }
+
+    setPendingText(null);
 
     try {
       const stream = await requestMicStream();
@@ -60,11 +70,15 @@ export default function VoiceInputButton({ onDictate, onText, setStatus, title =
         try {
           const text = await onDictate(blob);
 
-          if (text) {
+          if (text && requireConfirm) {
+            setPendingText(text);
+            setStatus?.('Проверь распознанный текст и подтверди');
+          } else if (text) {
             onText(text);
+            setStatus?.('Голосовой запрос распознан');
+          } else {
+            setStatus?.('Не удалось распознать речь');
           }
-
-          setStatus?.(text ? 'Голосовой запрос распознан' : 'Не удалось распознать речь');
         } catch (error) {
           setStatus?.(error.message || 'Не удалось распознать запрос');
         } finally {
@@ -80,19 +94,51 @@ export default function VoiceInputButton({ onDictate, onText, setStatus, title =
     }
   }
 
+  function confirmPendingText() {
+    if (pendingText) {
+      onText(pendingText);
+    }
+    setPendingText(null);
+    setStatus?.('');
+  }
+
+  function cancelPendingText() {
+    setPendingText(null);
+    setStatus?.('');
+  }
+
   return (
-    <button
-      className={`button icon-button ${isRecording ? 'button-danger' : 'button-secondary'} voice-input-button`}
-      type="button"
-      onClick={handleToggle}
-      disabled={isBusy}
-      aria-label={isRecording ? 'Остановить голосовой ввод' : title}
-      title={isRecording ? 'Остановить голосовой ввод' : title}
-    >
-      <svg className="icon-button-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="9" y="2" width="6" height="12" rx="3" />
-        <path d="M5 10a7 7 0 0 0 14 0M12 17v4" />
-      </svg>
-    </button>
+    <span className="voice-input-wrapper">
+      <button
+        className={`button icon-button ${isRecording ? 'button-danger' : 'button-secondary'} voice-input-button`}
+        type="button"
+        onClick={handleToggle}
+        disabled={isBusy}
+        aria-label={isRecording ? 'Остановить голосовой ввод' : title}
+        title={isRecording ? 'Остановить голосовой ввод' : title}
+      >
+        <svg className="icon-button-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="9" y="2" width="6" height="12" rx="3" />
+          <path d="M5 10a7 7 0 0 0 14 0M12 17v4" />
+        </svg>
+      </button>
+
+      {pendingText !== null ? (
+        <span className="voice-input-confirm" role="group" aria-label="Подтверждение распознанного текста">
+          <input
+            className="voice-input-confirm-text"
+            value={pendingText}
+            onChange={(event) => setPendingText(event.target.value)}
+            aria-label="Распознанный текст"
+          />
+          <button className="button button-secondary icon-button" type="button" onClick={confirmPendingText} aria-label="Применить" title="Применить">
+            ✓
+          </button>
+          <button className="button button-secondary icon-button" type="button" onClick={cancelPendingText} aria-label="Отменить" title="Отменить">
+            ✕
+          </button>
+        </span>
+      ) : null}
+    </span>
   );
 }
