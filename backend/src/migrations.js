@@ -798,6 +798,26 @@ const migrations = [
         on recording_summary_versions(recording_id, created_at desc);
     `,
   },
+  {
+    id: '040_email_verification',
+    sql: `
+      -- STG-029 (решение владельца 27.07): обязательное подтверждение email для
+      -- всех аккаунтов, кроме OAuth-провайдеров, уже подтвердивших email сами
+      -- (Google/Яндекс/Сбер) - им email_verified_at проставляется сразу при
+      -- создании. Гейт мягкий (баннер-напоминание), ничего не блокирует.
+      alter table app_users add column if not exists email_verified_at timestamptz;
+
+      -- Токен хранится хэшем (sha256), как сессии - в отличие от
+      -- oauth_pending_links (короткоживущий, 15 мин), ссылка подтверждения
+      -- живёт сутки и уходит в письмо, которое может осесть в логах/архивах.
+      create table if not exists email_verify_tokens (
+        token_hash text primary key,
+        user_id uuid not null references app_users(id) on delete cascade,
+        created_at timestamptz not null default now()
+      );
+      create index if not exists email_verify_tokens_user_idx on email_verify_tokens(user_id);
+    `,
+  },
 ];
 
 export async function runMigrations() {

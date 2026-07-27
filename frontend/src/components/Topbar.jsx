@@ -66,6 +66,7 @@ export default function Topbar({
   isNotificationsOpen,
   setIsNotificationsOpen,
   onOpenNotification,
+  trashMode,
 }) {
   return (
     <section className="topbar" aria-labelledby="page-title">
@@ -82,7 +83,9 @@ export default function Topbar({
                 ? 'Проекты'
                 : activePage === 'tasksearch'
                   ? 'Поиск задач'
-                  : 'Встречи'}
+                  // STG-078: заголовок раньше всегда оставался "Встречи",
+                  // даже когда library-подрежим был "Корзина".
+                  : trashMode ? 'Корзина' : 'Встречи'}
           {isOnline ? null : (
             <span className="offline-badge" role="status" title="Нет подключения к сети — показаны сохранённые данные">
               Офлайн
@@ -97,7 +100,7 @@ export default function Topbar({
             <label
               className={`button icon-button icon-button-ghost ${isUploading || isMicRecording ? 'is-disabled' : ''}`}
               aria-label="Загрузить запись"
-              title="Загрузить запись"
+              title="Загрузить запись — mp3, wav, m4a, ogg, mp4, mov, mkv, webm"
             >
               <input
                 type="file"

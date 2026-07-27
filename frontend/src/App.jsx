@@ -16,6 +16,7 @@ import SharePage from './components/SharePage.jsx';
 import VoicePanel from './components/VoicePanel/VoicePanel.jsx';
 import StopOrBackgroundDialog from './components/VoicePanel/StopOrBackgroundDialog.jsx';
 import ConsentDialog from './components/ConsentDialog.jsx';
+import EmailVerifyBanner from './components/EmailVerifyBanner.jsx';
 import useMicRecorder from './hooks/useMicRecorder.js';
 import useIsMobile from './hooks/useIsMobile.js';
 import useUiStore from './store/uiStore.js';
@@ -272,6 +273,33 @@ function App() {
     }
   }, []);
 
+  // STG-029: переход по ссылке из письма подтверждения — работает независимо
+  // от текущей сессии (тот же браузер может быть залогинен другим аккаунтом
+  // или разлогинен), поэтому не завязан на currentUser; если это тот самый
+  // аккаунт в текущей сессии — снимаем баннер сразу, без перезахода.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('verify_email');
+
+    if (!token) {
+      return;
+    }
+
+    window.history.replaceState({}, '', window.location.pathname);
+
+    apiFetch(`/api/auth/verify-email?token=${encodeURIComponent(token)}`)
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (response.ok) {
+          setStatus('Email подтверждён');
+          setCurrentUser((current) => (current ? { ...current, emailVerified: true } : current));
+        } else {
+          setStatus(data.error || 'Не удалось подтвердить email');
+        }
+      })
+      .catch(() => setStatus('Не удалось подтвердить email — проверьте подключение к сети'));
+  }, []);
+
   const hasRecordings = recordings.length > 0;
   // #10: сортировка встреч по времени создания (новые сверху по умолчанию).
   const [sortOrder, setSortOrder] = useState('desc');
@@ -393,7 +421,23 @@ function App() {
     setStatus('Аккаунт удалён');
   }
 
+  // STG-029: «Отправить письмо ещё раз» с баннера-напоминания.
+  async function handleResendVerification() {
+    const response = await apiFetch('/api/auth/resend-verification', { method: 'POST' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || 'Не удалось отправить письмо');
+    }
+  }
+
   async function handleLogout() {
+    // STG-076: раньше один случайный тап по "Выйти" сразу разлогинивал -
+    // ни одного подтверждения, в отличие от других деструктивных действий
+    // в этом файле (удаление записи навсегда, полная перегенерация протокола).
+    if (!window.confirm('Выйти из аккаунта?')) {
+      return;
+    }
+
     const snapshot = await getQueueSnapshot();
     // Тупиковые сбои не выгрузить — они не должны вечно блокировать выход
     // «дождитесь синхронизации»; их можно только удалить.
@@ -643,9 +687,14 @@ function App() {
     setIsNotificationsOpen(false);
 
     if (!notification.readAt) {
-      await apiFetch(`/api/notifications/${notification.id}/read`, { method: 'POST' }).catch(() => null);
-      setNotifications((current) => current.map((item) => (item.id === notification.id ? { ...item, readAt: new Date().toISOString() } : item)));
-      setUnreadNotificationCount((current) => Math.max(0, current - 1));
+      // STG-032: раньше UI обновлялся оптимистично независимо от исхода
+      // запроса - при 401/500 счётчик и статус "прочитано" откатывались
+      // тихо при следующем опросе, будто "не сохранилось между сессиями".
+      const response = await apiFetch(`/api/notifications/${notification.id}/read`, { method: 'POST' }).catch(() => null);
+      if (response?.ok) {
+        setNotifications((current) => current.map((item) => (item.id === notification.id ? { ...item, readAt: new Date().toISOString() } : item)));
+        setUnreadNotificationCount((current) => Math.max(0, current - 1));
+      }
     }
 
     if (notification.recordingId) {
@@ -1695,6 +1744,67 @@ function App() {
     }
   }
 
+  // STG-033: в корзине раньше вообще не было массового выбора - только
+  // восстановление/удаление по одной записи. Переиспользует тот же
+  // selectionMode/selectedIds, что и обычный список (пересекающегося
+  // использования нет — корзина и обычный список не показываются одновременно).
+  async function handleBulkRestore() {
+    if (!selectedIds.size) {
+      return;
+    }
+
+    setIsBulkDeleting(true);
+    setStatus(`Восстанавливаем ${selectedIds.size} встреч...`);
+
+    try {
+      const ids = [...selectedIds];
+      await Promise.all(ids.map((id) => apiFetch(`/api/recordings/${id}/restore`, { method: 'POST' }).catch(() => null)));
+      setSelectionMode(false);
+      setSelectedIds(new Set());
+      await loadRecordings();
+      setStatus(`Восстановлено записей: ${ids.length}`);
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  }
+
+  async function handleBulkPurge() {
+    if (!selectedIds.size) {
+      return;
+    }
+
+    if (!window.confirm(`Удалить выбранные записи (${selectedIds.size}) навсегда? Восстановить будет нельзя.`)) {
+      return;
+    }
+
+    setIsBulkDeleting(true);
+    setStatus(`Удаляем ${selectedIds.size} записей навсегда...`);
+
+    try {
+      const ids = [...selectedIds];
+      await Promise.all(ids.map((id) => apiFetch(`/api/recordings/${id}/purge`, { method: 'DELETE' }).catch(() => null)));
+      setSelectionMode(false);
+      setSelectedIds(new Set());
+      await loadRecordings();
+      setStatus(`Удалено навсегда: ${ids.length}`);
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  }
+
+  // STG-017/073: единая точка входа/выхода из корзины - переиспользуется и
+  // тумблером в LibraryControls, и кнопкой "Встречи" таббара (STG-073).
+  function enterTrash() {
+    preTrashSelectedIdRef.current = selectedRecordingId;
+    setSelectedRecordingId(null);
+    setTrashMode(true);
+  }
+
+  function exitTrash() {
+    setSelectedRecordingId(preTrashSelectedIdRef.current);
+    setTrashMode(false);
+  }
+
   // Ссылка на результат (US-11.1) открывается внешним получателем без аккаунта,
   // поэтому проверяется до экрана входа. Роутера в проекте нет — страница
   // включается параметром ?share=<token>.
@@ -1790,7 +1900,13 @@ function App() {
         isNotificationsOpen={isNotificationsOpen}
         setIsNotificationsOpen={setIsNotificationsOpen}
         onOpenNotification={handleOpenNotification}
+        trashMode={trashMode}
       />
+
+      {/* STG-029: мягкий баннер-напоминание, ничего не блокирует. */}
+      {currentUser && !currentUser.emailVerified ? (
+        <EmailVerifyBanner email={currentUser.email} onResend={handleResendVerification} />
+      ) : null}
 
       <VoicePanel
         isOpen={isVoicePanelOpen}
@@ -1884,20 +2000,7 @@ function App() {
             onDictate={handleDictateVoiceNote}
             setStatus={setStatus}
             trashMode={trashMode}
-            onToggleTrash={() => {
-              setTrashMode((v) => {
-                const next = !v;
-                if (next) {
-                  // Заходим в корзину - запоминаем, что было открыто, и чистим выбор.
-                  preTrashSelectedIdRef.current = selectedRecordingId;
-                  setSelectedRecordingId(null);
-                } else {
-                  // Выходим - возвращаем то, что было открыто до захода (если ещё существует).
-                  setSelectedRecordingId(preTrashSelectedIdRef.current);
-                }
-                return next;
-              });
-            }}
+            onToggleTrash={() => (trashMode ? exitTrash() : enterTrash())}
             sortOrder={sortOrder}
             onToggleSort={() => setSortOrder((v) => (v === 'asc' ? 'desc' : 'asc'))}
             selectionMode={selectionMode}
@@ -2022,6 +2125,41 @@ function App() {
             </section>
           ) : null}
 
+          {/* STG-033: в корзине раньше не было массового выбора вообще -
+              только по одной записи. «Выбрать все» — только для текущего
+              списка корзины, отдельного select-all в обычном списке нет. */}
+          {selectionMode && trashMode ? (
+            <section className="sync-bar bulk-select-bar" aria-label="Групповые действия в корзине">
+              <span className="sync-bar-count">Выбрано: <strong>{selectedIds.size}</strong></span>
+              <div className="sync-bar-actions">
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  onClick={() => setSelectedIds(new Set(sortedRecordings.map((recording) => recording.id)))}
+                  disabled={isBulkDeleting}
+                >
+                  Выбрать все
+                </button>
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  onClick={handleBulkRestore}
+                  disabled={!selectedIds.size || isBulkDeleting}
+                >
+                  {isBulkDeleting ? 'Восстанавливаем...' : 'Восстановить выбранные'}
+                </button>
+                <button
+                  className="button button-danger"
+                  type="button"
+                  onClick={handleBulkPurge}
+                  disabled={!selectedIds.size || isBulkDeleting}
+                >
+                  {isBulkDeleting ? 'Удаляем...' : 'Удалить выбранные навсегда'}
+                </button>
+              </div>
+            </section>
+          ) : null}
+
           {/* US-3.2/US-3.4: несинхронизированные записи + ручной запуск синхры и
               запрет выгрузки по мобильной сети. Панель видна, только когда есть
               что отправлять. */}
@@ -2065,32 +2203,46 @@ function App() {
                 <div className="recording-cards trash-list">
                   {sortedRecordings.map((recording) => (
                     <article
-                      className="recording-card trash-card"
+                      className={`recording-card trash-card${selectedIds.has(recording.id) ? ' is-checked' : ''}`}
                       key={recording.id}
                       // STG-072: раньше подсказка "нажмите, чтобы открыть" не имела под
                       // собой действия - onClick не был назначен вообще.
-                      onClick={() => setSelectedRecordingId(recording.id)}
+                      // STG-033: в режиме выбора клик по карточке переключает
+                      // чекбокс, как и в обычном списке, а не открывает деталь.
+                      onClick={() => (selectionMode ? toggleRecordingSelected(recording) : setSelectedRecordingId(recording.id))}
                       role="button"
                       tabIndex={0}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault();
-                          setSelectedRecordingId(recording.id);
+                          selectionMode ? toggleRecordingSelected(recording) : setSelectedRecordingId(recording.id);
                         }
                       }}
                     >
+                      {selectionMode ? (
+                        <input
+                          type="checkbox"
+                          className="recording-card-checkbox"
+                          checked={selectedIds.has(recording.id)}
+                          onChange={() => toggleRecordingSelected(recording)}
+                          onClick={(event) => event.stopPropagation()}
+                          aria-label="Выбрать запись"
+                        />
+                      ) : null}
                       <div className="recording-card-main">
                         <strong className="recording-card-title">{recording.title || recording.originalFilename}</strong>
                         <span className="muted-text">удалено {formatDate(recording.deletedAt)} · будет стёрто через неделю</span>
                       </div>
-                      <div className="trash-card-actions">
-                        <button className="button button-secondary" type="button" onClick={(event) => { event.stopPropagation(); handleRestore(recording); }}>
-                          Восстановить
-                        </button>
-                        <button className="button button-danger" type="button" onClick={(event) => { event.stopPropagation(); handlePurge(recording); }}>
-                          Удалить навсегда
-                        </button>
-                      </div>
+                      {!selectionMode ? (
+                        <div className="trash-card-actions">
+                          <button className="button button-secondary" type="button" onClick={(event) => { event.stopPropagation(); handleRestore(recording); }}>
+                            Восстановить
+                          </button>
+                          <button className="button button-danger" type="button" onClick={(event) => { event.stopPropagation(); handlePurge(recording); }}>
+                            Удалить навсегда
+                          </button>
+                        </div>
+                      ) : null}
                     </article>
                   ))}
                 </div>
@@ -2196,6 +2348,8 @@ function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onLogout={handleLogout}
+        trashMode={trashMode}
+        onExitTrash={exitTrash}
       />
     </main>
   );

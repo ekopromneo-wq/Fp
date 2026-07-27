@@ -123,7 +123,9 @@ export default function HomePage({
         {/* Запись — центральная кнопка-микрофон внизу; на главной оставляем только
             загрузку файла и приглашение бота, компактными кнопками. */}
         <div className="home-hero-actions">
-          <label className="button button-secondary home-hero-action">
+          {/* STG-068: раньше нигде не было видно, какие форматы поддерживаются,
+              до самого выбора файла - title даёт подсказку по наведению/долгому тапу. */}
+          <label className="button button-secondary home-hero-action" title="Поддерживаются: mp3, wav, m4a, ogg, mp4, mov, mkv, webm">
             Загрузить
             <input
               type="file"

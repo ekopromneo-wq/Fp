@@ -72,7 +72,10 @@ export default function useSwipeAction({ onSwipeLeft, onSwipeRight, enabled = tr
       if (delta > REVEAL_START) {
         track.style.background = 'var(--accent-success)';
       } else if (delta < -REVEAL_START) {
-        track.style.background = 'var(--accent-warning)';
+        // STG-034: свайп влево = удаление (onSwipeLeft -> onDelete), а фон
+        // был предупреждающим оранжевым вместо опасного красного - паттерн
+        // "красная зона + корзина" из QA-документа.
+        track.style.background = 'var(--accent-danger)';
       } else {
         track.style.background = 'transparent';
       }

@@ -64,6 +64,8 @@ export default function BottomNav({
   theme,
   onToggleTheme,
   onLogout,
+  trashMode,
+  onExitTrash,
 }) {
   const [isMoreOpen, setIsMoreOpen] = useState(false);
 
@@ -124,7 +126,17 @@ export default function BottomNav({
         <button
           type="button"
           className={`bottom-nav-item ${activePage === 'library' ? 'is-active' : ''}`}
-          onClick={() => go('library')}
+          onClick={() => {
+            // STG-073: раньше тап по "Встречи" из корзины не давал эффекта -
+            // activePage уже был 'library' (корзина - подрежим той же
+            // страницы), so setActivePage('library') был no-op.
+            if (activePage === 'library' && trashMode) {
+              setIsMoreOpen(false);
+              onExitTrash?.();
+              return;
+            }
+            go('library');
+          }}
           aria-label="Встречи"
         >
           <NavIcon name="library" />

@@ -8,6 +8,7 @@ import { MEETING_TYPES } from './protocolTemplates.js';
 import { PROCESSING_TEMPLATE_KEYS } from './processingTemplates.js';
 import { deleteRecordingAudio } from './storage.js';
 import { encryptSecret, decryptSecret } from './secretCrypto.js';
+import { sendNotificationEmail } from './email.js';
 import {
   buildAuthorizeUrl,
   createPkce,
@@ -32,6 +33,14 @@ const REGISTRATION_ENABLED = process.env.ALLOW_REGISTRATION !== 'false';
 
 function normalizeEmail(email) {
   return typeof email === 'string' ? email.trim().toLowerCase() : '';
+}
+
+// STG-028: `email.includes('@')` пропускал "test@test"/"a@b" без домена -
+// HTML5 type="email" на фронте тоже это не ловит (по спеке single-label
+// домен валиден). Требуем точку и хотя бы 1 символ после неё - тот же
+// паттерн, что уже используется для получателей писем (email.js).
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 function parseCookies(cookieHeader = '') {
@@ -83,6 +92,25 @@ function isRateLimited(key, limit, windowMs) {
 
   entry.count += 1;
   return entry.count > limit;
+}
+
+// STG-030: 429-ответы говорили только «попробуйте позже» без срока - сколько
+// именно ждать, пользователь узнать не мог. Читает то же окно, что только
+// что проверил isRateLimited (вызывать сразу после него, для того же key).
+function retryAfterSeconds(key) {
+  const entry = RATE_BUCKETS.get(key);
+  if (!entry) {
+    return 60;
+  }
+  const remainingMs = entry.windowMs - (Date.now() - entry.windowStart);
+  return Math.max(1, Math.ceil(remainingMs / 1000));
+}
+
+function rateLimitResponse(c, key, message) {
+  const seconds = retryAfterSeconds(key);
+  const human = seconds >= 60 ? `${Math.ceil(seconds / 60)} мин` : `${seconds} сек`;
+  c.header('Retry-After', String(seconds));
+  return c.json({ error: `${message} Попробуйте снова через ${human}.`, retryAfterSeconds: seconds }, 429);
 }
 
 // Caddy fronts the API in production and appends the real client IP to
@@ -148,6 +176,10 @@ function mapUser(row) {
     id: row.id,
     displayName: row.display_name,
     email: row.email,
+    // STG-029: мягкий гейт - фронт показывает баннер-напоминание, ничего не
+    // блокирует. row.email_verified_at отсутствует в части старых SELECT'ов
+    // (undefined) - Boolean(undefined) корректно даёт false, а не падает.
+    emailVerified: Boolean(row.email_verified_at),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -324,6 +356,41 @@ async function createPendingOauthLink(provider, profile) {
   return token;
 }
 
+// STG-029: обязательное подтверждение email (решение владельца 27.07).
+// Токен живёт сутки, хранится хэшем (см. миграция 040) - ссылка уходит в
+// письмо, которое может осесть в логах почтового сервиса дольше 15 минут
+// oauth_pending_links, поэтому дольше живёт и не хранится в открытом виде.
+const EMAIL_VERIFY_TTL_INTERVAL = '24 hours';
+
+async function createEmailVerifyToken(userId) {
+  const token = randomBytes(32).toString('base64url');
+  // Старый токен того же пользователя больше не нужен - только последняя
+  // отправленная ссылка должна быть рабочей.
+  await query('delete from email_verify_tokens where user_id = $1', [userId]);
+  await query('insert into email_verify_tokens (token_hash, user_id) values ($1, $2)', [hashToken(token), userId]);
+  return token;
+}
+
+// Всегда системный SMTP (передаём {} - getSmtpConfig внутри email.js падает
+// на SMTP_HOST/SMTP_FROM из окружения), не личный SMTP пользователя: письмо
+// о подтверждении аккаунта логично слать от имени сервиса, а у только что
+// созданного аккаунта личного SMTP всё равно ещё нет.
+async function sendVerificationEmail(user) {
+  const token = await createEmailVerifyToken(user.id);
+  const appUrl = (process.env.PUBLIC_APP_URL || '').replace(/\/+$/, '');
+  const link = `${appUrl}/?verify_email=${token}`;
+  const text = [
+    'Здравствуйте!',
+    '',
+    'Подтвердите email для аккаунта Stenogram — ссылка действует 24 часа:',
+    link,
+    '',
+    'Если вы не регистрировались в Stenogram, просто проигнорируйте это письмо.',
+  ].join('\n');
+
+  await sendNotificationEmail({}, user.email, 'Подтвердите email — Stenogram', text);
+}
+
 /**
  * Находит аккаунт по внешней личности (US-16.1), а при первом входе решает по
  * ADR-034, можно ли создать аккаунт прямо сейчас. Возвращает статус:
@@ -335,7 +402,7 @@ async function createPendingOauthLink(provider, profile) {
  */
 async function findOrCreateOauthUser(provider, profile) {
   const existing = await query(
-    `select u.id, u.display_name, u.email, u.created_at, u.updated_at
+    `select u.id, u.display_name, u.email, u.email_verified_at, u.created_at, u.updated_at
      from oauth_identities i join app_users u on u.id = i.user_id
      where i.provider = $1 and i.provider_user_id = $2`,
     [provider, profile.id],
@@ -354,7 +421,7 @@ async function findOrCreateOauthUser(provider, profile) {
   // email у себя) получил бы доступ к чужому, в т.ч. парольному, аккаунту.
   if (email && emailVerified) {
     const byEmail = await query(
-      'select id, display_name, email, created_at, updated_at from app_users where email = $1',
+      'select id, display_name, email, email_verified_at, created_at, updated_at from app_users where email = $1',
       [email],
     );
     if (byEmail.rowCount) {
@@ -373,8 +440,12 @@ async function findOrCreateOauthUser(provider, profile) {
       if (!REGISTRATION_ENABLED) {
         return { status: 'registration_closed' };
       }
+      // STG-029: провайдер уже подтвердил email на своей стороне (решение
+      // владельца 27.07 — не слать таким аккаунтам письмо-подтверждение).
       const created = await query(
-        'insert into app_users (display_name, email) values ($1, $2) returning id, display_name, email, created_at, updated_at',
+        `insert into app_users (display_name, email, email_verified_at)
+         values ($1, $2, now())
+         returning id, display_name, email, email_verified_at, created_at, updated_at`,
         [profile.name || email, email],
       );
       const user = mapUser(created.rows[0]);
@@ -424,7 +495,7 @@ async function getCurrentUser(c) {
   const tokenHash = hashToken(token);
   const result = await query(
     `
-      select u.id, u.display_name, u.email, u.created_at, u.updated_at
+      select u.id, u.display_name, u.email, u.email_verified_at, u.created_at, u.updated_at
       from auth_sessions s
       join app_users u on u.id = s.user_id
       where s.token_hash = $1 and s.expires_at > now()
@@ -446,7 +517,7 @@ export async function requireAuth(c, next) {
   const user = await getCurrentUser(c);
 
   if (!user) {
-    return c.json({ error: 'Authentication required' }, 401);
+    return c.json({ error: 'Требуется вход в аккаунт' }, 401);
   }
 
   c.set('currentUser', user);
@@ -644,7 +715,7 @@ export function registerAuthRoutes(app) {
   // любой TG/ВК-вход с чужим email = захват аккаунта.
   app.post('/api/auth/oauth/complete', async (c) => {
     if (isRateLimited(`oauth-complete:${clientIp(c)}`, 10, 15 * 60 * 1000)) {
-      return c.json({ error: 'Too many attempts - try again later' }, 429);
+      return rateLimitResponse(c, `oauth-complete:${clientIp(c)}`, 'Слишком много попыток.');
     }
 
     const body = await c.req.json().catch(() => ({}));
@@ -657,7 +728,7 @@ export function registerAuthRoutes(app) {
       return c.json({ error: 'Сессия входа устарела — начните заново' }, 400);
     }
 
-    if (!email || !email.includes('@')) {
+    if (!email || !isValidEmail(email)) {
       return c.json({ error: 'Укажите корректный email' }, 400);
     }
 
@@ -678,7 +749,7 @@ export function registerAuthRoutes(app) {
     const { provider, provider_user_id: providerUserId, provider_name: providerName } = pending.rows[0];
 
     const existing = await query(
-      'select id, display_name, email, password_hash, created_at, updated_at from app_users where email = $1',
+      'select id, display_name, email, password_hash, email_verified_at, created_at, updated_at from app_users where email = $1',
       [email],
     );
 
@@ -713,7 +784,7 @@ export function registerAuthRoutes(app) {
         `insert into app_users (display_name, email, password_hash)
          values ($1, $2, $3)
          on conflict (email) do nothing
-         returning id, display_name, email, created_at, updated_at`,
+         returning id, display_name, email, email_verified_at, created_at, updated_at`,
         [displayName || providerName || email.split('@')[0], email, password ? hashPassword(password) : null],
       );
 
@@ -721,6 +792,13 @@ export function registerAuthRoutes(app) {
       if (!created.rowCount) {
         return c.json({ error: 'Аккаунт с таким email уже существует — войдите' }, 409);
       }
+
+      // STG-029: email введён самим пользователем (Telegram/ВК не гарантируют
+      // email от провайдера) — в отличие от Google/Яндекс/Сбер, не подтверждён
+      // никем, шлём то же письмо, что и при обычной регистрации.
+      sendVerificationEmail(mapUser(created.rows[0])).catch((error) =>
+        console.warn(`Verification email failed for user ${created.rows[0].id}:`, error.message),
+      );
 
       user = mapUser(created.rows[0]);
     }
@@ -880,7 +958,7 @@ export function registerAuthRoutes(app) {
     }
 
     if (isRateLimited(`register:${clientIp(c)}`, 5, 60 * 60 * 1000)) {
-      return c.json({ error: 'Too many registration attempts - try again later' }, 429);
+      return rateLimitResponse(c, `register:${clientIp(c)}`, 'Слишком много попыток регистрации.');
     }
 
     const body = await c.req.json().catch(() => ({}));
@@ -889,12 +967,12 @@ export function registerAuthRoutes(app) {
     const displayName =
       typeof body.displayName === 'string' && body.displayName.trim() ? body.displayName.trim() : email.split('@')[0];
 
-    if (!email || !email.includes('@')) {
-      return c.json({ error: 'Valid email is required' }, 400);
+    if (!email || !isValidEmail(email)) {
+      return c.json({ error: 'Укажите корректный email' }, 400);
     }
 
     if (password.length < 6) {
-      return c.json({ error: 'Password must be at least 6 characters' }, 400);
+      return c.json({ error: 'Пароль должен быть не короче 6 символов' }, 400);
     }
 
     // `on conflict` instead of check-then-insert - two concurrent registers
@@ -905,20 +983,73 @@ export function registerAuthRoutes(app) {
         insert into app_users (display_name, email, password_hash)
         values ($1, $2, $3)
         on conflict (email) do nothing
-        returning id, display_name, email, created_at, updated_at
+        returning id, display_name, email, email_verified_at, created_at, updated_at
       `,
       [displayName, email, hashPassword(password)],
     );
 
     if (inserted.rowCount === 0) {
-      return c.json({ error: 'User already exists' }, 409);
+      return c.json({ error: 'Аккаунт с таким email уже существует — войдите' }, 409);
     }
 
     const user = mapUser(inserted.rows[0]);
     const session = await createSession(user.id, { userAgent: c.req.header('User-Agent') || '', ip: clientIp(c) });
 
+    // STG-029: не блокируем регистрацию доставкой письма (офлайн-first дух
+    // проекта — SMTP-сбой не должен мешать завести аккаунт) - fire-and-forget.
+    sendVerificationEmail(user).catch((error) =>
+      console.warn(`Verification email failed for user ${user.id}:`, error.message),
+    );
+
     c.header('Set-Cookie', session.cookie);
     return c.json({ user }, 201);
+  });
+
+  // STG-029: переход по ссылке из письма. Не требует входа - на новом
+  // устройстве/в другом браузере, где нет cookie сессии, ссылка всё равно
+  // должна сработать (подтверждение привязано к токену, не к сессии).
+  app.get('/api/auth/verify-email', async (c) => {
+    const token = c.req.query('token') || '';
+
+    if (!token) {
+      return c.json({ error: 'Ссылка неполная — токен не передан' }, 400);
+    }
+
+    const result = await query(
+      `select user_id from email_verify_tokens where token_hash = $1 and created_at > now() - interval '${EMAIL_VERIFY_TTL_INTERVAL}'`,
+      [hashToken(token)],
+    );
+
+    if (!result.rowCount) {
+      return c.json({ error: 'Ссылка подтверждения недействительна или устарела — запросите новую в приложении' }, 400);
+    }
+
+    const userId = result.rows[0].user_id;
+    await query('update app_users set email_verified_at = coalesce(email_verified_at, now()) where id = $1', [userId]);
+    await query('delete from email_verify_tokens where user_id = $1', [userId]);
+
+    return c.json({ ok: true });
+  });
+
+  // STG-029: «отправить письмо ещё раз» — с баннера-напоминания в приложении.
+  app.post('/api/auth/resend-verification', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+
+    if (user.emailVerified) {
+      return c.json({ ok: true, alreadyVerified: true });
+    }
+
+    if (isRateLimited(`resend-verify:${user.id}`, 3, 60 * 60 * 1000)) {
+      return rateLimitResponse(c, `resend-verify:${user.id}`, 'Слишком много запросов на повторную отправку.');
+    }
+
+    try {
+      await sendVerificationEmail(user);
+    } catch (error) {
+      return c.json({ error: error.message || 'Не удалось отправить письмо — попробуйте позже' }, 502);
+    }
+
+    return c.json({ ok: true });
   });
 
   app.post('/api/auth/login', async (c) => {
@@ -929,12 +1060,12 @@ export function registerAuthRoutes(app) {
     // Keyed on IP+email so one address being brute-forced doesn't lock the
     // whole office NAT out of every other account.
     if (isRateLimited(`login:${clientIp(c)}:${email}`, 10, 15 * 60 * 1000)) {
-      return c.json({ error: 'Too many login attempts - try again later' }, 429);
+      return rateLimitResponse(c, `login:${clientIp(c)}:${email}`, 'Слишком много попыток входа.');
     }
 
     const result = await query(
       `
-        select id, display_name, email, password_hash, created_at, updated_at
+        select id, display_name, email, password_hash, email_verified_at, created_at, updated_at
         from app_users
         where email = $1
         limit 1
@@ -943,7 +1074,7 @@ export function registerAuthRoutes(app) {
     );
 
     if (result.rowCount === 0 || !verifyPassword(password, result.rows[0].password_hash)) {
-      return c.json({ error: 'Invalid email or password' }, 401);
+      return c.json({ error: 'Неверный email или пароль' }, 401);
     }
 
     const user = mapUser(result.rows[0]);

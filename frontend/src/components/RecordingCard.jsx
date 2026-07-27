@@ -129,7 +129,12 @@ export default function RecordingCard({
           ) : null}
 
           <div className="recording-card-main">
-            <strong className="recording-card-title">{recording.title || recording.originalFilename}</strong>
+            {/* STG-027: заголовок обрезается многоточием, но раньше не было
+                способа увидеть полное имя, не начиная переименование -
+                нативный tooltip по наведению/долгому тапу. */}
+            <strong className="recording-card-title" title={recording.title || recording.originalFilename}>
+              {recording.title || recording.originalFilename}
+            </strong>
 
             <div className="recording-meta">
               <span>{formatFileSize(recording.fileSizeBytes)}</span>

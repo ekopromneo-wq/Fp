@@ -42,9 +42,14 @@ function AuthScreen({
   oauthProviders = [],
   telegramLogin = null,
 }) {
-  const [email, setEmail] = useState(demoEmail);
-  const [password, setPassword] = useState(demoPassword);
-  const [displayName, setDisplayName] = useState('Demo User');
+  // STG-031: демо-значения раньше подставлялись как реальные value= на
+  // проде (не placeholder) - можно было случайно зарегистрироваться под
+  // "Demo User"/demo@voxmate.local, не заметив. Прод-сборка стартует с
+  // пустых полей; удобство автозаполнения оставлено только для локальной
+  // разработки (import.meta.env.DEV).
+  const [email, setEmail] = useState(import.meta.env.DEV ? demoEmail : '');
+  const [password, setPassword] = useState(import.meta.env.DEV ? demoPassword : '');
+  const [displayName, setDisplayName] = useState(import.meta.env.DEV ? 'Demo User' : '');
   // Регистрация закрыта на сервере → показываем только вход.
   const isRegister = registrationOpen && authMode === 'register';
 
@@ -68,13 +73,25 @@ function AuthScreen({
           {isRegister ? (
             <label>
               Имя
-              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" />
+              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" placeholder="Как к вам обращаться" />
             </label>
           ) : null}
 
           <label>
             Email
-            <input value={email} type="email" onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
+            <input
+              value={email}
+              type="email"
+              onChange={(event) => setEmail(event.target.value)}
+              autoComplete="email"
+              placeholder="name@example.com"
+              // STG-028: type="email" по спеке пропускает "a@b" без домена -
+              // сервер всё равно проверяет строго, но паттерн ловит опечатку
+              // раньше отправки формы.
+              pattern="[^\s@]+@[^\s@]+\.[^\s@]+"
+              title="Например: name@example.com"
+              required
+            />
           </label>
 
           <label>
@@ -84,6 +101,7 @@ function AuthScreen({
               type="password"
               onChange={(event) => setPassword(event.target.value)}
               autoComplete={isRegister ? 'new-password' : 'current-password'}
+              placeholder={isRegister ? 'Не короче 6 символов' : 'Пароль'}
               minLength={6}
               required
             />

@@ -126,15 +126,22 @@ function LibraryControls({
 
       {isExpanded ? (
         <div className="library-extra-filters">
-          <label>
-            Дата с
-            <input type="date" value={filters.dateFrom} onChange={(event) => setFilter('dateFrom', event.target.value)} />
-          </label>
+          {/* STG-026: раньше "Дата с"/"Дата по" ничем не отличались от соседних
+              несвязанных фильтров - на iOS пустой <input type="date"> не
+              показывает "дд.мм.гггг" (в отличие от десктоп-браузеров), и два
+              подряд пустых поля с мелкой подписью сливались в один блок.
+              Общая рамка визуально объединяет пару. */}
+          <div className="library-date-range">
+            <label>
+              Дата с
+              <input type="date" value={filters.dateFrom} onChange={(event) => setFilter('dateFrom', event.target.value)} />
+            </label>
 
-          <label>
-            Дата по
-            <input type="date" value={filters.dateTo} onChange={(event) => setFilter('dateTo', event.target.value)} />
-          </label>
+            <label>
+              Дата по
+              <input type="date" value={filters.dateTo} onChange={(event) => setFilter('dateTo', event.target.value)} />
+            </label>
+          </div>
 
           <label>
             Статус
