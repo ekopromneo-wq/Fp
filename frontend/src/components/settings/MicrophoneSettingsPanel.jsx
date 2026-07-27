@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import useUiStore from '../../store/uiStore.js';
+import { checkMicPermissionState, describeMicError, requestMicStream } from '../../lib/micPermission.js';
+
+const PERMISSION_LABELS = {
+  granted: 'Доступ к микрофону разрешён',
+  denied: 'Доступ к микрофону запрещён — разрешите его в настройках браузера',
+  prompt: 'Браузер запросит доступ при первой записи или тесте',
+};
 
 export default function MicrophoneSettingsPanel({ micDeviceId, setMicDeviceId }) {
   const startSoundEnabled = useUiStore((state) => state.startSoundEnabled);
@@ -10,6 +17,7 @@ export default function MicrophoneSettingsPanel({ micDeviceId, setMicDeviceId })
   const [isTesting, setIsTesting] = useState(false);
   const [testLevel, setTestLevel] = useState(0);
   const [testError, setTestError] = useState('');
+  const [permissionState, setPermissionState] = useState(null);
 
   const testStreamRef = useRef(null);
   const testAudioContextRef = useRef(null);
@@ -26,6 +34,7 @@ export default function MicrophoneSettingsPanel({ micDeviceId, setMicDeviceId })
 
   useEffect(() => {
     refreshDevices();
+    checkMicPermissionState().then((state) => setPermissionState(state === 'unsupported' ? null : state));
 
     if (navigator.mediaDevices?.addEventListener) {
       navigator.mediaDevices.addEventListener('devicechange', refreshDevices);
@@ -58,9 +67,7 @@ export default function MicrophoneSettingsPanel({ micDeviceId, setMicDeviceId })
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
-      });
+      const stream = await requestMicStream(micDeviceId);
       testStreamRef.current = stream;
 
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -94,8 +101,9 @@ export default function MicrophoneSettingsPanel({ micDeviceId, setMicDeviceId })
       // Device labels are blank until permission has been granted at least
       // once - refresh so the dropdown can show real names from now on.
       await refreshDevices();
+      checkMicPermissionState().then((state) => setPermissionState(state === 'unsupported' ? null : state));
     } catch (error) {
-      setTestError(error.name === 'NotAllowedError' ? 'Доступ к микрофону запрещён' : error.message || 'Не удалось получить доступ к микрофону');
+      setTestError(describeMicError(error));
     }
   }
 
@@ -111,6 +119,12 @@ export default function MicrophoneSettingsPanel({ micDeviceId, setMicDeviceId })
       </div>
 
       <div className="settings-form">
+        {permissionState ? (
+          <p className={`settings-note${permissionState === 'denied' ? ' mic-test-error' : ''}`}>
+            {PERMISSION_LABELS[permissionState]}
+          </p>
+        ) : null}
+
         <label>
           Устройство записи
           <select value={micDeviceId} onChange={(event) => setMicDeviceId(event.target.value)}>

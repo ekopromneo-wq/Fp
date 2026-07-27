@@ -13,6 +13,10 @@ const RECORDING_STATUS_LABELS = {
   waiting_quota: 'Ожидает квоты',
   done: 'Готово',
   failed: 'Ошибка',
+  // STG-002: гейт качества речи (speechQuality.js) не нашёл в записи реальной
+  // речи — протокол/задачи намеренно не генерировались, стенограмма (если
+  // есть) доступна для прослушивания.
+  no_speech_detected: 'Речь не распознана',
 };
 
 export function getStatusLabel(status) {

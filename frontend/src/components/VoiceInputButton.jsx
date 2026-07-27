@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { describeMicError, requestMicStream } from '../lib/micPermission.js';
 
 /**
  * Push-to-talk кнопка голосового ввода (US-10.2, голосовой поиск): клик —
@@ -30,7 +31,7 @@ export default function VoiceInputButton({ onDictate, onText, setStatus, title =
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await requestMicStream();
       const options = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? { mimeType: 'audio/webm;codecs=opus' } : {};
       const recorder = new MediaRecorder(stream, options);
       chunksRef.current = [];
@@ -75,7 +76,7 @@ export default function VoiceInputButton({ onDictate, onText, setStatus, title =
       setIsRecording(true);
       setStatus?.('Говорите — повторный клик остановит запись');
     } catch (error) {
-      setStatus?.(error.name === 'NotAllowedError' ? 'Доступ к микрофону запрещён' : error.message || 'Не удалось начать запись');
+      setStatus?.(describeMicError(error));
     }
   }
 

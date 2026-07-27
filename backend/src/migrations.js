@@ -764,6 +764,40 @@ const migrations = [
       alter table recordings add column if not exists processing_template text;
     `,
   },
+  {
+    id: '038_no_speech_status',
+    sql: `
+      -- STG-002: раньше запись без реальной речи (тишина/шум, из которых ASR
+      -- галлюцинирует текст) доходила до статуса 'done' с придуманным
+      -- протоколом. Воркер теперь гейтит суммаризацию (speechQuality.js) и
+      -- для такой записи ставит отдельный статус вместо 'done' — стенограмма
+      -- (какая есть) остаётся доступна, протокол/задачи не генерируются.
+      alter table recordings drop constraint recordings_status_check;
+      alter table recordings add constraint recordings_status_check
+        check (status in ('uploaded', 'queued', 'processing', 'transcribing', 'summarizing', 'waiting_quota', 'done', 'failed', 'no_speech_detected'));
+    `,
+  },
+  {
+    id: '039_recording_summary_versions',
+    sql: `
+      -- STG-003: до сих пор каждая (пере)генерация протокола выполняла delete+
+      -- insert - предыдущий текст, ручные правки и статусы задач терялись
+      -- безвозвратно. Снимок делается перед перезаписью (summarizeRecording/
+      -- restoreSummaryVersion), sections_changed=null означает полную
+      -- перегенерацию, иначе — точечную (см. "Переделать [раздел]").
+      create table if not exists recording_summary_versions (
+        id uuid primary key default gen_random_uuid(),
+        recording_id uuid not null references recordings(id) on delete cascade,
+        snapshot jsonb not null,
+        sections_changed text[],
+        instruction text,
+        created_by uuid references app_users(id) on delete set null,
+        created_at timestamptz not null default now()
+      );
+      create index if not exists recording_summary_versions_recording_idx
+        on recording_summary_versions(recording_id, created_at desc);
+    `,
+  },
 ];
 
 export async function runMigrations() {

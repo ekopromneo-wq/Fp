@@ -14,6 +14,7 @@ import AuthScreen from './components/AuthScreen.jsx';
 import LinkEmailScreen from './components/LinkEmailScreen.jsx';
 import SharePage from './components/SharePage.jsx';
 import VoicePanel from './components/VoicePanel/VoicePanel.jsx';
+import StopOrBackgroundDialog from './components/VoicePanel/StopOrBackgroundDialog.jsx';
 import ConsentDialog from './components/ConsentDialog.jsx';
 import useMicRecorder from './hooks/useMicRecorder.js';
 import useIsMobile from './hooks/useIsMobile.js';
@@ -62,6 +63,7 @@ import { uploadBlobInChunks } from './lib/chunkedUploader.js';
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [consentPromptOpen, setConsentPromptOpen] = useState(false);
+  const [stopOrBackgroundPromptOpen, setStopOrBackgroundPromptOpen] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [registrationEnabled, setRegistrationEnabled] = useState(true);
   const [oauthProviders, setOauthProviders] = useState([]);
@@ -198,6 +200,7 @@ function App() {
     micDuration,
     isMicLevelLow,
     analyserRef: micAnalyserRef,
+    cancelMicRecording,
     handleMicRecordingToggle,
     handleMicPauseToggle,
   } = useMicRecorder(uploadRecordingFile, setStatus, micDeviceId);
@@ -217,6 +220,18 @@ function App() {
     }
 
     handleMicRecordingToggle();
+  }
+
+  // STG-065: раньше ✕/клик по фону панели просто прятали её, а запись молча
+  // продолжалась (isVoicePanelOpen и isMicRecording — независимые состояния).
+  // Теперь во время записи закрытие перехватывается диалогом с явным выбором
+  // «Остановить» / «Записывать в фоне» — третьего скрытого исхода нет.
+  function handleVoicePanelClose() {
+    if (!isMicRecording) {
+      closeVoicePanel();
+      return;
+    }
+    setStopOrBackgroundPromptOpen(true);
   }
 
   // Мобильный: тап по микрофону сразу ведёт в согласие/запись (панель открывается
@@ -1159,7 +1174,7 @@ function App() {
         });
 
         await uploadRecordingFile(file, session.source || 'frontend-microphone');
-        setStatus('Восстановлена прерванная запись');
+        setStatus('Найдена прерванная запись — она автоматически сохранена и добавлена в список. Удалите её, если она не нужна.');
       } catch (error) {
         console.error('live recording recovery failed', error);
       }
@@ -1272,14 +1287,14 @@ function App() {
     }
   }
 
-  async function handleSummarize(recording, { instruction, processingTemplate } = {}) {
+  async function handleSummarize(recording, { instruction, processingTemplate, sections } = {}) {
     if (!recording?.transcript) {
       setStatus('Сначала нужна стенограмма');
       return;
     }
 
     setIsSummarizing(true);
-    setStatus(`Готовим протокол "${recording.title}"...`);
+    setStatus(sections?.length ? `Переделываем раздел "${recording.title}"...` : `Готовим протокол "${recording.title}"...`);
 
     try {
       const response = await apiFetch(`/api/recordings/${recording.id}/summary`, {
@@ -1290,6 +1305,9 @@ function App() {
           length: processingTemplate ? undefined : summaryLength,
           instruction,
           processingTemplate,
+          // STG-003: «Переделать [раздел]» — точечная регенерация одного-двух
+          // разделов protocol, ничего больше не меняет.
+          sections,
           timezoneOffsetMinutes: new Date().getTimezoneOffset(),
         }),
       });
@@ -1360,6 +1378,24 @@ function App() {
     setRecordings((current) => current.map((item) => (item.id === recording.id ? { ...item, summary: data.summary } : item)));
 
     return data.summary;
+  }
+
+  // STG-003: «доступна предыдущая версия» — откатывает протокол+задачи к
+  // снимку, сделанному перед прошлой (пере)генерацией (см. SummaryVersionHistory).
+  async function handleRestoreSummaryVersion(recording, versionId) {
+    const response = await apiFetch(`/api/recordings/${recording.id}/summary/versions/${versionId}/restore`, {
+      method: 'POST',
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Не удалось восстановить версию');
+    }
+
+    const patch = { summary: data.summary, tasks: data.tasks || [] };
+    setSelectedRecording((current) => (current?.id === recording.id ? { ...current, ...patch } : current));
+    setRecordings((current) => current.map((item) => (item.id === recording.id ? { ...item, ...patch } : item)));
+    setStatus('Версия протокола восстановлена');
   }
 
   async function handleDictateVoiceNote(blob) {
@@ -1653,6 +1689,19 @@ function App() {
           onCancel={() => setConsentPromptOpen(false)}
         />
       ) : null}
+      {stopOrBackgroundPromptOpen ? (
+        <StopOrBackgroundDialog
+          onStop={() => {
+            setStopOrBackgroundPromptOpen(false);
+            handleMicRecordingToggle();
+          }}
+          onBackground={() => {
+            setStopOrBackgroundPromptOpen(false);
+            closeVoicePanel();
+          }}
+          onDismiss={() => setStopOrBackgroundPromptOpen(false)}
+        />
+      ) : null}
       <Topbar
         activePage={activePage}
         isOnline={isOnline}
@@ -1668,7 +1717,7 @@ function App() {
 
       <VoicePanel
         isOpen={isVoicePanelOpen}
-        onClose={closeVoicePanel}
+        onClose={handleVoicePanelClose}
         isMicRecording={isMicRecording}
         isMicPaused={isMicPaused}
         canPauseMicRecording={canPauseMicRecording}
@@ -1678,6 +1727,7 @@ function App() {
         analyserRef={micAnalyserRef}
         onToggleRecording={startRecordingWithConsent}
         onTogglePause={handleMicPauseToggle}
+        onCancelRecording={cancelMicRecording}
         status={status}
       />
 
@@ -2013,6 +2063,7 @@ function App() {
                   onUpdateProtection={handleUpdateProtection}
                   onUpdateTranscript={handleUpdateTranscript}
                   onUpdateProtocol={handleUpdateProtocol}
+                  onRestoreSummaryVersion={handleRestoreSummaryVersion}
                   onDictate={handleDictateVoiceNote}
                   onAppendFragment={handleAppendFragment}
                   isAppendingFragment={isAppendingFragment}

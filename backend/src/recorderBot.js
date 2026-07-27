@@ -51,7 +51,13 @@ export async function startRecorderJob(input) {
   const body = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(body?.message || `Recorder-bot join failed with ${response.status}`);
+    // recorder-bot отвечает {error: ...} (server.js) — раньше здесь читали
+    // body?.message, которого там нет, и всегда падали в generic-фоллбэк:
+    // реальная причина 409 терялась. statusCode вешаем на Error, чтобы дошёл
+    // до structured join_failed в botLog.
+    const error = new Error(body?.error || body?.message || `Recorder-bot join failed with ${response.status}`);
+    error.statusCode = response.status;
+    throw error;
   }
 
   if (!body?.jobId) {
@@ -69,7 +75,9 @@ export async function stopRecorderJob(jobId) {
   const body = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(body?.message || `Recorder-bot stop failed with ${response.status}`);
+    const error = new Error(body?.error || body?.message || `Recorder-bot stop failed with ${response.status}`);
+    error.statusCode = response.status;
+    throw error;
   }
 
   return body;

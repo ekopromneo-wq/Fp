@@ -54,6 +54,7 @@ function RecordingDetail({
   onUpdateProtection,
   onUpdateTranscript,
   onUpdateProtocol,
+  onRestoreSummaryVersion,
   onDictate,
   onAppendFragment,
   isAppendingFragment,
@@ -532,7 +533,15 @@ function RecordingDetail({
             <button
               className={`button button-primary${isSummarizing ? ' is-busy' : ''}`}
               type="button"
-              onClick={() => onSummarize(recording)}
+              onClick={() => {
+                // STG-003: полная перегенерация без подтверждения стирала бы
+                // ручные правки и статусы задач без предупреждения — спрашиваем,
+                // только если действительно есть что терять.
+                if (recording.summary && !window.confirm('Полная перегенерация заменит весь протокол новым (задачи сохранятся там, где узнаются). Продолжить?')) {
+                  return;
+                }
+                onSummarize(recording);
+              }}
               disabled={isSummarizing}
             >
               {isSummarizing ? 'Готовим...' : recording.summary ? 'Переделать протокол' : 'Сделать протокол'}
@@ -555,7 +564,12 @@ function RecordingDetail({
             <button
               className={`button button-secondary${isSummarizing ? ' is-busy' : ''}`}
               type="button"
-              onClick={() => onSummarize(recording, { processingTemplate: rebuildTemplate })}
+              onClick={() => {
+                if (recording.summary && !window.confirm('Полная перегенерация заменит весь протокол новым (задачи сохранятся там, где узнаются). Продолжить?')) {
+                  return;
+                }
+                onSummarize(recording, { processingTemplate: rebuildTemplate });
+              }}
               disabled={isSummarizing}
               title="Пересобрать протокол и задачи по выбранному шаблону"
             >
@@ -583,6 +597,7 @@ function RecordingDetail({
               recording={recording}
               onUpdateProtocol={onUpdateProtocol}
               onGenerateProtocol={(options) => onSummarize(recording, options)}
+              onRestoreVersion={(versionId) => onRestoreSummaryVersion(recording, versionId)}
               onDictate={onDictate}
               setStatus={setStatus}
             />

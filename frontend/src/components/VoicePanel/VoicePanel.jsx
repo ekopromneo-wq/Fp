@@ -14,8 +14,15 @@ export default function VoicePanel({
   analyserRef,
   onToggleRecording,
   onTogglePause,
+  onCancelRecording,
   status,
 }) {
+  function handleCancelClick() {
+    if (window.confirm('Отменить запись без сохранения?')) {
+      onCancelRecording();
+    }
+  }
+
   if (!isOpen) {
     return null;
   }
@@ -54,6 +61,17 @@ export default function VoicePanel({
         )}
 
         <div className="voice-panel-controls">
+          {isMicRecording ? (
+            <button
+              className="button button-secondary voice-panel-cancel-button"
+              type="button"
+              onClick={handleCancelClick}
+              aria-label="Отменить запись"
+            >
+              Отменить
+            </button>
+          ) : null}
+
           {isMicRecording && canPauseMicRecording ? (
             <button
               className="voice-panel-pause-button"

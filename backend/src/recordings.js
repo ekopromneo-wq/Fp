@@ -412,6 +412,11 @@ async function generateSummaryWithOpenRouter(
     timezoneOffsetMinutes = 0,
     includeTasks = true,
     includeRecommendations = false,
+    // STG-003: точечная перегенерация ("Переделать [раздел]") - когда задан,
+    // модель просят вернуть protocol только с этими ключами; всё остальное
+    // (summary/executiveSummary/topics по-прежнему полные, tasks пустой)
+    // caller (summarizeRecording) не трогает при записи.
+    sections: sectionsOverride = null,
   } = {},
 ) {
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -424,9 +429,15 @@ async function generateSummaryWithOpenRouter(
   const template = getProtocolTemplate(meetingType);
   // Шаблон ОБРАБОТКИ (processingTemplates.js) может добавить раздел «рекомендации»
   // поверх разделов, заданных типом встречи (protocolTemplates.js) — оси независимы.
-  const sections = includeRecommendations && !template.sections.includes('recommendations')
-    ? [...template.sections, 'recommendations']
-    : template.sections;
+  const sections = sectionsOverride && sectionsOverride.length
+    ? sectionsOverride
+    : includeRecommendations && !template.sections.includes('recommendations')
+      ? [...template.sections, 'recommendations']
+      : template.sections;
+  const scopedInstruction = sectionsOverride && sectionsOverride.length
+    ? `\n\nВАЖНО: верни protocol только с ключами: ${sectionsOverride.join(', ')}. Не включай другие разделы protocol. ` +
+      'summary, executiveSummary и topics верни как обычно (полные, по всей стенограмме), tasks верни пустым массивом [] - в этом запросе задачи не нужны.'
+    : '';
   const model = process.env.OPENROUTER_LLM_MODEL || 'openai/gpt-4o-mini';
   const sectionDescriptions = sections
     .map((key) =>
@@ -474,11 +485,19 @@ async function generateSummaryWithOpenRouter(
             `Разделы protocol (используй только перечисленные ниже, больше никаких других полей в protocol не добавляй):\n${sectionDescriptions}\n\n` +
             'Пиши по-русски, конкретно. Если исполнитель или срок не названы явно, ставь null - не выдумывай. ' +
             'Одна реплика может дать несколько задач. Если два фрагмента речи описывают одно и то же поручение - верни одну задачу, не дублируй. ' +
-            'Приоритет — точность: лучше не создать задачу, чем создать ложную.' +
+            'Приоритет — точность: лучше не создать задачу, чем создать ложную. ' +
+            // STG-002: защита второго рубежа поверх гейта качества речи (worker.js
+            // assessSpeechQuality) — на случай транскрипта, который прошёл гейт, но
+            // всё равно бессвязен/пуст по содержанию.
+            'Если стенограмма пуста, состоит из бессмысленного или повторяющегося текста, либо явно не отражает реальный разговор ' +
+            '(например, это технический артефакт распознавания речи) - верни summary и executiveSummary с текстом ' +
+            '"Не удалось выделить содержательную часть встречи", protocol с пустыми массивами по всем разделам и tasks: []. ' +
+            'Не придумывай обсуждение, участников или решения, которых не было в переданном тексте.' +
             speakersLine + '\n\n' +
             SUMMARY_LENGTH_INSTRUCTIONS[summaryLength] +
             tasksInstruction +
-            instructionLine,
+            instructionLine +
+            scopedInstruction,
         },
         {
           role: 'user',
@@ -1035,6 +1054,50 @@ export async function createRecording(input, ownerId) {
   return recording;
 }
 
+// STG-001(e): «Пригласить бота» не был идемпотентным - двойной клик/два
+// вкладки создавали два recordings-ряда и два параллельных join, один из
+// которых гарантированно ловил 409 от recorder-bot (там всего один слот на
+// контейнер). Сравниваем без query/hash - у Zoom/Telemost id встречи обычно
+// в пути, а не в query-строке.
+function normalizeMeetingUrl(meetingUrl) {
+  try {
+    const url = new URL(meetingUrl);
+    return `${url.origin}${url.pathname}`.toLowerCase().replace(/\/+$/, '');
+  } catch {
+    return String(meetingUrl || '').trim().toLowerCase();
+  }
+}
+
+/**
+ * If this owner already has a bot invite in flight for essentially the same
+ * meeting URL (double-click, two tabs, accidental resubmit), return its id
+ * instead of firing a second concurrent join - the second join is what
+ * actually surfaces as an opaque 409 from recorder-bot's single-flight lock.
+ */
+async function findRecentActiveMeetingBotRecording(ownerId, meetingUrl) {
+  const normalized = normalizeMeetingUrl(meetingUrl);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const result = await query(
+    `
+      select id, meeting_url from recordings
+      where owner_id = $1
+        and status = 'processing'
+        and source in ('meeting_bot', 'recorder_bot')
+        and meeting_url is not null
+        and created_at > now() - interval '10 minutes'
+      order by created_at desc
+    `,
+    [ownerId],
+  );
+
+  const match = result.rows.find((row) => normalizeMeetingUrl(row.meeting_url) === normalized);
+  return match?.id || null;
+}
+
 /**
  * Sends the Speech2Text bot to join a live meeting (Zoom/Meet/Telemost/etc)
  * and creates a text-only recording that fills in once the bot finishes -
@@ -1103,7 +1166,14 @@ export async function createMeetingBotRecording(input, ownerId) {
     logBotEvent(recordingId, { engine: 'speech2text', event: 'join_accepted', detail: { taskId: task.id } });
   } catch (error) {
     await query('update recordings set status = $1, updated_at = now() where id = $2', ['failed', recordingId]);
-    logBotEvent(recordingId, { engine: 'speech2text', event: 'join_failed', detail: { error: error.message } });
+    // STG-001(f): раньше только свободный текст - теперь + код ответа
+    // провайдера и слой, где упало, чтобы 409/etc. были диагностируемы, а не
+    // просто "не получилось".
+    logBotEvent(recordingId, {
+      engine: 'speech2text',
+      event: 'join_failed',
+      detail: { error: error.message, layer: 'speech2text_api', statusCode: error.statusCode ?? null },
+    });
     throw error;
   }
 
@@ -1200,7 +1270,12 @@ export async function createSelfHostedMeetingRecording(input, ownerId) {
     logBotEvent(recordingId, { engine: 'self_hosted', platform, event: 'join_accepted', detail: { jobId: job.jobId } });
   } catch (error) {
     await query('update recordings set status = $1, updated_at = now() where id = $2', ['failed', recordingId]);
-    logBotEvent(recordingId, { engine: 'self_hosted', platform, event: 'join_failed', detail: { error: error.message } });
+    logBotEvent(recordingId, {
+      engine: 'self_hosted',
+      platform,
+      event: 'join_failed',
+      detail: { error: error.message, layer: 'recorder_bot', statusCode: error.statusCode ?? null },
+    });
     throw error;
   }
 
@@ -1370,10 +1445,72 @@ export async function getRecording(id, ownerId) {
   };
 }
 
+function normalizeTaskText(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^\wа-яё\s]/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function taskWordOverlap(a, b) {
+  const wordsA = new Set(normalizeTaskText(a).split(' ').filter(Boolean));
+  const wordsB = new Set(normalizeTaskText(b).split(' ').filter(Boolean));
+
+  if (!wordsA.size || !wordsB.size) {
+    return 0;
+  }
+
+  let hits = 0;
+  for (const word of wordsA) {
+    if (wordsB.has(word)) {
+      hits += 1;
+    }
+  }
+
+  return hits / Math.min(wordsA.size, wordsB.size);
+}
+
+// STG-003: снимок текущего protocol/summary/tasks ПЕРЕД тем, как их
+// перезапишет регенерация или восстановление - это и есть «журнал: кто,
+// когда, какой раздел изменил» (created_by/created_at/sections_changed).
+// Не пишет ничего, если протокола ещё не было (первая генерация — снимать
+// нечего). Вызывать только внутри той же транзакции, что и саму перезапись.
+async function snapshotSummaryVersion(client, recordingId, { sectionsChanged = null, instruction = null, createdBy = null } = {}) {
+  const existingSummary = await client.query(
+    'select summary, executive_summary, protocol, topics, action_items from recording_summaries where recording_id = $1',
+    [recordingId],
+  );
+
+  if (existingSummary.rowCount === 0) {
+    return;
+  }
+
+  const existingTasks = await client.query(
+    'select assignee, description, due_text, due_date, status, assignee_external from recording_tasks where recording_id = $1',
+    [recordingId],
+  );
+
+  const snapshot = {
+    summary: existingSummary.rows[0].summary,
+    executiveSummary: existingSummary.rows[0].executive_summary,
+    protocol: existingSummary.rows[0].protocol,
+    topics: existingSummary.rows[0].topics,
+    actionItems: existingSummary.rows[0].action_items,
+    tasks: existingTasks.rows,
+  };
+
+  await client.query(
+    `insert into recording_summary_versions (recording_id, snapshot, sections_changed, instruction, created_by)
+     values ($1, $2::jsonb, $3, $4, $5)`,
+    [recordingId, JSON.stringify(snapshot), sectionsChanged, instruction, createdBy],
+  );
+}
+
 export async function summarizeRecording(
   recordingId,
   ownerId,
-  { length = null, instruction = '', timezoneOffsetMinutes = 0, processingTemplate = null } = {},
+  { length = null, instruction = '', timezoneOffsetMinutes = 0, processingTemplate = null, sections = null } = {},
 ) {
   const recording = await getRecording(recordingId, ownerId);
 
@@ -1387,6 +1524,17 @@ export async function summarizeRecording(
 
   if (recording.summary?.isLocked) {
     throw new Error('Protocol is locked - unlock it before regenerating');
+  }
+
+  // STG-003: «Переделать [раздел]» — точечная регенерация одного-двух
+  // разделов protocol, ничего больше не трогает (см. ветку isScoped ниже).
+  // Валидные ключи ограничены известным набором разделов; пустая пересечка
+  // (весь sections отфильтрован) равнозначна отсутствию scoping.
+  const scopedSections = Array.isArray(sections) ? sections.filter((key) => PROTOCOL_ALL_SECTIONS.includes(key)) : null;
+  const isScoped = Boolean(scopedSections && scopedSections.length);
+
+  if (isScoped && !recording.summary) {
+    throw new Error('Nothing to regenerate yet - generate the full protocol first');
   }
 
   // #9: «пересобрать по другому шаблону» — persist явного выбора на записи, если
@@ -1415,23 +1563,66 @@ export async function summarizeRecording(
     speakers: recording.speakers || [],
     dueDateAnchor: recording.createdAt ? new Date(recording.createdAt) : new Date(),
     timezoneOffsetMinutes,
-    includeTasks: template.includeTasks,
+    // Точечная регенерация никогда не трогает задачи - генерировать их тут
+    // бессмысленно (полный список уже есть) и рискованно (LLM может не
+    // соблюсти "tasks: []" из промпта; includeTasks=false режет это железно).
+    includeTasks: isScoped ? false : template.includeTasks,
     includeRecommendations: template.includeRecommendations,
+    sections: scopedSections,
   });
-  const originalSnapshot = JSON.stringify({
-    summary: generated.summary,
-    executiveSummary: generated.executiveSummary,
-    protocol: generated.protocol,
-    topics: generated.topics,
-  });
+
+  const trimmedInstruction = instruction && String(instruction).trim() ? String(instruction).trim() : null;
 
   const result = await transaction(async (client) => {
-    // No version history is kept (US-8.2: "старая версия затирается") - each
-    // (re)generation replaces the row outright rather than accumulating one
-    // row per call the way the old code incidentally did.
+    // STG-003: снимок перед перезаписью — раньше (пере)генерация делала
+    // delete+insert без следа ("старая версия затирается"), теряя ручные
+    // правки и статусы задач безвозвратно.
+    await snapshotSummaryVersion(client, recordingId, {
+      sectionsChanged: isScoped ? scopedSections : null,
+      instruction: trimmedInstruction,
+      createdBy: ownerId,
+    });
+
+    if (isScoped) {
+      // Мердж по ключам protocol - ничего кроме запрошенных разделов не
+      // меняется: summary/executiveSummary/topics/actionItems и вся таблица
+      // recording_tasks остаются как есть. Это то, что физически гарантирует
+      // "изменение «Рисков» не меняет участников, решения, задачи", а не
+      // просто просит модель об этом в промпте.
+      const currentResult = await client.query('select protocol from recording_summaries where recording_id = $1', [
+        recordingId,
+      ]);
+      const mergedProtocol = { ...normalizeProtocol(currentResult.rows[0]?.protocol) };
+      for (const key of scopedSections) {
+        mergedProtocol[key] = generated.protocol[key];
+      }
+
+      const updated = await client.query(
+        `
+          update recording_summaries
+          set protocol = $2::jsonb, updated_at = now()
+          where recording_id = $1
+          returning id, recording_id, transcript_id, model, summary, executive_summary, action_items, topics, protocol,
+            original_summary, is_locked, created_at, updated_at
+        `,
+        [recordingId, JSON.stringify(mergedProtocol)],
+      );
+      const summary = mapSummary(updated.rows[0]);
+      const existingTasksResult = await client.query('select * from recording_tasks where recording_id = $1', [recordingId]);
+
+      return { summary, tasks: existingTasksResult.rows.map(mapTask) };
+    }
+
+    const originalSnapshot = JSON.stringify({
+      summary: generated.summary,
+      executiveSummary: generated.executiveSummary,
+      protocol: generated.protocol,
+      topics: generated.topics,
+    });
+
     await client.query('delete from recording_summaries where recording_id = $1', [recordingId]);
 
-    const result = await client.query(
+    const inserted = await client.query(
       `
         insert into recording_summaries
           (recording_id, transcript_id, model, summary, executive_summary, action_items, topics, protocol, original_summary)
@@ -1451,33 +1642,82 @@ export async function summarizeRecording(
         originalSnapshot,
       ],
     );
-    const summary = mapSummary(result.rows[0]);
+    const summary = mapSummary(inserted.rows[0]);
 
-    await client.query('delete from recording_tasks where recording_id = $1', [recordingId]);
-
+    // STG-003: раньше delete-all + reinsert-all стирало status
+    // (confirmed/sent/done/dismissed) и ручные правки описания у каждой
+    // задачи при любой регенерации. Теперь сопоставляем новые задачи со
+    // старыми по исполнителю + текстовому сходству (без эмбеддингов —
+    // подстрока или пересечение слов ≥60%): совпавшие обновляются
+    // (описание может стать точнее модели), status сохраняется как был;
+    // несовпавшие старые задачи остаются нетронутыми — модель могла просто
+    // не переупомянуть их в этот раз, это не повод их удалять.
+    const existingTasksResult = await client.query('select * from recording_tasks where recording_id = $1', [recordingId]);
+    const existingTasks = existingTasksResult.rows;
+    const matchedIds = new Set();
     const contacts = await listContacts(ownerId);
     const tasks = [];
-    for (const task of generated.tasks) {
-      const inserted = await client.query(
-        `
-          insert into recording_tasks (recording_id, summary_id, transcript_id, assignee, description, due_text, due_date, assignee_external)
-          values ($1, $2, $3, $4, $5, $6, $7, $8)
-          returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, due_date,
-            assignee_external, status, external_refs, created_at, updated_at
-        `,
-        [
-          recordingId,
-          summary.id,
-          recording.transcript.id,
-          task.assignee || null,
-          task.description,
-          task.dueText || null,
-          task.dueDate || null,
-          isAssigneeExternal(task.assignee, contacts),
-        ],
-      );
 
-      tasks.push(mapTask(inserted.rows[0]));
+    for (const task of generated.tasks) {
+      const match = existingTasks.find((row) => {
+        if (matchedIds.has(row.id)) {
+          return false;
+        }
+        if ((row.assignee || null) !== (task.assignee || null)) {
+          return false;
+        }
+        const normalizedExisting = normalizeTaskText(row.description);
+        const normalizedNew = normalizeTaskText(task.description);
+        if (!normalizedExisting || !normalizedNew) {
+          return false;
+        }
+        return (
+          normalizedExisting.includes(normalizedNew) ||
+          normalizedNew.includes(normalizedExisting) ||
+          taskWordOverlap(row.description, task.description) >= 0.6
+        );
+      });
+
+      if (match) {
+        matchedIds.add(match.id);
+        const updated = await client.query(
+          `
+            update recording_tasks
+            set description = $2, due_text = $3, due_date = $4, summary_id = $5, transcript_id = $6, updated_at = now()
+            where id = $1
+            returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, due_date,
+              assignee_external, status, external_refs, created_at, updated_at
+          `,
+          [match.id, task.description, task.dueText || null, task.dueDate || null, summary.id, recording.transcript.id],
+        );
+        tasks.push(mapTask(updated.rows[0]));
+      } else {
+        const insertedTask = await client.query(
+          `
+            insert into recording_tasks (recording_id, summary_id, transcript_id, assignee, description, due_text, due_date, assignee_external)
+            values ($1, $2, $3, $4, $5, $6, $7, $8)
+            returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, due_date,
+              assignee_external, status, external_refs, created_at, updated_at
+          `,
+          [
+            recordingId,
+            summary.id,
+            recording.transcript.id,
+            task.assignee || null,
+            task.description,
+            task.dueText || null,
+            task.dueDate || null,
+            isAssigneeExternal(task.assignee, contacts),
+          ],
+        );
+        tasks.push(mapTask(insertedTask.rows[0]));
+      }
+    }
+
+    for (const row of existingTasks) {
+      if (!matchedIds.has(row.id)) {
+        tasks.push(mapTask(row));
+      }
     }
 
     return { summary, tasks };
@@ -1493,6 +1733,125 @@ export async function summarizeRecording(
       console.warn(`Auto-title failed for recording ${recordingId}: ${error.message}`);
     }
   }
+
+  return result;
+}
+
+// STG-003: «журнал: кто, когда, какой раздел изменил» — список метаданных
+// снимков (без самого snapshot, чтобы не таскать полный протокол на каждую
+// строку списка истории).
+export async function listSummaryVersions(recordingId, ownerId) {
+  const owned = await query('select id from recordings where id = $1 and owner_id = $2', [recordingId, ownerId]);
+
+  if (owned.rowCount === 0) {
+    return null;
+  }
+
+  const result = await query(
+    `
+      select id, sections_changed, instruction, created_by, created_at
+      from recording_summary_versions
+      where recording_id = $1
+      order by created_at desc
+    `,
+    [recordingId],
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    sectionsChanged: row.sections_changed,
+    instruction: row.instruction,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  }));
+}
+
+// STG-003: «доступна предыдущая версия» — полная замена текущего протокола +
+// задач снимком (в отличие от regen-мерджа выше, восстановление — явное
+// «вернуть как было», поэтому список задач заменяется целиком, а не
+// сопоставляется по сходству).
+export async function restoreSummaryVersion(recordingId, ownerId, versionId) {
+  const recording = await getRecording(recordingId, ownerId);
+
+  if (!recording) {
+    return null;
+  }
+
+  if (recording.summary?.isLocked) {
+    throw new Error('Protocol is locked - unlock it before restoring');
+  }
+
+  const versionResult = await query(
+    'select snapshot from recording_summary_versions where id = $1 and recording_id = $2',
+    [versionId, recordingId],
+  );
+
+  if (versionResult.rowCount === 0) {
+    throw new Error('Version not found');
+  }
+
+  const snapshot = versionResult.rows[0].snapshot;
+
+  const result = await transaction(async (client) => {
+    // Восстановление — тоже изменение, которое можно откатить: снимаем
+    // текущее состояние тем же путём перед тем, как перезаписать его снимком.
+    await snapshotSummaryVersion(client, recordingId, {
+      sectionsChanged: null,
+      instruction: 'restore',
+      createdBy: ownerId,
+    });
+
+    const updated = await client.query(
+      `
+        update recording_summaries
+        set summary = $2, executive_summary = $3, protocol = $4::jsonb, topics = $5::jsonb, action_items = $6::jsonb, updated_at = now()
+        where recording_id = $1
+        returning id, recording_id, transcript_id, model, summary, executive_summary, action_items, topics, protocol,
+          original_summary, is_locked, created_at, updated_at
+      `,
+      [
+        recordingId,
+        snapshot.summary,
+        snapshot.executiveSummary,
+        JSON.stringify(snapshot.protocol),
+        JSON.stringify(snapshot.topics),
+        JSON.stringify(snapshot.actionItems || []),
+      ],
+    );
+
+    if (updated.rowCount === 0) {
+      throw new Error('Recording has no protocol to restore into');
+    }
+
+    const summary = mapSummary(updated.rows[0]);
+
+    await client.query('delete from recording_tasks where recording_id = $1', [recordingId]);
+    const tasks = [];
+    for (const task of snapshot.tasks || []) {
+      const inserted = await client.query(
+        `
+          insert into recording_tasks (recording_id, summary_id, transcript_id, assignee, description, due_text, due_date, status, assignee_external)
+          values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          returning id, recording_id, summary_id, transcript_id, assignee, description, due_text, due_date,
+            assignee_external, status, external_refs, created_at, updated_at
+        `,
+        [
+          recordingId,
+          summary.id,
+          recording.transcript?.id || null,
+          task.assignee,
+          task.description,
+          task.due_text,
+          task.due_date,
+          task.status || 'extracted',
+          task.assignee_external || false,
+        ],
+      );
+      tasks.push(mapTask(inserted.rows[0]));
+    }
+
+    return { summary, tasks };
+  });
 
   return result;
 }
@@ -2572,6 +2931,13 @@ export function registerRecordingRoutes(app) {
     const body = await c.req.json().catch(() => ({}));
 
     try {
+      // STG-001(e): double-click/two tabs → return the already in-flight
+      // invite instead of firing a second join (see findRecentActive...).
+      const existingId = await findRecentActiveMeetingBotRecording(user.id, body.meetingUrl || '');
+      if (existingId) {
+        return c.json({ recording: await getRecording(existingId, user.id) }, 200);
+      }
+
       const recording = isSelfHostedMeetingUrl(body.meetingUrl)
         ? await createSelfHostedMeetingRecording(body, user.id)
         : await createMeetingBotRecording(body, user.id);
@@ -2864,6 +3230,9 @@ export function registerRecordingRoutes(app) {
         instruction: body.instruction,
         timezoneOffsetMinutes: body.timezoneOffsetMinutes,
         processingTemplate: body.processingTemplate,
+        // STG-003: «Переделать [раздел]» — точечная регенерация одного-двух
+        // разделов protocol вместо полной пересборки.
+        sections: Array.isArray(body.sections) ? body.sections : null,
       });
 
       if (!result) {
@@ -2873,6 +3242,35 @@ export function registerRecordingRoutes(app) {
       return c.json(result, 201);
     } catch (error) {
       return c.json({ error: error.message || 'Failed to summarize recording' }, 400);
+    }
+  });
+
+  // STG-003: история версий протокола — снимки, сделанные перед каждой
+  // (пере)генерацией/восстановлением (см. snapshotSummaryVersion).
+  app.get('/api/recordings/:id/summary/versions', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const versions = await listSummaryVersions(c.req.param('id'), user.id);
+
+    if (versions === null) {
+      return c.json({ error: 'Recording not found' }, 404);
+    }
+
+    return c.json({ versions });
+  });
+
+  app.post('/api/recordings/:id/summary/versions/:versionId/restore', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+
+    try {
+      const result = await restoreSummaryVersion(c.req.param('id'), user.id, c.req.param('versionId'));
+
+      if (!result) {
+        return c.json({ error: 'Recording not found' }, 404);
+      }
+
+      return c.json(result);
+    } catch (error) {
+      return c.json({ error: error.message || 'Failed to restore version' }, 400);
     }
   });
 

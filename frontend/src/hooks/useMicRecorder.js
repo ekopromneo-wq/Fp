@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import useUiStore from '../store/uiStore.js';
 import { startLiveRecordingSession, appendLiveRecordingChunk, clearLiveRecordingSession } from '../lib/offlineDb.js';
+import { checkMicPermissionState, describeMicError, requestMicStream } from '../lib/micPermission.js';
 
 const LOW_LEVEL_THRESHOLD = 0.03;
 const LOW_LEVEL_WARNING_MS = 4000;
@@ -290,21 +291,31 @@ export default function useMicRecorder(uploadRecordingFile, setStatus, micDevice
       // Оценка места не критична — если недоступна, просто пишем без предупреждения.
     }
 
+    // STG-004: если разрешение уже заблокировано навсегда, не дёргаем
+    // getUserMedia второй раз (в части браузеров это просто мгновенно
+    // повторит отказ) — сразу даём понятную инструкцию.
+    const permissionState = await checkMicPermissionState();
+    if (permissionState === 'denied') {
+      setStatus('Доступ к микрофону запрещён. Разрешите доступ в настройках браузера.');
+      return;
+    }
+
     try {
-      let stream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: micDeviceId ? { deviceId: { exact: micDeviceId } } : true,
-        });
-      } catch (deviceError) {
-        if (micDeviceId && deviceError.name === 'OverconstrainedError') {
-          // The saved device is no longer available (unplugged, etc.) - fall back
-          // to the system default rather than failing to record altogether.
-          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        } else {
-          throw deviceError;
-        }
+      const stream = await requestMicStream(micDeviceId);
+
+      const [audioTrack] = stream.getAudioTracks();
+      if (!audioTrack || audioTrack.readyState !== 'live') {
+        stream.getTracks().forEach((track) => track.stop());
+        throw new Error('Микрофон недоступен (трек не активен) — попробуйте снова');
       }
+      // Трек может замолчать легитимно (аппаратная кнопка mute) — это не
+      // ошибка. А вот 'ended' необратим (устройство отключили, разрешение
+      // отозвали на лету) — тогда останавливаем запись и предупреждаем,
+      // вместо того чтобы молча писать тишину.
+      audioTrack.onended = () => {
+        setStatus('Микрофон отключён во время записи');
+        stopMicRecording();
+      };
 
       const options = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? { mimeType: 'audio/webm;codecs=opus' } : {};
       const recorder = new MediaRecorder(stream, options);
@@ -385,7 +396,7 @@ export default function useMicRecorder(uploadRecordingFile, setStatus, micDevice
       releaseWakeLock();
       setIsMicRecording(false);
       setIsMicPaused(false);
-      setStatus(error.name === 'NotAllowedError' ? 'Доступ к микрофону запрещён' : error.message || 'Не удалось начать запись');
+      setStatus(describeMicError(error));
     }
   }
 
@@ -447,6 +458,44 @@ export default function useMicRecorder(uploadRecordingFile, setStatus, micDevice
     setMediaSessionState('none');
     setIsMicRecording(false);
     setIsMicPaused(false);
+  }
+
+  // STG-005/STG-065: раньше единственным способом закончить запись был
+  // stopMicRecording, чей onstop безусловно грузит файл в очередь — «отменить»
+  // было нечем. Здесь — настоящая отмена: глушим onstop/ondataavailable ДО
+  // recorder.stop(), поэтому обычный обработчик загрузки не срабатывает, чистим
+  // накопленные чанки и IndexedDB-сессию, чтобы восстановление после краша не
+  // «воскресило» отменённую запись.
+  function cancelMicRecording() {
+    const recorder = mediaRecorderRef.current;
+    const stream = micStreamRef.current;
+
+    if (recorder) {
+      recorder.onstop = null;
+      recorder.ondataavailable = null;
+      if (recorder.state !== 'inactive') {
+        recorder.stop();
+      }
+    }
+    stream?.getTracks().forEach((track) => track.stop());
+
+    micStreamRef.current = null;
+    mediaRecorderRef.current = null;
+    micStartedAtRef.current = null;
+    micChunksRef.current = [];
+
+    stopMicLevelMeter();
+    stopDurationTimer();
+    releaseWakeLock();
+    clearMediaSessionHandlers();
+    setMediaSessionState('none');
+    setIsMicRecording(false);
+    setIsMicPaused(false);
+
+    clearLiveRecordingSession().catch(() => {});
+    micSessionIdRef.current = null;
+
+    setStatus('Запись отменена');
   }
 
   function handleMicRecordingToggle() {
@@ -535,6 +584,7 @@ export default function useMicRecorder(uploadRecordingFile, setStatus, micDevice
     analyserRef: micAnalyserRef,
     startMicRecording,
     stopMicRecording,
+    cancelMicRecording,
     pauseMicRecording,
     resumeMicRecording,
     handleMicRecordingToggle,

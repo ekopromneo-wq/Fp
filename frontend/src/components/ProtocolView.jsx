@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react';
 import { formatDate } from '../lib/format.js';
+import { describeMicError, requestMicStream } from '../lib/micPermission.js';
+import SummaryVersionHistory from './SummaryVersionHistory.jsx';
 
 const PROTOCOL_SECTION_LABELS = {
   participants: 'Участники',
@@ -50,7 +52,7 @@ function DictateButton({ isActive, isBusy, onToggle, label }) {
   );
 }
 
-export default function ProtocolView({ recording, onUpdateProtocol, onGenerateProtocol, onDictate, setStatus }) {
+export default function ProtocolView({ recording, onUpdateProtocol, onGenerateProtocol, onRestoreVersion, onDictate, setStatus }) {
   const summary = recording.summary;
   const template = recording.protocolTemplate || { label: 'Совещание', sections: ['participants', 'agenda', 'discussions', 'decisions', 'risks', 'questions', 'nextSteps'] };
 
@@ -60,6 +62,10 @@ export default function ProtocolView({ recording, onUpdateProtocol, onGeneratePr
   const [isLocking, setIsLocking] = useState(false);
   const [instruction, setInstruction] = useState('');
   const [isRegenerating, setIsRegenerating] = useState(false);
+  // STG-003: «Переделать [раздел]» — какой конкретно раздел сейчас точечно
+  // перегенерируется (null = ни один), чтобы не блокировать остальные кнопки
+  // разделов на время одного запроса.
+  const [regeneratingSection, setRegeneratingSection] = useState(null);
   const [dictatingField, setDictatingField] = useState(null);
 
   const mediaRecorderRef = useRef(null);
@@ -134,6 +140,22 @@ export default function ProtocolView({ recording, onUpdateProtocol, onGeneratePr
     }
   }
 
+  // STG-003: точечная регенерация — гарантированно не трогает остальные
+  // разделы/задачи (мердж на бэкенде), поэтому без подтверждения, в отличие
+  // от полной перегенерации в RecordingDetail.jsx.
+  async function regenerateSection(key) {
+    setRegeneratingSection(key);
+
+    try {
+      await onGenerateProtocol({ sections: [key] });
+      setStatus?.(`Раздел «${PROTOCOL_SECTION_LABELS[key]}» переделан`);
+    } catch (error) {
+      setStatus?.(error.message || 'Не удалось переделать раздел');
+    } finally {
+      setRegeneratingSection(null);
+    }
+  }
+
   async function toggleDictate(fieldKey, appendTo) {
     if (dictatingField === fieldKey) {
       mediaRecorderRef.current?.stop();
@@ -150,7 +172,7 @@ export default function ProtocolView({ recording, onUpdateProtocol, onGeneratePr
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await requestMicStream();
       const options = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? { mimeType: 'audio/webm;codecs=opus' } : {};
       const recorder = new MediaRecorder(stream, options);
       chunksRef.current = [];
@@ -193,7 +215,7 @@ export default function ProtocolView({ recording, onUpdateProtocol, onGeneratePr
       setDictatingField(fieldKey);
       setStatus?.('Идёт надиктовка...');
     } catch (error) {
-      setStatus?.(error.name === 'NotAllowedError' ? 'Доступ к микрофону запрещён' : error.message || 'Не удалось начать надиктовку');
+      setStatus?.(describeMicError(error));
     }
   }
 
@@ -320,7 +342,21 @@ export default function ProtocolView({ recording, onUpdateProtocol, onGeneratePr
       <div className="protocol-grid">
         {template.sections.map((key) => (
           <section className="protocol-section" key={key}>
-            <h4>{PROTOCOL_SECTION_LABELS[key]}</h4>
+            <div className="protocol-section-head">
+              <h4>{PROTOCOL_SECTION_LABELS[key]}</h4>
+              {!isEditing ? (
+                <button
+                  className="button icon-button button-secondary protocol-section-regen-button"
+                  type="button"
+                  onClick={() => regenerateSection(key)}
+                  disabled={Boolean(regeneratingSection) || summary.isLocked}
+                  title={`Переделать раздел «${PROTOCOL_SECTION_LABELS[key]}» — остальное не меняется`}
+                  aria-label={`Переделать раздел: ${PROTOCOL_SECTION_LABELS[key]}`}
+                >
+                  {regeneratingSection === key ? '…' : '⟳'}
+                </button>
+              ) : null}
+            </div>
             {isEditing ? (
               <div className="protocol-field-with-dictate">
                 <textarea
@@ -397,6 +433,8 @@ export default function ProtocolView({ recording, onUpdateProtocol, onGeneratePr
           {isRegenerating ? 'Перегенерируем...' : 'Перегенерировать'}
         </button>
       </section>
+
+      <SummaryVersionHistory recordingId={recording.id} onRestore={onRestoreVersion} setStatus={setStatus} />
     </div>
   );
 }

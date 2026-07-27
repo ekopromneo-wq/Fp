@@ -15,6 +15,7 @@ import { transcribeWithAccuratePipeline } from './pipelineDiarizer.js';
 import { transcribeWithSpeech2Text, checkSpeech2TextStatus, fetchSpeech2TextResult, parseSpeech2TextResult } from './speech2textDiarizer.js';
 import { getUserDiarizationConfig } from './auth.js';
 import { summarizeRecording, purgeExpiredTrash, enqueueRecording } from './recordings.js';
+import { assessSpeechQuality } from './speechQuality.js';
 import { track } from './analytics.js';
 import { logBotEvent } from './botLog.js';
 import {
@@ -48,6 +49,24 @@ async function checkCancelled(jobId) {
   }
 }
 
+// STG-002: транскрипт есть, но не похож на настоящую речь (гейт
+// assessSpeechQuality) — не зовём суммаризацию (не придумываем протокол по
+// мусору), сразу закрываем job статусом no_speech_detected. Запись при этом
+// не теряется - стенограмма (какая есть) остаётся доступна для прослушивания.
+async function markNoSpeechDetected(jobId, recordingId, ownerId, quality) {
+  track('speech_quality_gate_blocked', { userId: ownerId, recordingId, props: quality });
+
+  await transaction(async (client) => {
+    await client.query(`update processing_jobs set status = 'done', error = null, updated_at = now() where id = $1`, [
+      jobId,
+    ]);
+    await client.query(`update recordings set status = 'no_speech_detected', updated_at = now() where id = $1`, [
+      recordingId,
+    ]);
+  });
+  await notifyRecordingEvent(recordingId, ownerId, 'done');
+}
+
 async function processRecording(data, { attemptsMade = 0 } = {}) {
   const { jobId, recordingId, retranscribe = false } = data;
 
@@ -73,9 +92,10 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
   // attempt, skip straight to summarization instead of re-transcribing -
   // this is what makes a summarization-only failure retry as a
   // summarization-only retry (US-4.3), without a second job/queue.
-  const existingTranscript = await query('select id from transcripts where recording_id = $1 order by created_at desc limit 1', [
-    recordingId,
-  ]);
+  const existingTranscript = await query(
+    'select id, text, segments from transcripts where recording_id = $1 order by created_at desc limit 1',
+    [recordingId],
+  );
   const alreadyTranscribed = existingTranscript.rowCount > 0;
 
   await transaction(async (client) => {
@@ -137,6 +157,20 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
   }
 
   if (alreadyTranscribed) {
+    // Гейт нужен и здесь, не только на первом проходе ниже: это путь ретрая
+    // (контрольная точка выше), и если суммаризация упала по несвязанной
+    // причине (например, таймаут OpenRouter) на галлюцинированном
+    // транскрипте, ретрай не должен молча проскочить проверку.
+    const quality = assessSpeechQuality(
+      existingTranscript.rows[0]?.text,
+      existingTranscript.rows[0]?.segments,
+      file?.duration_seconds ? file.duration_seconds * 1000 : null,
+    );
+    if (!quality.ok) {
+      await markNoSpeechDetected(jobId, recordingId, file?.owner_id, quality);
+      return;
+    }
+
     await summarizeRecording(recordingId, file?.owner_id);
 
     await transaction(async (client) => {
@@ -295,6 +329,12 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
   // straight into summarization rather than re-transcribing.
   await checkCancelled(jobId);
 
+  const quality = assessSpeechQuality(finalText, finalSegments, file?.duration_seconds ? file.duration_seconds * 1000 : null);
+  if (!quality.ok) {
+    await markNoSpeechDetected(jobId, recordingId, file?.owner_id, quality);
+    return;
+  }
+
   await query(`update recordings set status = 'summarizing', updated_at = now() where id = $1`, [recordingId]);
   await summarizeRecording(recordingId, file?.owner_id);
 
@@ -359,14 +399,26 @@ async function ingestCompletedMeeting(recording, statusBody) {
   let finalSegments = [];
   let hasSpeech = false;
 
+  let qualityReason = null;
+
   if (statusCode === 200) {
     const result = await fetchSpeech2TextResult(recording.meeting_bot_task_id, recording.apiKey);
     const parsed = parseSpeech2TextResult(result);
 
     if (parsed) {
-      finalText = parsed.text;
-      finalSegments = parsed.segments;
-      hasSpeech = true;
+      // STG-002: раньше "hasSpeech" значило только "Speech2Text вообще что-то
+      // вернул" - тот же класс ASR-галлюцинаций на тишине, что и в файловом
+      // пайплайне, проходил без единой проверки. Длительность записи здесь
+      // недоступна (нет аудиофайла на этой стороне) - гейт деградирует к
+      // проверкам по тексту/сегментам без порога покрытия.
+      const quality = assessSpeechQuality(parsed.text, parsed.segments, null);
+      hasSpeech = quality.ok;
+      if (quality.ok) {
+        finalText = parsed.text;
+        finalSegments = parsed.segments;
+      } else {
+        qualityReason = quality.reason;
+      }
     }
   }
 
@@ -385,7 +437,7 @@ async function ingestCompletedMeeting(recording, statusBody) {
 
     await client.query(`update recordings set status = $2, updated_at = now() where id = $1`, [
       recording.id,
-      hasSpeech ? 'summarizing' : 'done',
+      hasSpeech ? 'summarizing' : 'no_speech_detected',
     ]);
   });
 
@@ -406,7 +458,7 @@ async function ingestCompletedMeeting(recording, statusBody) {
 
   await notifyRecordingEvent(recording.id, recording.owner_id, 'done');
   // US-15.1: журнал подключений — транскрипт получен и внесён.
-  logBotEvent(recording.id, { engine: 'speech2text', event: 'ingested', detail: { hasSpeech } });
+  logBotEvent(recording.id, { engine: 'speech2text', event: 'ingested', detail: { hasSpeech, reason: qualityReason } });
   console.log(`Meeting bot recording ${recording.id} finished (${finalSegmentsCountLabel(statusCode)})`);
 }
 

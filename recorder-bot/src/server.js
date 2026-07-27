@@ -32,7 +32,16 @@ app.post('/jobs', async (c) => {
 
     return c.json(job, 202);
   } catch (error) {
-    return c.json({ error: error.message || 'Failed to start job' }, 409);
+    // STG-001(d): раньше ЛЮБАЯ ошибка createJob (в т.ч. падение Playwright,
+    // неподдерживаемая платформа) маппилась в 409 - выглядело как "конфликт",
+    // хотя настоящий конфликт (занятый инстанс) — только один из случаев.
+    if (error.message === 'Another recording is already in progress on this recorder-bot instance') {
+      return c.json({ error: error.message }, 409);
+    }
+    if (error.message?.startsWith('Unsupported platform:')) {
+      return c.json({ error: error.message }, 400);
+    }
+    return c.json({ error: error.message || 'Failed to start job' }, 502);
   }
 });
 

@@ -46,7 +46,12 @@ export async function joinMeeting(input, apiKey) {
   const body = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(body?.message || `Speech2Text meeting join failed with ${response.status}`);
+    // Не знаем точное имя поля с ошибкой в ответе Speech2Text - проверяем оба
+    // распространённых варианта вместо одного, чтобы не терять причину молча
+    // (см. тот же баг для recorder-bot в recorderBot.js).
+    const error = new Error(body?.error || body?.message || `Speech2Text meeting join failed with ${response.status}`);
+    error.statusCode = response.status;
+    throw error;
   }
 
   if (!body?.id) {
@@ -64,7 +69,9 @@ export async function stopMeeting(taskId, apiKey) {
   const body = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(body?.message || `Speech2Text meeting stop failed with ${response.status}`);
+    const error = new Error(body?.error || body?.message || `Speech2Text meeting stop failed with ${response.status}`);
+    error.statusCode = response.status;
+    throw error;
   }
 
   return body;
