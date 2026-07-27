@@ -1,6 +1,7 @@
 import Waveform from './Waveform.jsx';
 import BrandMicIcon from '../BrandMicIcon.jsx';
 import { formatDuration } from '../../lib/format.js';
+import useEscapeKey from '../../hooks/useEscapeKey.js';
 
 export default function VoicePanel({
   isOpen,
@@ -22,6 +23,11 @@ export default function VoicePanel({
       onCancelRecording();
     }
   }
+
+  // STG-062: Escape закрывает панель записи, как и клик по крестику/фону.
+  useEscapeKey(() => {
+    if (isOpen) onClose();
+  });
 
   if (!isOpen) {
     return null;
@@ -73,8 +79,12 @@ export default function VoicePanel({
           ) : null}
 
           {isMicRecording && canPauseMicRecording ? (
+            // STG-047: на паузе именно «Продолжить» - самое вероятное следующее
+            // действие, но кнопка была маленькой серой рядом с крупной красной
+            // «Остановить» - легко перепутать или не заметить. На паузе меняем
+            // приоритет: «Продолжить» становится крупной акцентной.
             <button
-              className="voice-panel-pause-button"
+              className={`voice-panel-pause-button ${isMicPaused ? 'is-paused' : ''}`}
               type="button"
               onClick={onTogglePause}
               aria-label={isMicPaused ? 'Продолжить запись' : 'Поставить на паузу'}
@@ -84,17 +94,21 @@ export default function VoicePanel({
           ) : null}
 
           <button
-            className={`voice-panel-record-button ${isMicRecording ? 'is-recording' : ''}`}
+            className={`voice-panel-record-button ${isMicRecording ? 'is-recording' : ''} ${isMicPaused ? 'is-secondary' : ''}`}
             type="button"
             onClick={onToggleRecording}
             aria-label={isMicRecording ? 'Остановить запись' : 'Начать запись'}
           >
             {isMicRecording ? (
-              // #13/полосочки: фирменный микрофон, 4 строки внутри капсулы двигаются
-              // по реальному уровню сигнала (пауза — level=null, застывают статично).
-              <BrandMicIcon className="voice-panel-record-icon" level={isMicPaused ? null : micLevel ?? 0} />
+              // STG-070: раньше во время записи кнопка показывала тот же
+              // анимированный микрофон, что и общий индикатор выше - нет
+              // стандартной иконки остановки (квадрат ■), которую ожидает
+              // пользователь по ментальной модели плеера/диктофона.
+              <span className="voice-panel-stop-square" aria-hidden="true" />
             ) : (
-              '●'
+              // #13: фирменный микрофон на стойке - тот же знак, что и на FAB
+              // главного экрана (BottomNav), для единообразия "нажми, чтобы начать".
+              <BrandMicIcon className="voice-panel-record-icon" level={0} />
             )}
           </button>
         </div>

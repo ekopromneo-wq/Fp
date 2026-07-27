@@ -49,6 +49,7 @@ function AuthScreen({
   // разработки (import.meta.env.DEV).
   const [email, setEmail] = useState(import.meta.env.DEV ? demoEmail : '');
   const [password, setPassword] = useState(import.meta.env.DEV ? demoPassword : '');
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [displayName, setDisplayName] = useState(import.meta.env.DEV ? 'Demo User' : '');
   // Регистрация закрыта на сервере → показываем только вход.
   const isRegister = registrationOpen && authMode === 'register';
@@ -96,15 +97,29 @@ function AuthScreen({
 
           <label>
             Пароль
-            <input
-              value={password}
-              type="password"
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete={isRegister ? 'new-password' : 'current-password'}
-              placeholder={isRegister ? 'Не короче 6 символов' : 'Пароль'}
-              minLength={6}
-              required
-            />
+            {/* STG-038: показ/скрытие пароля. STG-066: требование к длине
+                видно постоянно (в placeholder оно пропадает, как только
+                начинаешь печатать) — отдельная подсказка под полем. */}
+            <span className="auth-password-field">
+              <input
+                value={password}
+                type={isPasswordVisible ? 'text' : 'password'}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete={isRegister ? 'new-password' : 'current-password'}
+                minLength={6}
+                required
+              />
+              <button
+                className="auth-password-toggle"
+                type="button"
+                onClick={() => setIsPasswordVisible((value) => !value)}
+                aria-label={isPasswordVisible ? 'Скрыть пароль' : 'Показать пароль'}
+                title={isPasswordVisible ? 'Скрыть пароль' : 'Показать пароль'}
+              >
+                {isPasswordVisible ? '🙈' : '👁'}
+              </button>
+            </span>
+            {isRegister ? <span className="auth-field-hint">Не короче 6 символов</span> : null}
           </label>
 
           <button className="button button-primary" type="submit" disabled={isSubmitting}>

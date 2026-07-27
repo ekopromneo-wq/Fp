@@ -608,6 +608,26 @@ export function registerAuthRoutes(app) {
     });
   });
 
+  // STG-040: раньше отображаемое имя задавалось только при регистрации и
+  // нигде в UI не менялось (например, у пришедших через OAuth оно бралось
+  // из провайдера и могло быть неудобным).
+  app.patch('/api/auth/profile', requireAuth, async (c) => {
+    const user = getAuthUser(c);
+    const body = await c.req.json().catch(() => ({}));
+    const displayName = typeof body.displayName === 'string' ? body.displayName.trim() : '';
+
+    if (!displayName) {
+      return c.json({ error: 'Имя не может быть пустым' }, 400);
+    }
+
+    const result = await query(
+      'update app_users set display_name = $1, updated_at = now() where id = $2 returning id, display_name, email, email_verified_at, created_at, updated_at',
+      [displayName, user.id],
+    );
+
+    return c.json({ user: mapUser(result.rows[0]) });
+  });
+
   // US-16.1: Telegram Login Widget шлёт подписанные данные на этот адрес.
   app.get('/api/auth/telegram/callback', async (c) => {
     const appUrl = (process.env.PUBLIC_APP_URL || new URL(c.req.url).origin).replace(/\/+$/, '');

@@ -20,7 +20,7 @@ const TABS = [
   { key: 'notifications', label: 'Уведомления' },
 ];
 
-function SettingsPage({ settings, micDeviceId, setMicDeviceId, status, currentUser, onLoggedOut, setStatus }) {
+function SettingsPage({ settings, micDeviceId, setMicDeviceId, status, currentUser, setCurrentUser, onLoggedOut, setStatus }) {
   const [tab, setTab] = useState('account');
 
   return (
@@ -41,7 +41,7 @@ function SettingsPage({ settings, micDeviceId, setMicDeviceId, status, currentUs
       </div>
 
       {tab === 'account' ? (
-        <AccountPanel currentUser={currentUser} onLoggedOut={onLoggedOut} setStatus={setStatus} />
+        <AccountPanel currentUser={currentUser} setCurrentUser={setCurrentUser} onLoggedOut={onLoggedOut} setStatus={setStatus} />
       ) : null}
 
       {tab === 'processing' ? (

@@ -19,6 +19,7 @@ import ConsentDialog from './components/ConsentDialog.jsx';
 import EmailVerifyBanner from './components/EmailVerifyBanner.jsx';
 import useMicRecorder from './hooks/useMicRecorder.js';
 import useIsMobile from './hooks/useIsMobile.js';
+import useEscapeKey from './hooks/useEscapeKey.js';
 import useUiStore from './store/uiStore.js';
 import useSettings from './hooks/useSettings.js';
 import useContacts from './hooks/useContacts.js';
@@ -151,6 +152,10 @@ function App() {
   // шаблона обработки. Файл переиспользует uploadRecordingFile, ссылка —
   // существующий handleJoinMeeting (meetingBotDraft уже несёт processingTemplate).
   const [isCreateMeetingOpen, setIsCreateMeetingOpen] = useState(false);
+  // STG-062: Escape закрывает модалку «Новая встреча».
+  useEscapeKey(() => {
+    if (isCreateMeetingOpen) setIsCreateMeetingOpen(false);
+  });
   const [createMeetingMode, setCreateMeetingMode] = useState('file');
   const [createMeetingTemplate, setCreateMeetingTemplate] = useState('standard');
   const [isStoppingMeetingBot, setIsStoppingMeetingBot] = useState(false);
@@ -1944,7 +1949,7 @@ function App() {
           isJoiningMeeting={isJoiningMeeting}
         />
       ) : activePage === 'settings' ? (
-        <SettingsPage settings={settings} micDeviceId={micDeviceId} setMicDeviceId={setMicDeviceId} status={status} currentUser={currentUser} onLoggedOut={handleLoggedOut} setStatus={setStatus} />
+        <SettingsPage settings={settings} micDeviceId={micDeviceId} setMicDeviceId={setMicDeviceId} status={status} currentUser={currentUser} setCurrentUser={setCurrentUser} onLoggedOut={handleLoggedOut} setStatus={setStatus} />
       ) : activePage === 'projects' ? (
         <>
           <section className="status-line" aria-live="polite">
@@ -2014,6 +2019,9 @@ function App() {
           {isCreateMeetingOpen ? (
             <div className="modal-overlay" onClick={() => setIsCreateMeetingOpen(false)}>
               <div className="modal" role="dialog" aria-modal="true" aria-label="Новая встреча" onClick={(event) => event.stopPropagation()}>
+                <button className="modal-close" type="button" onClick={() => setIsCreateMeetingOpen(false)} aria-label="Закрыть">
+                  ✕
+                </button>
                 <h3>Новая встреча</h3>
 
                 <div className="create-meeting-mode-toggle" role="group" aria-label="Способ создания">
@@ -2108,18 +2116,29 @@ function App() {
             <span>{status || (hasRecordings ? `${recordings.length} ${pluralizeRu(recordings.length, ['встреча', 'встречи', 'встреч'])}${trashMode ? ' в корзине' : ''}` : trashMode ? 'Корзина пуста' : 'Встреч пока нет')}</span>
           </section>
 
-          {/* #3: групповое удаление — панель появляется в режиме выбора. */}
+          {/* #3: групповое удаление — панель появляется в режиме выбора.
+              STG-051: раньше здесь не было «Выбрать все» (в отличие от
+              корзины, см. STG-033 ниже), а кнопка удаления была только
+              текстовой без иконки. */}
           {selectionMode && !trashMode ? (
             <section className="sync-bar bulk-select-bar" aria-label="Групповые действия">
               <span className="sync-bar-count">Выбрано: <strong>{selectedIds.size}</strong></span>
               <div className="sync-bar-actions">
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  onClick={() => setSelectedIds(new Set(sortedRecordings.map((recording) => recording.id)))}
+                  disabled={isBulkDeleting}
+                >
+                  Выбрать все
+                </button>
                 <button
                   className="button button-danger"
                   type="button"
                   onClick={handleBulkDelete}
                   disabled={!selectedIds.size || isBulkDeleting}
                 >
-                  {isBulkDeleting ? 'Удаляем...' : 'Удалить выбранные'}
+                  🗑 {isBulkDeleting ? 'Удаляем...' : 'Удалить выбранные'}
                 </button>
               </div>
             </section>
@@ -2195,7 +2214,16 @@ function App() {
 
               {!isLoading && !hasRecordings ? (
                 <div className="empty-state">
-                  {trashMode ? <h2>Корзина пуста</h2> : <><h2>Нет встреч</h2><p>Запишите первую встречу или добавьте аудиофайл.</p></>}
+                  {/* STG-077: корзина без пояснения не отличалась от "пусто, и так
+                      и должно быть" - непонятно её назначение и срок хранения. */}
+                  {trashMode ? (
+                    <>
+                      <h2>Корзина пуста</h2>
+                      <p>Здесь хранятся удалённые встречи 7 дней до окончательного удаления.</p>
+                    </>
+                  ) : (
+                    <><h2>Нет встреч</h2><p>Запишите первую встречу или добавьте аудиофайл.</p></>
+                  )}
                 </div>
               ) : null}
 
@@ -2231,7 +2259,10 @@ function App() {
                       ) : null}
                       <div className="recording-card-main">
                         <strong className="recording-card-title">{recording.title || recording.originalFilename}</strong>
-                        <span className="muted-text">удалено {formatDate(recording.deletedAt)} · будет стёрто через неделю</span>
+                        <span className="muted-text">
+                          удалено {formatDate(recording.deletedAt)} · если не восстановить встречу в течение 7 дней, она
+                          будет удалена без возможности восстановления
+                        </span>
                       </div>
                       {!selectionMode ? (
                         <div className="trash-card-actions">

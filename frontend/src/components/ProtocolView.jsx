@@ -278,7 +278,9 @@ export default function ProtocolView({ recording, onUpdateProtocol, onGeneratePr
 
       {summary.executiveSummary || isEditing ? (
         <section className="protocol-section executive-summary">
-          <h4>Executive summary</h4>
+          {/* STG-010: было название на английском; "Резюме" занято чуть ниже
+              полной версией — берём отдельную формулировку без коллизии. */}
+          <h4>Кратко о встрече</h4>
           {isEditing ? (
             <div className="protocol-field-with-dictate">
               <textarea

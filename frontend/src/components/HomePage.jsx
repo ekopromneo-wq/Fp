@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { apiFetch, isProcessingStatus } from '../lib/api.js';
 import { formatDate } from '../lib/format.js';
 import { getStatusLabel, getTaskStatusLabel } from '../lib/statusLabels.js';
+import useEscapeKey from '../hooks/useEscapeKey.js';
 
 // Приоритет блоков по US-13.1: текущая обработка → готовые протоколы → задачи →
 // предстоящие встречи → ошибки.
@@ -9,7 +10,10 @@ const BLOCKS = [
   { key: 'processing', label: 'Сейчас обрабатывается' },
   { key: 'ready', label: 'Готовые протоколы' },
   { key: 'tasks', label: 'Задачи' },
-  { key: 'upcoming', label: 'Предстоящие встречи' },
+  // STG-044: было просто «Предстоящие встречи» без пояснения, откуда они
+  // берутся - непонятно, что это встречи из подключённого календаря
+  // (Настройки → Обработка → Календарь), а не какие-то напоминания приложения.
+  { key: 'upcoming', label: 'Встречи из календаря' },
   { key: 'failed', label: 'Ошибки' },
 ];
 
@@ -47,6 +51,10 @@ export default function HomePage({
   const [upcoming, setUpcoming] = useState([]);
   const [isConfiguring, setIsConfiguring] = useState(false);
   const [showBotModal, setShowBotModal] = useState(false);
+  // STG-062: Escape закрывает модалку «Пригласить бота».
+  useEscapeKey(() => {
+    if (showBotModal) setShowBotModal(false);
+  });
 
   // Задачи по всем встречам — тем же поиском, что и страница «Поиск задач»;
   // сортировка по сроку уже на сервере, просроченные окажутся первыми.
@@ -147,6 +155,9 @@ export default function HomePage({
       {showBotModal ? (
         <div className="modal-overlay" onClick={() => setShowBotModal(false)}>
           <div className="modal" role="dialog" aria-modal="true" aria-label="Пригласить бота на встречу" onClick={(event) => event.stopPropagation()}>
+            <button className="modal-close" type="button" onClick={() => setShowBotModal(false)} aria-label="Закрыть">
+              ✕
+            </button>
             <h3>Пригласить бота на встречу</h3>
             <form
               className="modal-form"
@@ -259,8 +270,9 @@ export default function HomePage({
       ) : null}
 
       {!isHidden('upcoming') && upcoming.length ? (
-        <section className="home-block" aria-label="Предстоящие встречи">
-          <h3>Предстоящие встречи</h3>
+        <section className="home-block" aria-label="Встречи из календаря">
+          <h3>Встречи из календаря</h3>
+          <p className="muted-text">Ближайшие события из подключённого календаря (Настройки → Обработка → Календарь).</p>
           <div className="home-cards">
             {upcoming.map((meeting) => (
               <div key={meeting.eventId} className="home-card home-card-static">

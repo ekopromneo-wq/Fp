@@ -12,6 +12,24 @@
     <link rel="icon" type="image/png" sizes="64x64" href="/icons/favicon-64.png" />
     <title>Stenogram — мобильный AI-ассистент</title>
     <script>
+      // STG-055: html имел статичный data-theme="dark", а реальная тема
+      // применялась к documentElement только в useEffect ПОСЛЕ монтирования
+      // React (App.jsx) - у пользователей со светлой темой на миг мелькал
+      // тёмный экран (или наоборот) при каждой загрузке. Читаем сохранённую
+      // тему синхронно, до первой отрисовки. Ключ и формат должны совпадать
+      // с zustand persist в src/store/uiStore.js (name: 'voxmate-ui').
+      (function () {
+        try {
+          var raw = localStorage.getItem('voxmate-ui');
+          var parsed = raw ? JSON.parse(raw) : null;
+          var theme = parsed && parsed.state && parsed.state.theme;
+          document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+        } catch (e) {
+          document.documentElement.dataset.theme = 'dark';
+        }
+      })();
+    </script>
+    <script>
       // Ловим beforeinstallprompt как можно раньше: Chrome может прислать его
       // до монтирования React, и тогда useEffect-подписчик его не застанет.
       // Прячем событие на window, хук установки его подхватит.

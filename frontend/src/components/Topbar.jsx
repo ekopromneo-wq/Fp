@@ -30,24 +30,42 @@ function NotificationsMenu({ notifications, unreadNotificationCount, isNotificat
       </button>
 
       {isNotificationsOpen ? (
-        <div className="notifications-dropdown" role="menu">
-          {notifications.length === 0 ? (
-            <p className="muted-text notifications-empty">Уведомлений пока нет</p>
-          ) : (
-            notifications.map((notification) => (
+        <>
+          {/* STG-050: закрытие панели было неочевидно - единственный способ
+              был повторно нажать на колокольчик. Добавлены явный крестик и
+              клик по фону-подложке. */}
+          <div className="notifications-backdrop" onClick={() => setIsNotificationsOpen(false)} />
+          <div className="notifications-dropdown" role="menu">
+            <div className="notifications-header">
+              <strong>Уведомления</strong>
               <button
-                key={notification.id}
+                className="notifications-close"
                 type="button"
-                className={`notifications-item ${notification.readAt ? '' : 'is-unread'}`}
-                onClick={() => onOpenNotification(notification)}
+                onClick={() => setIsNotificationsOpen(false)}
+                aria-label="Закрыть уведомления"
+                title="Закрыть"
               >
-                <strong>{notification.title}</strong>
-                <span>{notification.message}</span>
-                <span className="notifications-item-date">{formatDate(notification.createdAt)}</span>
+                ✕
               </button>
-            ))
-          )}
-        </div>
+            </div>
+            {notifications.length === 0 ? (
+              <p className="muted-text notifications-empty">Уведомлений пока нет</p>
+            ) : (
+              notifications.map((notification) => (
+                <button
+                  key={notification.id}
+                  type="button"
+                  className={`notifications-item ${notification.readAt ? '' : 'is-unread'}`}
+                  onClick={() => onOpenNotification(notification)}
+                >
+                  <strong>{notification.title}</strong>
+                  <span>{notification.message}</span>
+                  <span className="notifications-item-date">{formatDate(notification.createdAt)}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </>
       ) : null}
     </div>
   );

@@ -49,9 +49,19 @@ function LibraryControls({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const activeExtraCount = Object.values(filters).filter(Boolean).length;
+  // STG-045: раньше «Сбросить» очищала только доп. фильтры (дата/статус/...),
+  // но не строку поиска и не проект - результат оставался отфильтрованным,
+  // хотя пользователь ожидал полный сброс.
+  const hasAnyFilter = Boolean(searchQuery || projectFilter) || activeExtraCount > 0;
 
   function setFilter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function resetAllFilters() {
+    setSearchQuery('');
+    setProjectFilter('');
+    setFilters({ dateFrom: '', dateTo: '', status: '', source: '', meetingType: '', participant: '', hasTasks: '' });
   }
 
   return (
@@ -65,8 +75,18 @@ function LibraryControls({
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Название, файл, проект или текст стенограммы"
             />
+            {/* STG-079: раньше очистить поле можно было только вручную стирая
+                текст - крестик как в большинстве поисковых полей. */}
+            {searchQuery ? (
+              <button type="button" className="search-clear-button" onClick={() => setSearchQuery('')} aria-label="Очистить поиск" title="Очистить">
+                ✕
+              </button>
+            ) : null}
             <VoiceInputButton onDictate={onDictate} onText={setSearchQuery} setStatus={setStatus} title="Голосовой поиск" requireConfirm />
           </span>
+          {/* STG-046: раньше подсказка «что ищем» была только в placeholder -
+              бледный цвет плейсхолдера и он пропадает при вводе текста. */}
+          <span className="field-hint">Ищем по названию, файлу, проекту и тексту стенограммы</span>
         </label>
 
         <label>
@@ -195,15 +215,9 @@ function LibraryControls({
             </select>
           </label>
 
-          {activeExtraCount ? (
-            <button
-              className="button button-secondary library-filters-reset"
-              type="button"
-              onClick={() =>
-                setFilters({ dateFrom: '', dateTo: '', status: '', source: '', meetingType: '', participant: '', hasTasks: '' })
-              }
-            >
-              Сбросить
+          {hasAnyFilter ? (
+            <button className="button button-secondary library-filters-reset" type="button" onClick={resetAllFilters}>
+              Сбросить всё
             </button>
           ) : null}
         </div>

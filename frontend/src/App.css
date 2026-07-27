@@ -33,6 +33,11 @@
   --bg-base: #ffffff;
   --bg-elevated: #f1f5f9;
   --accent-primary: #2dd4bf;
+  /* STG-082: --accent-success (#4ade80) был подобран под тёмный фон и на
+     белом даёт контраст ~1.8:1 - плохо читается и не проходит WCAG AA для
+     текста/иконок. Более тёмный зелёный держит тот же смысл "успех/готово"
+     с контрастом ~4.6:1 на белом. */
+  --accent-success: #15803d;
   --text-primary: #0f172a;
   --text-secondary: #475569;
   --border-subtle: rgba(45, 212, 191, 0.15);
@@ -159,6 +164,38 @@ input[type="color"] {
   color: var(--text-primary);
   min-height: 42px;
   padding: 0 12px;
+}
+
+/* STG-038: показ/скрытие пароля. */
+.auth-password-field {
+  position: relative;
+  display: block;
+}
+
+.auth-password-field input {
+  padding-right: 44px;
+}
+
+.auth-password-toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 42px;
+  height: 42px;
+  border: none;
+  background: transparent;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* STG-066: требование к длине пароля видно постоянно, не только пока поле
+   пустое (placeholder пропадает при вводе). */
+.auth-field-hint {
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--text-secondary);
+  text-transform: none;
 }
 
 .auth-message {
@@ -906,13 +943,17 @@ body::after {
   grid-template-columns: auto 1fr;
   align-items: center;
   gap: 10px;
-  min-height: 0;
+  /* STG-081: раньше строка была ~20px в высоту (без отступов, чекбокс 18px) -
+     это же и есть кликабельная область (label оборачивает input), так что
+     соседние переключатели было легко перепутать пальцем. */
+  min-height: 44px;
+  padding: 6px 0;
   text-transform: none !important;
 }
 
 .settings-toggle input {
-  width: 18px;
-  min-height: 18px;
+  width: 20px;
+  min-height: 20px;
 }
 
 .settings-form .button {
@@ -951,6 +992,15 @@ body::after {
   text-align: center;
 }
 
+/* STG-050: клик мимо панели закрывает её - подложка на весь экран под самой
+   панелью, прозрачная, только перехватывает клики. */
+.notifications-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 19;
+  background: transparent;
+}
+
 .notifications-dropdown {
   position: absolute;
   top: calc(100% + 8px);
@@ -966,6 +1016,31 @@ body::after {
   padding: 6px;
   display: grid;
   gap: 4px;
+}
+
+.notifications-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+}
+
+.notifications-close {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.notifications-close:hover {
+  background: var(--bg-base);
+  color: var(--text-primary);
 }
 
 .notifications-empty {
@@ -2802,6 +2877,21 @@ audio {
   color: var(--text-primary);
   font-size: 1.1rem;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: width 0.15s ease, height 0.15s ease, background 0.15s ease;
+}
+
+/* STG-047: на паузе «Продолжить» становится крупной и акцентной - основным
+   действием, а не одной из двух одинаково невзрачных кнопок. */
+.voice-panel-pause-button.is-paused {
+  width: 80px;
+  height: 80px;
+  border: none;
+  background: var(--accent-primary);
+  color: var(--bg-base);
+  font-size: 1.5rem;
 }
 
 .voice-panel-record-button {
@@ -2813,11 +2903,23 @@ audio {
   color: var(--bg-base);
   font-size: 1.5rem;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: width 0.15s ease, height 0.15s ease, opacity 0.15s ease;
 }
 
 .voice-panel-record-button.is-recording {
   background: var(--accent-danger);
   color: var(--text-primary);
+}
+
+/* STG-047: пока на паузе, завершение записи - второстепенное действие. */
+.voice-panel-record-button.is-secondary {
+  width: 52px;
+  height: 52px;
+  font-size: 1.1rem;
+  opacity: 0.7;
 }
 
 @media (min-width: 981px) {
@@ -2866,6 +2968,26 @@ audio {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
   align-items: center;
+}
+
+/* STG-079: крестик очистки поля поиска. */
+.search-clear-button {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.search-clear-button:hover {
+  background: var(--bg-base);
+  color: var(--text-primary);
 }
 
 /* STG-016: обёртка кнопки голосового ввода - сама по себе не влияет на
@@ -3791,6 +3913,15 @@ a.bitrix-sent-badge {
   overflow-wrap: anywhere;
 }
 
+/* STG-083: ошибка формы рядом с самим полем, а не только в общем статус-лайне. */
+.field-error {
+  display: block;
+  margin: 6px 0 0;
+  color: var(--accent-danger);
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
 .account-inline select,
 .account-inline input {
   min-height: 40px;
@@ -3956,11 +4087,35 @@ a.bitrix-sent-badge {
 }
 
 .consent-dialog {
+  position: relative;
   width: min(460px, 100%);
   padding: 22px 20px;
   border: 1px solid var(--border-subtle);
   border-radius: 18px;
   background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+/* STG-062: явный крестик на модалках - раньше закрыть можно было только
+   кликом по подложке (легко промахнуться мимо диалога и не заметить). */
+.modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 8px;
+  font-size: 1rem;
+}
+
+.modal-close:hover {
+  background: var(--bg-base);
   color: var(--text-primary);
 }
 
@@ -3998,6 +4153,7 @@ a.bitrix-sent-badge {
 }
 
 .stop-or-background-dialog {
+  position: relative;
   width: min(360px, 100%);
   padding: 22px 20px;
   border: 1px solid var(--border-subtle);
@@ -4137,6 +4293,7 @@ a.bitrix-sent-badge {
 }
 
 .modal {
+  position: relative;
   width: min(460px, 100%);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-card);
@@ -4827,4 +4984,13 @@ a.bitrix-sent-badge {
 .voice-panel-record-icon {
   width: 44px;
   height: 44px;
+}
+
+/* STG-070: стандартная иконка остановки - квадрат, как на кнопке "стоп"
+   плеера/диктофона, вместо повторного значка микрофона. */
+.voice-panel-stop-square {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: currentColor;
 }

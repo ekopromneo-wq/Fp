@@ -102,7 +102,17 @@ export default function BottomNav({
             >
               Справка
             </a>
-            <button type="button" className="bottom-sheet-item" onClick={onToggleTheme}>
+            {/* STG-063: раньше шторка оставалась открытой после смены темы -
+                единственное действие в ней без закрытия, в отличие от
+                «Справка» (переход) и «Выйти» (размонтирование дерева). */}
+            <button
+              type="button"
+              className="bottom-sheet-item"
+              onClick={() => {
+                onToggleTheme();
+                setIsMoreOpen(false);
+              }}
+            >
               {theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
             </button>
             <button type="button" className="bottom-sheet-item is-danger" onClick={onLogout}>

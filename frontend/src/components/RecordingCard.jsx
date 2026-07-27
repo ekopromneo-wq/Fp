@@ -31,10 +31,13 @@ function SyncPill({ syncState, syncProgress, syncError }) {
   }
 
   // US-3.2: две галочки = отправлено в облако (показываем ненадолго после синка).
+  // STG-060: было просто "✓✓ отправлено" - легко спутать с "В Telegram ✓" у
+  // задач (TaskRow.jsx), хотя это два разных понятия (выгрузка на сервер vs
+  // доставка получателю). Уточняем формулировку до "в облаке".
   if (syncState === 'synced') {
     return (
-      <span className="sync-pill sync-synced" title="Отправлено в облако">
-        ✓✓ отправлено
+      <span className="sync-pill sync-synced" title="Загружено в облако">
+        ✓✓ в облаке
       </span>
     );
   }

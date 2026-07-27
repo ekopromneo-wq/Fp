@@ -44,6 +44,12 @@ function TaskSearchPage({ search, projectOptions, onOpenRecording, onDictate, se
               onChange={(event) => setFilter('search', event.target.value)}
               placeholder="Текст задачи или исполнитель"
             />
+            {/* STG-079: крестик очистки, единообразно с поиском встреч. */}
+            {taskFilters.search ? (
+              <button type="button" className="search-clear-button" onClick={() => setFilter('search', '')} aria-label="Очистить поиск" title="Очистить">
+                ✕
+              </button>
+            ) : null}
             <VoiceInputButton
               onDictate={onDictate}
               onText={(text) => setFilter('search', text)}
@@ -52,6 +58,8 @@ function TaskSearchPage({ search, projectOptions, onOpenRecording, onDictate, se
               requireConfirm
             />
           </span>
+          {/* STG-046: подсказка видна постоянно, не только в бледном placeholder. */}
+          <span className="field-hint">Ищем по тексту задачи и исполнителю</span>
         </label>
 
         <label>

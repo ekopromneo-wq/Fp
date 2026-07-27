@@ -40,15 +40,27 @@ function deviceLabel(userAgent) {
  * Аккаунт (US-16.1/16.2/16.4): устройства и сессии, шаблон протокола по
  * умолчанию, предупреждение о согласии на запись, удаление аккаунта.
  */
-export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
+export default function AccountPanel({ currentUser, setCurrentUser, onLoggedOut, setStatus }) {
   const [sessions, setSessions] = useState([]);
   const [showAllSessions, setShowAllSessions] = useState(false);
   const [account, setAccount] = useState({ defaultMeetingType: 'meeting', recordingConsentWarning: true, defaultProcessingTemplate: 'standard' });
   const [isSavingAccount, setIsSavingAccount] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+  // STG-083: ошибка удаления (например, неверный пароль) уходила в общий
+  // статус-лайн наверху страницы - легко пропустить, форма далеко внизу.
+  const [deleteError, setDeleteError] = useState('');
   const [consents, setConsents] = useState(null);
   const [consentHistory, setConsentHistory] = useState(null);
+  // STG-040: имя раньше задавалось только при регистрации и было нигде не
+  // изменить (особенно неудобно для входа через OAuth/Telegram, где оно
+  // подставляется из профиля провайдера).
+  const [displayName, setDisplayName] = useState(currentUser?.displayName || '');
+  const [isSavingName, setIsSavingName] = useState(false);
+
+  useEffect(() => {
+    setDisplayName(currentUser?.displayName || '');
+  }, [currentUser?.displayName]);
 
   async function loadSessions() {
     try {
@@ -139,6 +151,25 @@ export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
     }
   }
 
+  async function saveDisplayName() {
+    const trimmed = displayName.trim();
+    if (!trimmed || trimmed === currentUser?.displayName) return;
+
+    setIsSavingName(true);
+    try {
+      const response = await apiFetch('/api/auth/profile', { method: 'PATCH', body: JSON.stringify({ displayName: trimmed }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Не удалось сохранить имя');
+      setCurrentUser?.(data.user);
+      setStatus('Имя сохранено');
+    } catch (error) {
+      setStatus(error.message);
+      setDisplayName(currentUser?.displayName || '');
+    } finally {
+      setIsSavingName(false);
+    }
+  }
+
   async function revokeSession(id) {
     const response = await apiFetch(`/api/auth/sessions/${id}`, { method: 'DELETE' });
     if (response.ok) {
@@ -157,8 +188,10 @@ export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
   }
 
   async function deleteAccount() {
+    setDeleteError('');
+
     if (!deletePassword) {
-      setStatus('Введите пароль для подтверждения удаления');
+      setDeleteError('Введите пароль для подтверждения удаления');
       return;
     }
 
@@ -173,7 +206,7 @@ export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
       if (!response.ok) throw new Error(data.error || 'Не удалось удалить аккаунт');
       onLoggedOut();
     } catch (error) {
-      setStatus(error.message);
+      setDeleteError(error.message);
     } finally {
       setIsDeleting(false);
     }
@@ -185,6 +218,23 @@ export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
         <div>
           <p className="eyebrow">Аккаунт</p>
           <h2>Устройства, шаблон и удаление</h2>
+        </div>
+      </div>
+
+      <div className="account-block">
+        <h3>Имя</h3>
+        <div className="account-inline">
+          <input
+            type="text"
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+            onBlur={saveDisplayName}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur();
+            }}
+            placeholder="Как к вам обращаться"
+            disabled={isSavingName}
+          />
         </div>
       </div>
 
@@ -339,13 +389,17 @@ export default function AccountPanel({ currentUser, onLoggedOut, setStatus }) {
           <input
             type="password"
             value={deletePassword}
-            onChange={(event) => setDeletePassword(event.target.value)}
+            onChange={(event) => {
+              setDeletePassword(event.target.value);
+              setDeleteError('');
+            }}
             placeholder="Пароль аккаунта"
           />
           <button className="button button-danger" type="button" onClick={deleteAccount} disabled={isDeleting}>
             {isDeleting ? 'Удаляем...' : 'Удалить аккаунт'}
           </button>
         </div>
+        {deleteError ? <p className="field-error">{deleteError}</p> : null}
       </div>
     </section>
   );
