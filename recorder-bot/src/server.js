@@ -22,6 +22,11 @@ app.use('/jobs/*', async (c, next) => {
 
 app.post('/jobs', async (c) => {
   const body = await c.req.json().catch(() => ({}));
+  // STG-001: тот же ID, что backend пишет в свой журнал подключений (botLog) -
+  // строка в этом логе находится по коду, который видит пользователь/поддержка,
+  // без сверки по времени между двумя контейнерами.
+  const correlationId = c.req.header('X-Correlation-Id') || '';
+  const logPrefix = correlationId ? `[${correlationId}] ` : '';
 
   if (!body.recordingId || !body.meetingUrl || !body.platform) {
     return c.json({ error: 'recordingId, meetingUrl and platform are required' }, 400);
@@ -29,9 +34,11 @@ app.post('/jobs', async (c) => {
 
   try {
     const job = await createJob(body);
+    console.log(`${logPrefix}job ${job.jobId} created for recording ${body.recordingId}`);
 
     return c.json(job, 202);
   } catch (error) {
+    console.warn(`${logPrefix}job creation failed for recording ${body.recordingId}: ${error.message}`);
     // STG-001(d): раньше ЛЮБАЯ ошибка createJob (в т.ч. падение Playwright,
     // неподдерживаемая платформа) маппилась в 409 - выглядело как "конфликт",
     // хотя настоящий конфликт (занятый инстанс) — только один из случаев.

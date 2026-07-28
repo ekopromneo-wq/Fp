@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { bodyLimit } from 'hono/body-limit';
 import { createRecordingQueue } from './queue.js';
 import {
@@ -1137,18 +1138,18 @@ export async function createMeetingBotRecording(input, ownerId) {
   const meetingUrl = typeof input.meetingUrl === 'string' ? input.meetingUrl.trim() : '';
 
   if (!meetingUrl) {
-    throw new Error('Meeting URL is required');
+    throw new Error('Укажите ссылку на встречу');
   }
 
   if (!isSupportedMeetingUrl(meetingUrl)) {
-    throw new Error('Meeting URL is not a supported conference platform');
+    throw new Error('Ссылка не похожа на встречу поддерживаемой платформы');
   }
 
   const diarizationConfig = (await getUserDiarizationConfig(ownerId)) || {};
   const apiKey = diarizationConfig.speech2textApiKey || process.env.SPEECH2TEXT_API_KEY;
 
   if (!apiKey) {
-    throw new Error('Speech2Text is not configured');
+    throw new Error('Подключение бота не настроено — обратитесь к администратору');
   }
 
   const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : 'Встреча по ссылке';
@@ -1223,7 +1224,7 @@ export async function stopMeetingBotRecording(recordingId, ownerId) {
   const apiKey = diarizationConfig.speech2textApiKey || process.env.SPEECH2TEXT_API_KEY;
 
   if (!apiKey) {
-    throw new Error('Speech2Text is not configured');
+    throw new Error('Подключение бота не настроено — обратитесь к администратору');
   }
 
   await stopMeeting(taskId, apiKey);
@@ -1257,7 +1258,7 @@ export async function createSelfHostedMeetingRecording(input, ownerId) {
   const platform = detectPlatform(meetingUrl);
 
   if (!platform) {
-    throw new Error('Meeting URL is not supported by the self-hosted recorder yet');
+    throw new Error('Ссылка не похожа на встречу поддерживаемой платформы');
   }
 
   const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : 'Встреча по ссылке';
@@ -1272,17 +1273,25 @@ export async function createSelfHostedMeetingRecording(input, ownerId) {
     [ownerId, title, meetingUrl, processingTemplate],
   );
   const recordingId = inserted.rows[0].id;
+  // STG-001: один ID на всю попытку подключения - тот же, что уходит в
+  // recorder-bot заголовком X-Correlation-Id, чтобы связать запись в этом
+  // журнале, лог recorder-bot и код, который в случае неудачи увидит
+  // пользователь.
+  const correlationId = randomUUID();
   // US-15.1: журнал подключений — запрос входа самохост-бота.
-  logBotEvent(recordingId, { engine: 'self_hosted', platform, event: 'join_requested' });
+  logBotEvent(recordingId, { engine: 'self_hosted', platform, event: 'join_requested', detail: { correlationId } });
 
   try {
-    const job = await startRecorderJob({
-      recordingId,
-      meetingUrl,
-      title,
-      platform,
-      botName: input.botName,
-    });
+    const job = await startRecorderJob(
+      {
+        recordingId,
+        meetingUrl,
+        title,
+        platform,
+        botName: input.botName,
+      },
+      correlationId,
+    );
 
     await transaction(async (client) => {
       await client.query('update recordings set meeting_bot_task_id = $1, status = $2, updated_at = now() where id = $3', [
@@ -1295,15 +1304,29 @@ export async function createSelfHostedMeetingRecording(input, ownerId) {
         [recordingId, job.jobId],
       );
     });
-    logBotEvent(recordingId, { engine: 'self_hosted', platform, event: 'join_accepted', detail: { jobId: job.jobId } });
+    logBotEvent(recordingId, { engine: 'self_hosted', platform, event: 'join_accepted', detail: { jobId: job.jobId, correlationId } });
   } catch (error) {
     await query('update recordings set status = $1, updated_at = now() where id = $2', ['failed', recordingId]);
     logBotEvent(recordingId, {
       engine: 'self_hosted',
       platform,
       event: 'join_failed',
-      detail: { error: error.message, layer: 'recorder_bot', statusCode: error.statusCode ?? null },
+      detail: { error: error.message, layer: 'recorder_bot', statusCode: error.statusCode ?? null, correlationId },
     });
+
+    // STG-001: 409 - реальный конфликт (инстанс занят другой встречей), а не
+    // сбой - отдельное понятное сообщение с конкретным действием, а не общий
+    // "не получилось" с кодом ошибки. Остальные (после уже одного авто-повтора
+    // в startRecorderJob) - непрозрачный сбой, показываем diagnosticId вместо
+    // сырого текста recorder-bot.
+    const code = diagnosticId(correlationId);
+    if (error.statusCode === 409) {
+      error.message = 'Бот сейчас занят другой встречей. Попробуйте отправить его снова через пару минут.';
+    } else if (!error.statusCode || error.statusCode >= 500) {
+      error.message = `Не удалось подключить бота к встрече. Код для поддержки: ${code}`;
+    }
+    // statusCode 400 (неподдерживаемая платформа) уже приходит понятным текстом
+    // из recorder-bot/src/server.js - оставляем как есть.
     throw error;
   }
 
@@ -2972,7 +2995,7 @@ export function registerRecordingRoutes(app) {
 
       return c.json({ recording }, 201);
     } catch (error) {
-      return c.json({ error: error.message || 'Failed to send the bot to the meeting' }, 400);
+      return c.json({ error: error.message || 'Не удалось отправить бота на встречу' }, 400);
     }
   });
 

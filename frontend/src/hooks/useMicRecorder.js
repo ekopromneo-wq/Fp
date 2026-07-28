@@ -496,6 +496,11 @@ export default function useMicRecorder(uploadRecordingFile, setStatus, micDevice
     micSessionIdRef.current = null;
 
     setStatus('Запись отменена');
+    // STG-005: раньше отмена чистила состояние записи, но сама панель
+    // оставалась открытой (VoicePanel просто переключался на "idle"-вид) -
+    // пользователь ожидал вернуться на предыдущий экран, а не увидеть
+    // пустую панель "Готово к записи".
+    useUiStore.getState().closeVoicePanel();
   }
 
   function handleMicRecordingToggle() {

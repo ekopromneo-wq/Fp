@@ -1,7 +1,13 @@
+import { useState } from 'react';
 import Waveform from './Waveform.jsx';
 import BrandMicIcon from '../BrandMicIcon.jsx';
+import CancelRecordingDialog from './CancelRecordingDialog.jsx';
 import { formatDuration } from '../../lib/format.js';
 import useEscapeKey from '../../hooks/useEscapeKey.js';
+
+// STG-005: до этой длительности отменять нечего - пара секунд в начале
+// записи не жалко потерять, лишний диалог с выбором только бы мешал.
+const MEANINGFUL_DURATION_SECONDS = 3;
 
 export default function VoicePanel({
   isOpen,
@@ -18,7 +24,14 @@ export default function VoicePanel({
   onCancelRecording,
   status,
 }) {
+  const [showCancelChoice, setShowCancelChoice] = useState(false);
+
   function handleCancelClick() {
+    if (micDuration >= MEANINGFUL_DURATION_SECONDS) {
+      setShowCancelChoice(true);
+      return;
+    }
+
     if (window.confirm('Отменить запись без сохранения?')) {
       onCancelRecording();
     }
@@ -34,13 +47,31 @@ export default function VoicePanel({
   }
 
   return (
-    <div className="voice-panel-overlay" onClick={onClose}>
-      <section
-        className="voice-panel"
-        aria-label="Запись с микрофона"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="voice-panel-handle" />
+    <>
+      {showCancelChoice ? (
+        <CancelRecordingDialog
+          duration={micDuration}
+          onDismiss={() => setShowCancelChoice(false)}
+          onDelete={() => {
+            setShowCancelChoice(false);
+            onCancelRecording();
+          }}
+          onSave={() => {
+            setShowCancelChoice(false);
+            // "Сохранить как есть" - обычная остановка: тот же путь, что и
+            // кнопка "Остановить", запись уходит в очередь на обработку.
+            onToggleRecording();
+          }}
+        />
+      ) : null}
+
+      <div className="voice-panel-overlay" onClick={onClose}>
+        <section
+          className="voice-panel"
+          aria-label="Запись с микрофона"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="voice-panel-handle" />
 
         <button className="voice-panel-close" type="button" onClick={onClose} aria-label="Закрыть">
           ✕
@@ -112,7 +143,8 @@ export default function VoicePanel({
             )}
           </button>
         </div>
-      </section>
-    </div>
+        </section>
+      </div>
+    </>
   );
 }
