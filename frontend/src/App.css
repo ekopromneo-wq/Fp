@@ -164,6 +164,11 @@ input[type="color"] {
   color: var(--text-primary);
   min-height: 42px;
   padding: 0 12px;
+  /* STG-064: без явного font-size поле наследует 0.9rem (~14.4px) от
+     .auth-form label - iOS Safari зумит экран при фокусе на инпуте с
+     computed font-size < 16px. Форма входа/регистрации - первое, что
+     видит любой пользователь, этот кейс пропустили при первом проходе. */
+  font-size: 16px;
 }
 
 /* STG-038: показ/скрытие пароля. */
@@ -449,18 +454,25 @@ body::after {
   font-variant-numeric: tabular-nums;
 }
 
+/* STG-071: было 26x26px - вдвое меньше гайдлайна touch target (44x44 CSS px),
+   а это единственный способ поставить запись на паузу, пока попап записи
+   свёрнут. Позиция пересчитана так, чтобы визуальный центр остался
+   примерно там же (не наезжает на FAB и соседний пункт навигации). */
 .bottom-nav-pause {
   position: absolute;
-  top: -30px;
-  right: 8px;
-  width: 26px;
-  height: 26px;
+  top: -39px;
+  right: 0;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   border: none;
   background: var(--bg-surface);
   color: var(--text-primary);
   cursor: pointer;
-  font-size: 0.7rem;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .bottom-nav-low {
