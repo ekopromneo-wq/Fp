@@ -17,7 +17,7 @@ import { checkProcessingQuota, minutesFromSeconds } from './quota.js';
 import { constantTimeEqual } from './oauth.js';
 import { sendRecordingEmail, sendTaskEmail } from './email.js';
 import { sendRecordingTelegram, sendTaskTelegram } from './telegram.js';
-import { recordDelivery, sendWithRetry } from './sending.js';
+import { PermanentSendError, recordDelivery, sendWithRetry } from './sending.js';
 import {
   fetchBitrixGroups,
   fetchBitrixUsers,
@@ -44,6 +44,18 @@ import { transcribeWithOpenRouter } from './openrouterAsr.js';
 import { resolveDueDate } from './dueDateResolver.js';
 
 const queue = createRecordingQueue();
+
+// STG-008: сырые ошибки провайдера (nodemailer/Telegram API) не должны идти
+// пользователю как есть - только наши собственные PermanentSendError-сообщения
+// ("не настроен" и т.п.) уже написаны по-русски и понятны. Остальным - код для
+// поддержки (id доставки/задачи), сама ошибка остаётся в логе/lastError.
+function diagnosticId(id) {
+  return String(id || '').replace(/-/g, '').slice(0, 8).toUpperCase();
+}
+
+function isFriendlySendError(error) {
+  return error.cause instanceof PermanentSendError || error instanceof PermanentSendError;
+}
 
 // Only single-range "bytes=start-end"/"bytes=start-" requests are
 // supported (exactly what browsers send for <audio> scrubbing) - multi-range
@@ -3720,7 +3732,12 @@ export function registerRecordingRoutes(app) {
       return c.json({ delivery, task: mapTask(updated.rows[0]) });
     } catch (error) {
       track('delivery_failed', { userId: user.id, recordingId, props: { channel: 'email', payloadKind: 'tasks' } });
-      return c.json({ error: error.message || 'Failed to send task email' }, 400);
+      const code = diagnosticId(taskId);
+      console.warn(`[send-task-email ${code}] ${error.message}`);
+      return c.json(
+        { error: isFriendlySendError(error) ? error.message : `Не удалось отправить задачу на почту. Код для поддержки: ${code}` },
+        400,
+      );
     }
   });
 
@@ -3780,7 +3797,7 @@ export function registerRecordingRoutes(app) {
 
       return c.json({ delivery: result, task: mapTask(updated.rows[0]) });
     } catch (error) {
-      await recordDelivery({
+      const delivery = await recordDelivery({
         ownerId: user.id,
         recordingId,
         channel: 'telegram',
@@ -3793,7 +3810,14 @@ export function registerRecordingRoutes(app) {
 
       track('delivery_failed', { userId: user.id, recordingId, props: { channel: 'telegram', payloadKind: 'tasks' } });
 
-      return c.json({ error: error.message || 'Не удалось отправить задачу в Telegram' }, 400);
+      return c.json(
+        {
+          error: isFriendlySendError(error)
+            ? error.message
+            : `Не удалось отправить задачу в Telegram. Код для поддержки: ${diagnosticId(delivery.id)}`,
+        },
+        400,
+      );
     }
   });
 

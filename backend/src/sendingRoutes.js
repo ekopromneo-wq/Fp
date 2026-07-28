@@ -5,6 +5,7 @@ import { track } from './analytics.js';
 import {
   CHANNELS,
   PAYLOAD_KINDS,
+  PermanentSendError,
   createShareLink,
   listDeliveries,
   listShareLinks,
@@ -19,6 +20,16 @@ import { createTelegramLinkCode } from './telegramIntake.js';
 
 function normalizePayloadKind(value) {
   return PAYLOAD_KINDS.includes(value) ? value : 'protocol';
+}
+
+// STG-008: PermanentSendError - единственный тип ошибки, который мы сами
+// формулируем по-русски и для пользователя (email.js/telegram.js: "не
+// настроен", "нет привязанного чата"). Всё остальное - сырой ответ
+// nodemailer/Telegram API ("450 4.2.1 ...", "Bad Request: chat not found") -
+// в UI не идёт, только в lastError записи доставки; пользователю - код для
+// поддержки.
+function diagnosticId(id) {
+  return String(id || '').replace(/-/g, '').slice(0, 8).toUpperCase();
 }
 
 // Ссылка на результат должна вести на публичный адрес приложения, а не на
@@ -133,9 +144,13 @@ export function registerSendingRoutes(app) {
 
       track('delivery_failed', { userId: user.id, recordingId: recording.id, props: { channel, payloadKind } });
 
+      const isFriendly = error.cause instanceof PermanentSendError || error instanceof PermanentSendError;
+
       return c.json(
         {
-          error: error.message || 'Не удалось отправить',
+          error: isFriendly
+            ? error.message || 'Не удалось отправить'
+            : `Не удалось отправить. Код для поддержки: ${diagnosticId(delivery.id)}`,
           delivery,
           attempts,
           // Три попытки исчерпаны — предлагаем сменить канал (US-11.1).

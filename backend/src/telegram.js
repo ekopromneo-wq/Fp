@@ -61,8 +61,16 @@ async function callTelegram(botToken, method, payload) {
       // US-17.1: бот заблокирован получателем — подсказываем обратиться к
       // администратору, а не просто показываем телеграмный текст.
       const blocked = /bot was blocked|user is deactivated|bot can't initiate/i.test(description);
+      // STG-008: раньше сырое английское description от Telegram API ("Bad
+      // Request: chat not found" и т.п.) шло пользователю как есть в
+      // непонятном случае - оставляем его только в логе.
+      if (!blocked) {
+        console.warn(`Telegram ${method} permanent failure: ${description}`);
+      }
       throw new PermanentSendError(
-        blocked ? 'Получатель заблокировал бота — обратитесь к администратору или попросите его запустить бота.' : description,
+        blocked
+          ? 'Получатель заблокировал бота — обратитесь к администратору или попросите его запустить бота.'
+          : 'Telegram отклонил сообщение — проверьте получателя (чат/бот) в настройках.',
       );
     }
 

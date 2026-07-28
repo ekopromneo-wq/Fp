@@ -2748,6 +2748,27 @@ audio {
   margin-top: 6px;
 }
 
+/* STG-008: diagnostic ID вместо сырой ошибки провайдера в основном тексте. */
+.job-error code {
+  background: var(--bg-surface);
+  padding: 1px 6px;
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 0.86em;
+}
+
+.job-error summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.job-error-raw {
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 980px) {
   .workspace {
     grid-template-columns: 1fr;
