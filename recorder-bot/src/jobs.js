@@ -1,5 +1,6 @@
+import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
-import { startCapture } from './audioCapture.js';
+import { startCapture, FAKE_AUDIO_FILE, FAKE_VIDEO_FILE } from './audioCapture.js';
 import { getPlatformAdapter } from './platforms/index.js';
 import { sendCallback, sendEvent } from './callback.js';
 import { waitForMeetingEnd } from './endDetection.js';
@@ -109,6 +110,13 @@ async function runJob({ jobId, recordingId, meetingUrl, botName, adapter, signal
           args: [
             '--use-fake-ui-for-media-stream',
             '--use-fake-device-for-media-stream',
+            // STG-036: без файла фейковый микрофон Chromium отдаёт синтетический
+            // тестовый тон в звонок - участники слышали его как назойливый писк.
+            `--use-file-for-fake-audio-capture=${FAKE_AUDIO_FILE}`,
+            // Заставка не критична - если generation в initAudioSystem не удался
+            // (см. audioCapture.js), файла не будет, и лучше молча остаться на
+            // тестовом паттерне Chromium, чем передать Chromium несуществующий путь.
+            ...(existsSync(FAKE_VIDEO_FILE) ? [`--use-file-for-fake-video-capture=${FAKE_VIDEO_FILE}`] : []),
             '--autoplay-policy=no-user-gesture-required',
           ],
         });
