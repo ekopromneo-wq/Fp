@@ -818,6 +818,33 @@ const migrations = [
       create index if not exists email_verify_tokens_user_idx on email_verify_tokens(user_id);
     `,
   },
+  {
+    id: '041_speaker_voice_vectors',
+    sql: `
+      -- Голосовой вектор конкретного спикера этой конкретной записи (от
+      -- Speech2Text, save_speaker_vectors=1) - хранится, пока имя спикера не
+      -- подтверждено, чтобы в момент подтверждения можно было обучить/
+      -- обновить профиль голоса без повторного похода в Speech2Text.
+      alter table recording_speakers add column if not exists voice_vector jsonb;
+
+      -- Профиль голоса "известного" спикера (по владельцу + имени) - вектор
+      -- усредняется по всем подтверждённым образцам (sample_count). Новая
+      -- запись сверяется с этими профилями (косинусное сходство), чтобы
+      -- предложить имя спикера по голосу, а не только по тексту.
+      create table if not exists speaker_voice_profiles (
+        id uuid primary key default gen_random_uuid(),
+        owner_id uuid not null references app_users(id) on delete cascade,
+        display_name text not null,
+        vector jsonb not null,
+        sample_count integer not null default 1,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (owner_id, display_name)
+      );
+
+      create index if not exists speaker_voice_profiles_owner_id_idx on speaker_voice_profiles(owner_id);
+    `,
+  },
 ];
 
 export async function runMigrations() {

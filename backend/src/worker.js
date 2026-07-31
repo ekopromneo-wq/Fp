@@ -13,6 +13,7 @@ import { transcribeWithGeminiAudio } from './geminiDiarizer.js';
 import { transcribeWithKimi } from './kimiDiarizer.js';
 import { transcribeWithAccuratePipeline } from './pipelineDiarizer.js';
 import { transcribeWithSpeech2Text, checkSpeech2TextStatus, fetchSpeech2TextResult, parseSpeech2TextResult } from './speech2textDiarizer.js';
+import { findBestVoiceMatch } from './speakerVoiceMatch.js';
 import { getUserDiarizationConfig } from './auth.js';
 import { summarizeRecording, purgeExpiredTrash, enqueueRecording } from './recordings.js';
 import { assessSpeechQuality } from './speechQuality.js';
@@ -320,6 +321,53 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
         `,
         [recordingId, label, identity.suggestedName, identity.confidence, identity.evidence],
       );
+    }
+  }
+
+  // Голосовые векторы спикеров (сегодня - только speech2text-путь, см.
+  // speech2textDiarizer.js). Вектор сохраняем на recording_speakers всегда
+  // (пригодится в updateRecordingSpeaker при подтверждении имени, чтобы
+  // обучить профиль без повторного похода в Speech2Text); если голос совпал
+  // с уже известным профилем (speakerVoiceMatch.js) - подсказка через ту же
+  // pending-suggestion инфраструктуру, что и у accuracy-пайплайна выше.
+  if (diarized?.speakerVectors && Object.keys(diarized.speakerVectors).length > 0) {
+    for (const [label, vector] of Object.entries(diarized.speakerVectors)) {
+      const match =
+        file?.owner_id && !diarized.identities?.[label] ? await findBestVoiceMatch(file.owner_id, vector) : null;
+
+      if (match) {
+        await query(
+          `
+            insert into recording_speakers (recording_id, label, display_name, voice_vector, suggested_name, suggestion_confidence, suggestion_evidence, suggestion_status)
+            values ($1, $2, $2, $3::jsonb, $4, $5, $6, 'pending')
+            on conflict (recording_id, label) do update
+            set voice_vector = excluded.voice_vector,
+                suggested_name = excluded.suggested_name,
+                suggestion_confidence = excluded.suggestion_confidence,
+                suggestion_evidence = excluded.suggestion_evidence,
+                suggestion_status = 'pending',
+                updated_at = now()
+          `,
+          [
+            recordingId,
+            label,
+            JSON.stringify(vector),
+            match.name,
+            match.confidence,
+            `Похоже на голос из прошлой встречи (сходство ${Math.round(match.similarity * 100)}%)`,
+          ],
+        );
+      } else {
+        await query(
+          `
+            insert into recording_speakers (recording_id, label, display_name, voice_vector)
+            values ($1, $2, $2, $3::jsonb)
+            on conflict (recording_id, label) do update
+            set voice_vector = excluded.voice_vector, updated_at = now()
+          `,
+          [recordingId, label, JSON.stringify(vector)],
+        );
+      }
     }
   }
 

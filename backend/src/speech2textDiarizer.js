@@ -45,6 +45,10 @@ async function submitSpeech2TextJob(file, audioBuffer, apiKey, hints) {
     file?.original_filename || 'audio',
   );
   formData.append('lang', process.env.SPEECH2TEXT_LANGUAGE || 'ru');
+  // Голосовые векторы спикеров (см. документацию, стр. 4/10) - без этого
+  // флага GET .../vector после готовности задачи отдаёт пустой массив.
+  // Нужны для сопоставления с профилями голосов (speakerVoiceMatch.js).
+  formData.append('save_speaker_vectors', '1');
   // US-2.3: best-effort подсказка терминов. Поле не документировано у Speech2Text —
   // при ошибке отправки вызывающий повторит без него.
   if (hints) {
@@ -119,6 +123,61 @@ export async function fetchSpeech2TextResult(taskId, apiKey) {
 }
 
 /**
+ * Голосовые векторы спикеров этой задачи (см. документацию API, стр. 10):
+ * массив {id, vector (JSON-строка с числами), norm, metadata (JSON-строка с
+ * speaker_name вида "SPEAKER_00")} - по записи на спикера. Возвращает пустой
+ * массив, если задача создавалась без save_speaker_vectors=1 (см. submit
+ * выше - для наших запросов это не должно случаться, но старые/чужие задачи
+ * могли быть без флага).
+ */
+async function fetchSpeech2TextVectors(taskId, apiKey) {
+  const response = await fetch(`${SPEECH2TEXT_API_URL}/api/recognitions/${taskId}/vector?api-key=${apiKey}`, {
+    signal: AbortSignal.timeout(SPEECH2TEXT_POLL_REQUEST_TIMEOUT_MS),
+  });
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(`Speech2Text vector fetch failed with ${response.status}`);
+  }
+
+  return Array.isArray(body) ? body : [];
+}
+
+/**
+ * Приводит сырой ответ /vector к { <наша метка спикера>: number[] }, используя
+ * ту же карту id→имя, что и parseSpeech2TextResult, чтобы ключи совпадали с
+ * segment.speaker ("Спикер 1", "Спикер 2", ...) - через metadata.speaker_name
+ * вида "SPEAKER_00" (0-индексированный, дополненный нулём numeric id).
+ */
+function buildSpeakerVectorMap(result, vectorEntries) {
+  const speakerNames = new Map((result?.speakers || []).map((speaker) => [speaker.id, speaker.name]));
+  const map = {};
+
+  for (const entry of vectorEntries) {
+    let metadata;
+    let vector;
+
+    try {
+      metadata = typeof entry.metadata === 'string' ? JSON.parse(entry.metadata) : entry.metadata;
+      vector = typeof entry.vector === 'string' ? JSON.parse(entry.vector) : entry.vector;
+    } catch {
+      continue;
+    }
+
+    const rawMatch = /^SPEAKER_(\d+)$/.exec(metadata?.speaker_name || '');
+    if (!rawMatch || !Array.isArray(vector)) {
+      continue;
+    }
+
+    const numericId = Number(rawMatch[1]);
+    const label = speakerNames.get(numericId) || `Спикер ${numericId + 1}`;
+    map[label] = vector;
+  }
+
+  return map;
+}
+
+/**
  * Checks a Speech2Text task's status without blocking/looping - a single
  * GET. Used both by the file-based polling loop below and by the meeting-bot
  * poller in worker.js, which drives its own polling cadence across many
@@ -170,7 +229,11 @@ export function parseSpeech2TextResult(result) {
 /**
  * Diarizes a recording via the Speech2Text API (speech2text.ru). Unlike
  * Shopot/Gemini this service only assigns generic SPEAKER_N labels - no name
- * identification - but it also exposes speaker voice vectors (unused here).
+ * identification by itself - but it does expose per-speaker voice vectors
+ * (save_speaker_vectors=1 at submit, GET .../vector after done), which we
+ * fetch and attach as result.speakerVectors so worker.js can match them
+ * against previously-confirmed voices (speakerVoiceMatch.js) and suggest a
+ * name, the same way the accuracy pipeline suggests names from context.
  * Returns null (instead of throwing) on any failure, so callers fall back to
  * the plain OpenRouter ASR + text-based speaker split.
  */
@@ -197,8 +260,20 @@ export async function transcribeWithSpeech2Text(file, audioBuffer, config = {}) 
 
     await pollSpeech2TextJob(taskId, apiKey);
     const result = await fetchSpeech2TextResult(taskId, apiKey);
+    const parsed = parseSpeech2TextResult(result);
 
-    return parseSpeech2TextResult(result);
+    if (parsed) {
+      try {
+        const vectorEntries = await fetchSpeech2TextVectors(taskId, apiKey);
+        parsed.speakerVectors = buildSpeakerVectorMap(result, vectorEntries);
+      } catch (vectorError) {
+        // Векторы - для будущего сопоставления голосов, не для самой
+        // расшифровки: сбой здесь не должен рушить уже готовый транскрипт.
+        console.warn('Speech2Text vector fetch failed (continuing without voice matching):', vectorError.message);
+      }
+    }
+
+    return parsed;
   } catch (error) {
     console.warn('Speech2Text transcription failed, falling back:', error.message);
     return null;

@@ -19,6 +19,7 @@ import { constantTimeEqual } from './oauth.js';
 import { sendRecordingEmail, sendTaskEmail } from './email.js';
 import { sendRecordingTelegram, sendTaskTelegram } from './telegram.js';
 import { PermanentSendError, recordDelivery, sendWithRetry } from './sending.js';
+import { upsertVoiceProfile } from './speakerVoiceMatch.js';
 import {
   fetchBitrixGroups,
   fetchBitrixUsers,
@@ -2415,7 +2416,7 @@ export async function updateRecordingSpeaker(recordingId, label, ownerId, input)
   }
 
   const existing = await query(
-    'select display_name, contact_name, contact_email, suggested_name, suggestion_status from recording_speakers where recording_id = $1 and label = $2',
+    'select display_name, contact_name, contact_email, suggested_name, suggestion_status, voice_vector from recording_speakers where recording_id = $1 and label = $2',
     [recordingId, label],
   );
   const existingRow = existing.rows[0];
@@ -2466,6 +2467,16 @@ export async function updateRecordingSpeaker(recordingId, label, ownerId, input)
     `,
     [recordingId, label, ownerId, displayName, contactName, contactEmail, suggestionStatus],
   );
+
+  // Имя подтвердилось (ручной ввод или принятая подсказка) и не осталось
+  // родовой меткой ("Спикер N") - обучаем/обновляем профиль голоса этим
+  // образцом, чтобы будущие записи могли узнать тот же голос (US: тот же
+  // вектор, что пришёл от Speech2Text при диаризации - см. worker.js).
+  if (result.rowCount && existingRow?.voice_vector && !/^Спикер \d+$/i.test(displayName)) {
+    await upsertVoiceProfile(ownerId, displayName, existingRow.voice_vector).catch((error) => {
+      console.warn(`Failed to update voice profile for "${displayName}":`, error.message);
+    });
+  }
 
   return result.rowCount ? mapSpeaker(result.rows[0]) : null;
 }
