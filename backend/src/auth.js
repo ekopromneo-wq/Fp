@@ -251,7 +251,9 @@ const DIARIZATION_METHODS = new Set(['shopot', 'gemini', 'speech2text', 'kimi', 
 const ASR_LANGUAGES = new Set(['', 'ru', 'en']);
 
 function normalizeDiarizationConfig(input = {}, previous = {}) {
-  const method = DIARIZATION_METHODS.has(input.method) ? input.method : previous.method || 'shopot';
+  // Speech2Text по умолчанию - см. тот же дефолт в publicDiarizationConfig
+  // ниже и в worker.js (там же реальная точка выбора метода при обработке).
+  const method = DIARIZATION_METHODS.has(input.method) ? input.method : previous.method || 'speech2text';
   const shopotKeyInput = typeof input.shopotApiKey === 'string' ? input.shopotApiKey.trim() : '';
   const shopotApiKey = shopotKeyInput || previous.shopotApiKey || '';
   const geminiModel = typeof input.geminiModel === 'string' && input.geminiModel.trim()
@@ -269,7 +271,7 @@ function normalizeDiarizationConfig(input = {}, previous = {}) {
 
 function publicDiarizationConfig(config = {}) {
   return {
-    method: config.method || 'shopot',
+    method: config.method || 'speech2text',
     hasShopotKey: Boolean(config.shopotApiKey),
     geminiModel: config.geminiModel || 'google/gemini-2.5-pro',
     hasSpeech2textKey: Boolean(config.speech2textApiKey),

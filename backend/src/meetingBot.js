@@ -11,10 +11,18 @@ const SUPPORTED_PLATFORM_HOSTS = [
   'kontur.ru',
 ];
 
-export function isSupportedMeetingUrl(meetingUrl) {
+/**
+ * extraHosts - домены сверх статического списка, разрешённые для ЭТОГО
+ * пользователя: кастомный домен его Bitrix24-портала (self-hosted, не
+ * bitrix24.ru/.com) прежде Speech2Text отклонял с "meeting_url is not a
+ * supported conference URL" - сервис починил поддержку таких ссылок, но
+ * наша собственная валидация домена всё ещё резала их до обращения к API.
+ */
+export function isSupportedMeetingUrl(meetingUrl, extraHosts = []) {
   try {
     const host = new URL(meetingUrl).hostname.replace(/^www\./, '');
-    return SUPPORTED_PLATFORM_HOSTS.some((supported) => host === supported || host.endsWith(`.${supported}`));
+    const allowedHosts = [...SUPPORTED_PLATFORM_HOSTS, ...extraHosts];
+    return allowedHosts.some((supported) => host === supported || host.endsWith(`.${supported}`));
   } catch {
     return false;
   }

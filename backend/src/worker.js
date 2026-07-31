@@ -219,7 +219,7 @@ async function processRecording(data, { attemptsMade = 0 } = {}) {
   if (hints) {
     diarizationConfig.hints = hints;
   }
-  const diarizationMethod = diarizationConfig.method || 'shopot';
+  const diarizationMethod = diarizationConfig.method || 'speech2text';
 
   let diarized = null;
 

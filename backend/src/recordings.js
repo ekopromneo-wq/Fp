@@ -1141,7 +1141,20 @@ export async function createMeetingBotRecording(input, ownerId) {
     throw new Error('Укажите ссылку на встречу');
   }
 
-  if (!isSupportedMeetingUrl(meetingUrl)) {
+  // Кастомный домен Bitrix24-портала (self-hosted, не bitrix24.ru/.com) -
+  // добавляем его в разрешённые для этого пользователя, раз он уже привязал
+  // именно этот портал через настройки интеграции Bitrix.
+  const bitrixConfig = await getUserBitrixConfig(ownerId);
+  const extraHosts = [];
+  if (bitrixConfig?.webhookUrl) {
+    try {
+      extraHosts.push(new URL(bitrixConfig.webhookUrl).hostname.replace(/^www\./, ''));
+    } catch {
+      // невалидный сохранённый webhookUrl - просто не расширяем список хостов
+    }
+  }
+
+  if (!isSupportedMeetingUrl(meetingUrl, extraHosts)) {
     throw new Error('Ссылка не похожа на встречу поддерживаемой платформы');
   }
 

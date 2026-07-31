@@ -18,7 +18,7 @@ export default function useSettings(setStatus, onSendConfigSaved) {
   const [bitrixHasWebhook, setBitrixHasWebhook] = useState(false);
   const [isSavingBitrixSettings, setIsSavingBitrixSettings] = useState(false);
   const [diarizationSettingsDraft, setDiarizationSettingsDraft] = useState({
-    method: 'shopot',
+    method: 'speech2text',
     shopotApiKey: '',
     geminiModel: 'google/gemini-2.5-pro',
     speech2textApiKey: '',
@@ -201,7 +201,7 @@ export default function useSettings(setStatus, onSendConfigSaved) {
       }
 
       setDiarizationSettingsDraft({
-        method: data.diarization?.method || 'shopot',
+        method: data.diarization?.method || 'speech2text',
         shopotApiKey: '',
         geminiModel: data.diarization?.geminiModel || 'google/gemini-2.5-pro',
         speech2textApiKey: '',
